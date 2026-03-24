@@ -15,6 +15,8 @@
 이 문서는 **현재 저장소에 구현된 코드 경로를 설명하는 문서가 아니다.**
 현재 구현된 사실 기준은 [05. Data Collection Pipeline](./05_data_collection_pipeline.md) 이고, 이 문서는 그 위에 얹을 target enrichment/runtime 설계를 적는다.
 
+현재 runtime은 실제 LLM 호출 대신 `summary provider` abstraction만 구현돼 있다. 기본 provider는 `noop` 이며, 이후 실제 모델 연동은 `backend/app/services/summary_provider.py` 에 provider를 추가하는 방식으로 붙인다.
+
 World Monitor는 **Open World Agents 안에서 동작하는 요약/탐색 레이어**다. 사용자는 단순히 카드 몇 개를 읽는 것이 아니라, 여러 패널에서 정보를 훑고, 요약을 누르고, 관련 문서를 펼치고, 필요하면 agent에게 추가 질문을 던질 수 있어야 한다.
 
 World Monitor에서 원하는 UX는 아래와 같다.

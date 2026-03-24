@@ -33,6 +33,7 @@ from backend.app.services.session_service import (
     session_key,
     start_session_reload,
 )
+from backend.app.services.summary_provider import build_summary_generator
 
 
 def write_json(path: Path, payload: dict) -> None:
@@ -421,7 +422,7 @@ class SessionPipelineTests(unittest.TestCase):
             ),
         )
 
-    def test_enrichment_creates_category_digests_and_updates_status(self) -> None:
+    def test_enrichment_without_llm_provider_still_creates_digests(self) -> None:
         run_dir = self._make_run("2026-03-24T000103Z_enrich")
         result = publish_run(self.store, run_dir)
         session_id = result["session_id"]
@@ -431,7 +432,8 @@ class SessionPipelineTests(unittest.TestCase):
 
         self.assertEqual(meta["status"], "ready")
         self.assertTrue(meta["digests_ready"])
-        self.assertGreater(meta["summaries_ready"], 0)
+        self.assertEqual(meta["summaries_ready"], 0)
+        self.assertEqual(meta["summary_provider"], "noop")
 
         for category in ORDERED_SOURCE_CATEGORIES:
             digest = get_json(
@@ -444,6 +446,33 @@ class SessionPipelineTests(unittest.TestCase):
         self.assertEqual(dashboard["status"], "ready")
         self.assertEqual(dashboard["session"]["loading"]["stage"], "ready")
         self.assertEqual(dashboard["session"]["loading"]["percent"], 100)
+
+        stored_document = get_document_response(
+            self.store,
+            "papers:top",
+            session=session_id,
+        )
+        self.assertEqual(stored_document["llm"]["status"], "not_implemented")
+
+    def test_custom_summary_provider_can_be_injected(self) -> None:
+        run_dir = self._make_run("2026-03-24T000103Z_injected")
+        result = publish_run(self.store, run_dir, queue=False)
+        session_id = result["session_id"]
+
+        summary_result = run_session_enrichment(
+            self.store,
+            session_id,
+            generator=build_summary_generator("heuristic"),
+        )
+
+        self.assertGreater(summary_result["meta"]["summaries_ready"], 0)
+        document = get_document_response(
+            self.store,
+            "papers:top",
+            session=session_id,
+        )
+        self.assertEqual(document["llm"]["status"], "complete")
+        self.assertIsNotNone(document["llm"]["summary_short"])
 
     def test_partial_error_keeps_dashboard_usable(self) -> None:
         run_dir = self._make_run("2026-03-24T000104Z_partial")

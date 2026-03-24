@@ -1,4 +1,5 @@
 from .collector import collect_run
+from .summary_provider import build_summary_generator
 from .session_service import (
     enqueue_session_for_enrichment,
     get_dashboard_response,
@@ -16,6 +17,7 @@ from .session_service import (
 
 __all__ = [
     "collect_run",
+    "build_summary_generator",
     "enqueue_session_for_enrichment",
     "get_dashboard_response",
     "get_digest_response",

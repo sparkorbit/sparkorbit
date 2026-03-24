@@ -107,7 +107,7 @@ frontend와 backend는 아래 stage 이름을 공유한다.
 | `publishing_documents` | `doc:{document_id}` publish |
 | `publishing_views` | `feed:{source}`, `dashboard`, `active` 갱신 |
 | `published` | publish 완료, summary 대기 |
-| `summarizing_documents` | 선택 문서 summary 생성 |
+| `summarizing_documents` | 선택 문서 summary provider 실행 |
 | `building_digests` | category digest 생성 |
 | `ready` | 모든 단계 완료 |
 | `partial_error` | 일부 summary 실패 후 종료 |
@@ -165,6 +165,13 @@ frontend와 backend는 아래 stage 이름을 공유한다.
 - 정렬은 feed ordering과 동일
 
 선택되지 않은 문서는 `llm.status = "not_selected"`로 남고, detail/drill-down에는 그대로 사용된다.
+
+### Summary Provider
+
+- summary 생성은 `backend/app/services/summary_provider.py` 의 provider abstraction을 사용한다.
+- 기본 provider는 `noop` 이고, 현재 런타임은 실제 외부 LLM API를 호출하지 않는다.
+- `SPARKORBIT_SUMMARY_PROVIDER` 환경 변수로 provider를 선택할 수 있다.
+- 새로운 LLM 연동은 provider factory에 구현체를 추가하는 방식으로 붙인다.
 
 ### Digest Scope
 

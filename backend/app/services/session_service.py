@@ -26,6 +26,7 @@ from ..core.constants import (
 )
 from ..core.store import RedisLike
 from .collector import collect_run
+from .summary_provider import SummaryGenerator, build_summary_generator
 
 
 @dataclass(frozen=True)
@@ -1393,67 +1394,11 @@ def dequeue_session_for_enrichment(store: RedisLike) -> str | None:
     return str(session_id) if session_id else None
 
 
-class HeuristicSummaryGenerator:
-    model_name = "heuristic-local"
-    prompt_version = "v1"
-    fewshot_pack_version = "none"
-
-    def summarize_document(self, document: dict[str, Any]) -> dict[str, Any]:
-        title = str(document.get("title") or "").strip()
-        description = compact_text(
-            document.get("description")
-            or document.get("summary_input_text")
-            or document.get("body_text"),
-            220,
-        )
-        tags = [str(tag) for tag in (document.get("tags") or [])[:4]]
-        entities = [
-            segment
-            for segment in re.split(r"[^A-Za-z0-9.+#-]+", title)
-            if len(segment) >= 3
-        ][:5]
-        ranking = document.get("ranking") or {}
-        discovery = document.get("discovery") or {}
-        importance_reason = (
-            ranking.get("priority_reason")
-            or discovery.get("primary_reason")
-            or document.get("doc_type")
-        )
-        importance_score = int(
-            round(to_number(ranking.get("feed_score")) or to_number(discovery.get("spark_score")))
-        )
-        key_points = [
-            compact_text(description or title, 100),
-            f"source {document.get('source')} / {document.get('doc_type')}",
-        ]
-        if tags:
-            key_points.append(f"tags {', '.join(tags)}")
-
-        return {
-            "status": "complete",
-            "summary_1l": compact_text(title, 96) or "Untitled document",
-            "summary_short": description or compact_text(title, 140),
-            "key_points": key_points[:3],
-            "entities": entities,
-            "primary_domain": document.get("source_category"),
-            "subdomains": tags,
-            "importance_score": importance_score,
-            "importance_reason": importance_reason,
-            "evidence_chunk_ids": [],
-            "run_meta": {
-                "model_name": self.model_name,
-                "prompt_version": self.prompt_version,
-                "fewshot_pack_version": self.fewshot_pack_version,
-                "generated_at": now_utc_iso(),
-            },
-        }
-
-
 def run_session_enrichment(
     store: RedisLike,
     session_id: str,
     *,
-    generator: Any | None = None,
+    generator: SummaryGenerator | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     def emit_progress(**payload: Any) -> None:
@@ -1461,7 +1406,7 @@ def run_session_enrichment(
             return
         progress_callback(payload)
 
-    generator = generator or HeuristicSummaryGenerator()
+    generator = generator or build_summary_generator()
     meta = get_json(store, session_key(session_id, "meta"))
     run_manifest = get_json(store, session_key(session_id, "run_manifest"))
     source_manifest = get_json(store, session_key(session_id, "source_manifest")) or []
@@ -1480,8 +1425,10 @@ def run_session_enrichment(
         if (documents_by_id.get(document_id, {}).get("llm") or {}).get("status") == "pending"
     ]
     pending_total = len(pending_document_ids)
+    provider_name = getattr(generator, "provider_name", generator.__class__.__name__)
 
     meta["status"] = "summarizing"
+    meta["summary_provider"] = provider_name
     meta["updated_at"] = now_utc_iso()
     meta["loading_stage"] = "summarizing_documents"
     meta["loading_detail"] = (
@@ -1523,7 +1470,12 @@ def run_session_enrichment(
                 continue
             try:
                 llm.update(generator.summarize_document(document))
-                summaries_ready += 1
+                if not llm.get("status"):
+                    llm["status"] = "complete"
+                if llm.get("status") == "complete":
+                    summaries_ready += 1
+                elif llm.get("status") == "error":
+                    summary_errors += 1
             except Exception as exc:  # pragma: no cover
                 summary_errors += 1
                 llm["status"] = "error"
@@ -1604,11 +1556,19 @@ def run_session_enrichment(
     meta["updated_at"] = now_utc_iso()
     meta["status"] = "partial_error" if summary_errors else "ready"
     meta["loading_stage"] = meta["status"]
-    meta["loading_detail"] = (
-        f"문서 요약 {summaries_ready}건 완료, 일부 오류 {summary_errors}건이 남았습니다."
-        if summary_errors
-        else f"문서 요약과 category digest {len(ORDERED_SOURCE_CATEGORIES)}개 생성을 마쳤습니다."
-    )
+    if summary_errors:
+        meta["loading_detail"] = (
+            f"문서 요약 {summaries_ready}건 완료, 일부 오류 {summary_errors}건이 남았습니다."
+        )
+    elif summaries_ready == 0 and pending_total > 0:
+        meta["loading_detail"] = (
+            "LLM provider가 아직 연결되지 않아 문서 요약은 건너뛰고 "
+            f"category digest {len(ORDERED_SOURCE_CATEGORIES)}개만 생성했습니다."
+        )
+    else:
+        meta["loading_detail"] = (
+            f"문서 요약과 category digest {len(ORDERED_SOURCE_CATEGORIES)}개 생성을 마쳤습니다."
+        )
     meta["loading_progress_current"] = len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_progress_total"] = len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_current_source"] = None
