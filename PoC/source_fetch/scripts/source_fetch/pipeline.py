@@ -4,9 +4,10 @@ import copy
 import json
 import subprocess
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from time import perf_counter
+from typing import Any
 
 from source_fetch.adapters import (
     build_summary_input,
@@ -28,7 +29,7 @@ PROFILE_LIMITS = {
 
 
 def utc_run_id(label: str) -> str:
-    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
     return f"{stamp}_{label}"
 
 
@@ -197,7 +198,7 @@ def parse_iso_datetime(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
     except ValueError:
         return None
 
@@ -522,6 +523,28 @@ def build_contract_report(
     }
 
 
+def summarize_request_traces(request_traces: list[dict[str, Any]]) -> dict[str, Any]:
+    if not request_traces:
+        return {
+            "request_count": 0,
+            "request_duration_ms_total": 0,
+            "request_duration_ms_avg": 0,
+            "request_duration_ms_max": 0,
+            "slowest_request_name": None,
+            "slowest_request_url": None,
+        }
+    total_duration = sum(int(trace.get("duration_ms") or 0) for trace in request_traces)
+    slowest_trace = max(request_traces, key=lambda trace: int(trace.get("duration_ms") or 0))
+    return {
+        "request_count": len(request_traces),
+        "request_duration_ms_total": total_duration,
+        "request_duration_ms_avg": int(round(total_duration / len(request_traces))),
+        "request_duration_ms_max": int(slowest_trace.get("duration_ms") or 0),
+        "slowest_request_name": slowest_trace.get("request_name"),
+        "slowest_request_url": slowest_trace.get("url"),
+    }
+
+
 def run_collection(
     *,
     sources: list[str],
@@ -530,20 +553,13 @@ def run_collection(
     output_dir: str,
     run_label: str,
     timeout: float,
-    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], Path]:
-    def emit_progress(**payload: Any) -> None:
-        if progress_callback is None:
-            return
-        progress_callback(payload)
-
     run_id = utc_run_id(run_label)
     run_dir = Path(output_dir) / run_id
     paths = ensure_dirs(run_dir)
     selected_sources = resolve_sources(sources)
     applied_limit = effective_limit(profile, limit)
     started_at = now_utc_iso()
-    total_sources = len(selected_sources)
 
     run_manifest: dict[str, Any] = {
         "run_id": run_id,
@@ -560,39 +576,32 @@ def run_collection(
     }
     source_manifest_entries: list[dict[str, Any]] = []
     fetch_log_rows: list[dict[str, Any]] = []
+    request_log_rows: list[dict[str, Any]] = []
     error_rows: list[dict[str, Any]] = []
 
     client = make_client(timeout=timeout)
     try:
-        emit_progress(
-            stage="starting",
-            run_id=run_id,
-            total_sources=total_sources,
-            completed_sources=0,
-            current_source=None,
-            detail=f"Preparing {total_sources} source(s) for collection.",
-        )
         for source in selected_sources:
-            source_started_at = datetime.now(UTC)
-            emit_progress(
-                stage="fetching_sources",
-                run_id=run_id,
-                total_sources=total_sources,
-                completed_sources=len(source_manifest_entries),
-                current_source=source.name,
-                source_index=len(source_manifest_entries) + 1,
-                detail=f"Fetching {source.name} ({len(source_manifest_entries) + 1}/{total_sources}).",
-            )
+            source_started_at = perf_counter()
             try:
+                fetch_started_at = perf_counter()
                 result = fetch_source(client, source, run_id, applied_limit)
+                fetch_duration_ms = int((perf_counter() - fetch_started_at) * 1000)
+
+                normalize_started_at = perf_counter()
                 result.documents = [normalize_document_contract(document) for document in result.documents]
                 result.metrics = [normalize_metric_contract(metric) for metric in result.metrics]
+                normalize_duration_ms = int((perf_counter() - normalize_started_at) * 1000)
+
+                filter_started_at = perf_counter()
                 filtered_documents, filtered_metrics, excluded_documents = filter_displayable_documents(result.documents, result.metrics)
                 result.documents = filtered_documents
                 result.metrics = filtered_metrics
+                filter_duration_ms = int((perf_counter() - filter_started_at) * 1000)
                 if excluded_documents:
                     result.notes.append(f"Excluded {excluded_documents} document(s) without a displayable URL/reference.")
 
+                persist_started_at = perf_counter()
                 raw_dir = paths["raw_responses"] / source.name
                 raw_dir.mkdir(parents=True, exist_ok=True)
                 raw_response_paths: list[str] = []
@@ -620,8 +629,10 @@ def run_collection(
                         "metrics_preview": result.metrics[:5],
                     },
                 )
+                persist_duration_ms = int((perf_counter() - persist_started_at) * 1000)
 
-                duration_ms = int((datetime.now(UTC) - source_started_at).total_seconds() * 1000)
+                duration_ms = int((perf_counter() - source_started_at) * 1000)
+                request_summary = summarize_request_traces(result.request_traces)
                 notes_text = " ".join(result.notes).lower()
                 if "rate limit" in notes_text and not result.raw_items:
                     status = "skipped"
@@ -641,9 +652,14 @@ def run_collection(
                     "excluded_document_count": excluded_documents,
                     "notes": result.notes,
                     "duration_ms": duration_ms,
+                    "fetch_duration_ms": fetch_duration_ms,
+                    "normalize_duration_ms": normalize_duration_ms,
+                    "filter_duration_ms": filter_duration_ms,
+                    "persist_duration_ms": persist_duration_ms,
                     "raw_response_paths": raw_response_paths,
                     "raw_items_path": str(raw_items_path.relative_to(run_dir)),
                     "sample_path": str(sample_path.relative_to(run_dir)),
+                    **request_summary,
                 }
                 source_manifest_entries.append(manifest_entry)
                 fetch_log_rows.append(
@@ -656,25 +672,29 @@ def run_collection(
                         "normalized_count": len(result.documents),
                         "metric_count": len(result.metrics),
                         "duration_ms": duration_ms,
+                        "fetch_duration_ms": fetch_duration_ms,
+                        "normalize_duration_ms": normalize_duration_ms,
+                        "filter_duration_ms": filter_duration_ms,
+                        "persist_duration_ms": persist_duration_ms,
+                        **request_summary,
                     }
                 )
+                for trace in result.request_traces:
+                    request_log_rows.append(
+                        {
+                            "timestamp": now_utc_iso(),
+                            "source": source.name,
+                            **trace,
+                        }
+                    )
                 if status == "skipped":
                     run_manifest["skipped_count"] += 1
                 elif status == "excluded":
                     run_manifest["excluded_count"] += 1
                 else:
                     run_manifest["success_count"] += 1
-                emit_progress(
-                    stage="fetching_sources",
-                    run_id=run_id,
-                    total_sources=total_sources,
-                    completed_sources=len(source_manifest_entries),
-                    current_source=source.name,
-                    source_index=len(source_manifest_entries),
-                    detail=f"Completed {source.name} with status {status}.",
-                )
             except Exception as exc:
-                duration_ms = int((datetime.now(UTC) - source_started_at).total_seconds() * 1000)
+                duration_ms = int((perf_counter() - source_started_at) * 1000)
                 error_entry = {
                     "timestamp": now_utc_iso(),
                     "source": source.name,
@@ -712,28 +732,12 @@ def run_collection(
                     }
                 )
                 run_manifest["error_count"] += 1
-                emit_progress(
-                    stage="fetching_sources",
-                    run_id=run_id,
-                    total_sources=total_sources,
-                    completed_sources=len(source_manifest_entries),
-                    current_source=source.name,
-                    source_index=len(source_manifest_entries),
-                    detail=f"{source.name} failed with {type(exc).__name__}.",
-                )
     finally:
         client.close()
 
-    emit_progress(
-        stage="writing_artifacts",
-        run_id=run_id,
-        total_sources=total_sources,
-        completed_sources=len(source_manifest_entries),
-        current_source=None,
-        detail="Writing manifests, normalized outputs, and contract report.",
-    )
     append_ndjson(paths["root"] / "source_manifest.ndjson", source_manifest_entries)
     append_ndjson(paths["logs"] / "fetch.ndjson", fetch_log_rows)
+    append_ndjson(paths["logs"] / "requests.ndjson", request_log_rows)
     append_ndjson(paths["logs"] / "errors.ndjson", error_rows)
     run_manifest["finished_at"] = now_utc_iso()
     write_json(paths["root"] / "run_manifest.json", run_manifest)

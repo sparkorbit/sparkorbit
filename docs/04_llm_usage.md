@@ -1,817 +1,550 @@
-[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · **04. LLM Usage** · [05. Data Collection Pipeline](./05_data_collection_pipeline.md)
+[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow Draft](./03_runtime_flow_draft.md) · **04. LLM Usage** · [05. Data Collection Pipeline](./05_data_collection_pipeline.md)
 
 ---
 
-# AI/Tech World Monitor - LLM Usage
+# SparkOrbit - LLM Usage
 
-> Target design, not implemented runtime
-> `docs/01_overall_flow.md`, `docs/02_sections/02_1_sources.md`, `docs/03_runtime_flow_draft.md`를 바탕으로, domain 요약과 drill-down UI를 만들기 위한 LLM 활용 문서
-> 2026-03-23 초안
-
----
-
-## 0. 이 문서의 목적
-
-이 문서는 **현재 저장소에 구현된 코드 경로를 설명하는 문서가 아니다.**
-현재 구현된 사실 기준은 [05. Data Collection Pipeline](./05_data_collection_pipeline.md) 이고, 이 문서는 그 위에 얹을 target enrichment/runtime 설계를 적는다.
-
-현재 runtime은 실제 LLM 호출 대신 `summary provider` abstraction만 구현돼 있다. 기본 provider는 `noop` 이며, 이후 실제 모델 연동은 `backend/app/services/summary_provider.py` 에 provider를 추가하는 방식으로 붙인다.
-
-World Monitor는 **Open World Agents 안에서 동작하는 요약/탐색 레이어**다. 사용자는 단순히 카드 몇 개를 읽는 것이 아니라, 여러 패널에서 정보를 훑고, 요약을 누르고, 관련 문서를 펼치고, 필요하면 agent에게 추가 질문을 던질 수 있어야 한다.
-
-World Monitor에서 원하는 UX는 아래와 같다.
-
-1. 홈 화면에서 domain별 요약 카드가 보인다
-2. 요약 카드를 누르면 해당 domain의 topic/event summary가 열린다
-3. event summary를 누르면 연결된 문서, chunk, 링크, 메타데이터가 DB에서 펼쳐진다
-4. 사용자는 `domain -> event -> original document` 순서로 drill-down할 수 있다
-
-이 구조는 충분히 가능하다. 핵심은 LLM이 원문을 대체하는 것이 아니라, **원문 위에 얹히는 요약/정리 레이어**로 동작하도록 저장 구조를 설계하는 것이다.
+> 2026-03-24 v4
+>
+> **이 문서의 위치:**
+> 수집 파이프라인(`05`)이 만든 `documents.ndjson` 위에 얹는 LLM enrichment 계층을 설명한다.
+> 실제 setup / run / verification 절차는 [06. Operational Playbook](./06_operational_playbook.md) 을 본다.
 
 ---
 
-## 1. 목표 UX
+## 0. 현재 구현 상태 요약
 
-| 화면 | 사용자에게 보이는 것 | 실제 뒤에서 읽는 데이터 |
-|------|----------------------|--------------------------|
-| **Home** | domain별 headline, 짧은 요약, 건수, 변화량 | `domain_digests`, `topic_clusters` 집계 |
-| **Domain View** | domain 설명, 주요 event 5~20개, 관련 태그 | `cluster_summaries`, `cluster_members` |
-| **Event View** | "무슨 일이 있었는가", 핵심 포인트, 관련 문서 목록 | `cluster_summaries`, `document_summaries`, `summary_evidence` |
-| **Document View** | 원문 제목, 링크, 짧은 요약, chunk 단위 evidence | `documents`, `document_chunks`, `document_summaries` |
-| **Ask Panel (선택)** | "이 이슈 왜 중요해?" 같은 follow-up 답변 | 위 레이어들을 retrieval해서 LLM 질의응답 |
+<!-- ────────────────────────────────────────────
+     읽는 사람이 가장 먼저 봐야 하는 것:
+     "지금 뭐가 돌아가고 있는가?"
+     ──────────────────────────────────────────── -->
 
-가장 중요한 점은 클릭할수록 **LLM 결과물만 보여주는 것이 아니라**, 그 결과물과 연결된 근거 문서들이 함께 보여야 한다는 점이다.
-
-또 하나의 원칙은 **source feed를 먼저 섞지 않는 것**이다. Reddit, HN, arXiv, 기업 채널, GitHub 같은 원문 레이어는 source별로 따로 보여주고, 여러 source를 하나의 사건으로 묶는 일은 summary / cluster 단계에서만 수행하는 편이 더 안전하다.
-
-### 패널 구성
-
-| 패널 | 역할 | 주로 보여주는 것 |
-|------|------|------------------|
-| **Summary Panel** | 전체 흐름을 빠르게 이해 | domain digest, top event headline |
-| **SNS / Community Panel** | 지금 반응이 어디에 몰리는지 파악 | Reddit/HN/공개 커뮤니티 포스트 |
-| **Paper Panel** | 연구 변화 추적 | arXiv/HF papers, paper summary |
-| **Company / Release Panel** | 기업 발표와 제품 변화 추적 | news, release notes, changelog |
-| **Open Source Panel** | repo/release 변화 추적 | GitHub repo, releases, OSS 요약 |
-| **Benchmark Panel** | 모델 비교와 평가 변화 확인 | leaderboard, benchmark summary |
-| **Ask Agent Panel** | follow-up 질문 | 현재 열린 요약/문서 기반 grounded answer |
+| 단계 | 상태 | 코드 | prompt pack |
+|------|------|------|-------------|
+| **Company filter + domain 분류** | 구현 완료, 실행 가능 | `PoC/llm_enrich/scripts/llm_enrich.py` | [company_filter_v2](./prompt_packs/company_filter_v2.md) |
+| **Paper domain 분류** | 구현 완료, 실행 가능 | `PoC/llm_enrich/scripts/paper_enrich.py` | [paper_domain_v1](./prompt_packs/paper_domain_v1.md) |
+| Summary digest | 미구현 | — | — |
+| Community panel LLM | 미구현 | — | — |
+| Benchmark panel LLM | 미구현 | — | — |
+| Ask / QA | 미구현 | — | — |
 
 ---
 
-## 2. 정보 계층
+## 1. 설계 원칙
 
-LLM 레이어는 아래 4단으로 나누는 것이 가장 안정적이다.
+<!-- ────────────────────────────────────────────
+     LLM을 "어디까지" 쓸 것인가의 가이드라인.
+     규칙 기반으로 충분한 것은 LLM에 넘기지 않는다.
+     ──────────────────────────────────────────── -->
 
-1. **Document Summary**
-   소스 문서 1개에 대한 grounded summary
-2. **Event / Topic Summary**
-   서로 관련된 문서들을 묶은 cluster 요약
-3. **Domain Digest**
-   하나의 domain 안에서 일정 시간창(`24h`, `7d`) 기준 top event를 요약
-4. **Global Digest**
-   전체 화면에서 보여줄 AI/Tech 전체 headline 요약
-
-이 계층을 쓰면 한 번 만든 document summary를 여러 cluster/domain 요약에 재활용할 수 있다.
+1. LLM은 **규칙 기반으로 해결하기 어려운 좁은 작업**에만 쓴다
+2. LLM 출력은 **JSON/NDJSON로 저장되는 구조화 결과**만 만든다
+3. 프론트엔드는 `document_id`로 원본 document를 다시 조회해 메타데이터를 직접 렌더링한다
+4. 날짜, URL, engagement, count, ordering은 **LLM이 다시 만들지 않는다**
+5. panel별 instruction pack은 Markdown으로 version 관리한다 → `docs/prompt_packs/*.md`
 
 ---
 
-## 3. LLM이 맡을 수 있는 일
+## 2. 데이터 흐름 전체 그림
 
-### 3-1. 분류
+<!-- ────────────────────────────────────────────
+     수집부터 enrichment 출력까지의 전체 파이프라인.
+     "어떤 데이터가 들어가서 어떤 데이터가 나오는가"를
+     한눈에 보기 위한 그림.
+     ──────────────────────────────────────────── -->
 
-| 작업 | 입력 | 출력 |
-|------|------|------|
-| **primary domain 분류** | 제목, 본문, source metadata | `research`, `models`, `opensource`, `company`, `community`, `benchmark`, `infra`, `policy` 등 |
-| **subdomain 분류** | 본문 + tags | `agents`, `multimodal`, `video`, `reasoning`, `safety`, `robotics` 등 |
-| **content type 분류** | title + source | `paper`, `repo`, `release_note`, `news`, `benchmark_update`, `post` |
-| **importance score** | 문서 내용 + source + discovery + engagement | 0~100 score와 한 줄 이유 |
-| **panel fit 분류** | title + body excerpt + source metadata | `keep`, `drop`, `needs_review` |
+```mermaid
+flowchart TD
+    subgraph Collection["수집 파이프라인 — PoC/source_fetch"]
+        A["source adapters"] --> B["raw_responses/"] --> C["raw_items/"] --> D["normalized/documents.ndjson"]
+    end
 
-### 3-2. 추출
+    D --> E1
+    D --> E2
 
-| 작업 | 출력 예시 |
-|------|-----------|
-| **entity extraction** | 사람, 회사, 모델명, 논문명, repo명 |
-| **claim extraction** | "어떤 주장이 나왔는지" |
-| **risk / caveat extraction** | benchmark caveat, 제한사항, 보안/정책 리스크 |
-| **canonical title 생성** | 홈 화면용 짧은 제목 |
+    subgraph Enrichment["LLM Enrichment — PoC/llm_enrich"]
+        E1["Company Filter\n입력: company 계열 문서\n출력: document_filters.ndjson"]
+        E2["Paper Domain\n입력: paper 계열 문서\n출력: paper_domains.ndjson"]
+        E3["Summary Digest\n(미구현)"]
+        E4["Community / Benchmark / Ask\n(미구현)"]
+    end
 
-### 3-3. 요약
+    E1 --> F["enriched/ 디렉토리"]
+    E2 --> F
 
-| 작업 | 설명 |
+    style Collection fill:#e8f4fd,stroke:#4a90d9
+    style Enrichment fill:#e8f5e9,stroke:#4caf50
+    style E3 fill:#f5f5f5,stroke:#bbb,stroke-dasharray: 5 5
+    style E4 fill:#f5f5f5,stroke:#bbb,stroke-dasharray: 5 5
+```
+
+**최종 산출물:**
+
+| 파일 | 내용 |
 |------|------|
-| **document summary** | 문서 1개를 1줄/짧은 요약/핵심 bullet로 압축 |
-| **event summary** | 같은 이슈를 다룬 문서 여러 개를 묶어서 "무슨 일이 있었나" 정리 |
-| **domain digest** | 한 domain에서 지금 봐야 할 변화만 압축 |
-| **global digest** | 여러 domain을 가로지르는 top headline 생성 |
+| `enriched/document_filters.ndjson` | company panel keep/drop + domain |
+| `enriched/paper_domains.ndjson` | paper panel domain 분류 |
+| `enriched/failed_items.ndjson` | needs_review 항목 모음 |
+| `enriched/llm_runs.ndjson` | 실행 로그 (모델, 시간, 통계) |
 
-### 3-4. 서빙 보조
+---
 
-| 작업 | 설명 |
+## 3. Company Filter — 상세
+
+<!-- ────────────────────────────────────────────
+     가장 먼저 구현한 enrichment.
+     Company 계열 source는 noise가 많아서
+     LLM으로 keep/drop을 판정한다.
+     ──────────────────────────────────────────── -->
+
+### 3-1. 왜 Company부터 시작했나
+
+Company 계열 source는 noise가 많다.
+
+**drop 대상 (LLM이 걸러내는 것):**
+- 행사 후기, 컨퍼런스 리캡
+- 교육/세미나/아카데미 안내
+- 채용/브랜딩/문화 소개 글
+- 일반 홍보성 포스트
+
+**keep 대상 (panel에 올라가야 하는 것):**
+- 모델 공개/업데이트
+- API / SDK / 제품 변경
+- 기술 블로그 / 연구 성과
+- 공개 OSS
+- benchmark / eval 결과
+- policy / safety 관련 발표
+
+이 작업은 입력이 짧고, 출력 enum이 좁고, frontend가 바로 체감할 수 있어서 4B 실험의 첫 대상으로 적합하다.
+
+### 3-2. 입력 → LLM → 출력
+
+```mermaid
+flowchart TD
+    A["documents.ndjson"] --> B["입력 선별\n(rule-based)"]
+    B --> C["LLM 호출\nQwen3.5-4B"]
+    C --> D["enriched/\ndocument_filters.ndjson"]
+
+    style A fill:#fff3e0,stroke:#f5a623
+    style B fill:#e8f4fd,stroke:#4a90d9
+    style C fill:#e8f5e9,stroke:#4caf50
+    style D fill:#f3e5f5,stroke:#9c27b0
+```
+
+**Step 1 — 입력 선별** (rule-based, LLM 호출 전)
+
+| 조건 | 내용 |
 |------|------|
-| **query-time QA** | 사용자가 domain이나 event 안에서 후속 질문을 던졌을 때 응답 |
-| **related item 추천** | 비슷한 이슈나 이전 이벤트 연결 |
-| **display text rewrite** | 카드 제목을 짧고 읽기 쉽게 정리 |
+| 포함 | `source_category` ∈ {company, company_kr, company_cn} 또는 `source == hf_blog` |
+| 포함 | `published_at` 또는 `sort_at` 기준 최근 90일 |
+| 제외 | `github_*` source |
+| 제외 | `text_scope`가 empty / metric_summary / generated_panel |
+| 샘플링 | source별 최근 N개만 선택 (default: 5), sort_at DESC 정렬 |
 
-### 3-5. Company / Release Panel 전용 필터
-
-Company 계열 source는 noise가 많다. 제품/모델/API 릴리즈와 직접 연결된 글도 있지만, 행사 후기, 채용, 교육, 논문 소개, 학회 참관기 같은 글도 섞인다. 따라서 Company / Release panel은 summary 전에 한 번 더 **panel-fit filter**를 거치는 편이 안전하다.
-
-이 단계는 retrieval이나 RAG가 필요한 작업이 아니다. 이 문서에서 필요한 것은 "이 문서가 company panel에 들어갈 가치가 있는가"에 대한 **bounded classification** 이므로, title, 본문 일부, source metadata만으로도 instruction-only 분류가 가능하다.
-
-#### 필터 대상
-
-- `company`
-- `company_kr`
-- `company_cn`
-
-#### keep 기준
-
-- 모델 공개, 모델 업데이트, 모델 성능 변화
-- API / SDK / 제품 릴리즈
-- changelog, release note, pricing / policy / availability 변경
-- benchmark / eval 결과 공개
-- 주요 오픈소스 공개
-- 기업이 직접 발표한 중요한 연구 성과 또는 deployment 사례
-
-#### drop 기준
-
-- 학회 참석 후기, conference recap, 행사 스케치
-- 논문 소개, survey, 리뷰성 글
-- 교육 프로그램, 아카데미, 캠프, 세미나 안내
-- 채용, recruiting, hiring, culture / interview / PR 글
-- 회사 일반 홍보, 파트너십 소개, 조직 뉴스
-- company panel에서 바로 보여줄 필요가 낮은 long-form thought piece
-
-#### 권장 출력 스키마
+**Step 2 — LLM에 넘기는 필드** (각 item에서 이것만 뽑는다)
 
 ```json
 {
-  "document_id": "doc_123",
-  "filter_scope": "company_panel",
-  "decision": "keep",
-  "section": "company_release",
-  "reason": "모델 릴리즈와 성능 변화가 직접적으로 포함되어 있다.",
-  "confidence": 0.93
+  "id":    "openai_news_rss:gpt5-turbo",
+  "src":   "openai_news_rss",
+  "title": "Introducing GPT-5.1 mini",
+  "desc":  "We are releasing GPT-5.1 mini, a smaller..."
 }
 ```
 
-`section`은 최소한 아래 정도로 고정하면 충분하다.
+> `desc`는 description 앞 200자 (있을 때만). URL, 날짜, engagement 같은 메타데이터는 넘기지 않는다. 프론트가 `document_id`로 원본에서 직접 읽는다.
 
-- `company_release`
-- `company_research`
-- `ignore`
+**Step 3 — LLM 출력** (각 item마다 정확히 하나)
 
-#### Batch Chunk 전략
+```json
+{
+  "document_id":    "openai_news_rss:gpt5-turbo",
+  "decision":       "keep",
+  "company_domain": "model_release",
+  "reason_code":    "model_signal"
+}
+```
 
-source item 하나당 LLM inference를 1번씩 수행하면 비용이 너무 커진다. 따라서 company filter는 문서 1개 단위 호출이 아니라 **item chunk 단위 batch classification** 으로 처리하는 편이 낫다.
+> pipeline이 자동으로 `filter_scope`, `model_name`, `runtime`, `prompt_version`, `schema_version`, `generated_at`을 추가한다.
 
-여기서 말하는 chunk는 document embedding을 위한 본문 chunk와 다르다. 이 단계의 chunk는 **여러 문서를 한 번에 모델에 넣는 inference batch chunk** 다.
+### 3-3. Enum 정의
 
-권장 방식은 아래와 같다.
+<!-- ────────────────────────────────────────────
+     LLM이 반환할 수 있는 값의 전체 목록.
+     이 enum은 guided_json schema로 강제된다.
+     ──────────────────────────────────────────── -->
 
-1. `company*` 계열 normalized document만 모은다.
-2. 각 문서에서 `document_id`, `source`, `title`, `published_at`, `tags`, `body_excerpt`만 뽑는다.
-3. 이 문서들을 `10~30개` 정도의 item chunk로 나눠 한 번에 분류한다.
-4. 모델은 item별로 `decision`, `section`, `reason`, `confidence`를 JSON 배열로 반환한다.
-5. `keep`만 company feed와 downstream summary 대상으로 넘긴다.
-6. `drop`은 raw/doc에는 남기되 UI와 summary 대상에서는 제외한다.
-7. `needs_review` 또는 confidence가 낮은 item만 2차 개별 호출로 재판정한다.
+**`decision`** — 이 문서를 company panel에 올릴 것인가
 
-이 방식의 장점은 다음과 같다.
+| 값 | 의미 |
+|----|------|
+| `keep` | panel 가치가 명확 → 화면에 올린다 |
+| `drop` | 홍보/행사/채용 등 → 화면에서 뺀다 |
+| `needs_review` | 판단 불확실 → 수동 확인 대상 |
 
-- RAG 없이도 충분히 높은 precision을 기대할 수 있다.
-- source를 삭제하지 않고도 panel 품질을 관리할 수 있다.
-- summary 전에 불필요한 문서를 줄여 LLM 비용을 낮출 수 있다.
-- 규칙이 바뀌어도 raw/doc를 기준으로 재판정이 가능하다
+**`company_domain`** — keep일 때, 어떤 종류의 발표인가
+
+| 값 | 의미 | 예시 |
+|----|------|------|
+| `model_release` | 신규/업데이트 모델 발표 | "Introducing GPT-5.1 mini" |
+| `product_update` | API, SDK, 플랫폼, 가격 변경 | "New region available", "SDK v3" |
+| `technical_research` | 기술 블로그, 연구 결과, 방법론 | "보안 모니터링 아키텍처 설계" |
+| `open_source` | OSS 릴리즈, 프레임워크/라이브러리 공개 | "Open-sourcing our agent framework" |
+| `benchmark_eval` | 벤치마크 결과, 평가 방법론 | "Our model scores 92.3 on..." |
+| `partnership_ecosystem` | 파트너십, 인수, 제휴 | "Partnership with X for Y" |
+| `policy_safety` | AI 안전, 거버넌스, 규제 대응 | "Responsible AI report 2026" |
+| `others` | 위에 해당 없지만 keep할 가치 있음 | — |
+| `null` | drop일 때 | — |
+
+**`reason_code`** — 판단 근거 코드
+
+| 값 | 용도 |
+|----|------|
+| `model_signal` | 모델 관련 keep |
+| `product_signal` | 제품 관련 keep |
+| `research_signal` | 연구 관련 keep |
+| `oss_signal` | OSS 관련 keep |
+| `benchmark_signal` | 벤치마크 관련 keep |
+| `partnership_signal` | 파트너십 관련 keep |
+| `policy_signal` | 정책/안전 관련 keep |
+| `other_signal` | 기타 keep |
+| `event_or_program` | 행사/프로그램 → drop |
+| `recruiting_or_pr` | 채용/PR → drop |
+| `general_promo` | 일반 홍보 → drop |
+| `unclear_scope` | 범위 불명확 → needs_review |
+| `runtime_fallback` | LLM 실패 시 시스템이 자동 부여 |
+
+### 3-4. 이 enrichment 후 활용 가능한 것
+
+Company filter가 완료되면 아래가 가능해진다:
+
+1. **Company panel 노이즈 제거** — `decision=keep`인 문서만 화면에 올릴 수 있다
+2. **Domain별 그룹핑** — `company_domain`으로 "모델 발표", "제품 업데이트", "연구" 등을 나눠 볼 수 있다
+3. **Reason 기반 필터** — `reason_code`로 왜 keep/drop 했는지 추적할 수 있다
+4. **Quality 모니터링** — `needs_review` 비율과 `runtime_fallback` 비율로 모델 품질을 추적한다
 
 ---
 
-## 4. 권장 파이프라인
+## 4. Paper Domain — 상세
 
-### 4-1. 비용 모델: 로컬 LLM (GPU)
+<!-- ────────────────────────────────────────────
+     두 번째로 구현한 enrichment.
+     논문을 연구 분야별로 분류한다.
+     ──────────────────────────────────────────── -->
 
-모든 LLM 호출은 **로컬 GPU에서 구동하는 Qwen 3.5 계열**을 사용한다. API 비용은 0이다.
+### 4-1. 왜 Paper domain 분류가 필요한가
 
-- 기본 모델: `Qwen/Qwen3.5-8B` (분류, 요약, 필터)
-- 고품질 모델: `Qwen/Qwen3.5-14B` (cluster summary, domain digest)
-- 구동: Ollama 또는 vLLM
-- GPU 기준 처리량: ~100+ tok/s (8B), 문서 1개 요약 ~0.3초
+arXiv만 해도 8개 카테고리(cs.AI, cs.LG, cs.CL, cs.CV, cs.RO, cs.IR, cs.CR, stat.ML)에서 수집하고, HF daily papers도 합치면 한 번에 수백 편이 들어온다. arXiv 카테고리는 넓어서("cs.AI"에 agent도, safety도, evaluation도 다 섞여 있다), 사용자가 관심 분야를 빠르게 찾으려면 더 세밀한 분류가 필요하다.
 
-### 4-2. 파이프라인 단계
+### 4-2. 입력 → LLM → 출력
 
-```
-수집 → 정규화 → discovery/engagement 필터 → title 키워드 클러스터링 → 섹션별 배치 LLM → 서빙
-                                             (LLM 불필요)              (섹션당 1회)
-```
+```mermaid
+flowchart TD
+    A["documents.ndjson"] --> B["입력 선별\narXiv + HF papers만"]
+    B --> C["LLM 호출\nQwen3.5-4B"]
+    C --> D["enriched/\npaper_domains.ndjson"]
 
-1. **수집**
-   RSS/API/scrape로 raw 문서를 모은다.
-2. **정규화**
-   source별 데이터를 공통 `documents` 스키마로 맞춘다.
-3. **1차 rule-based tagging**
-   source, category, URL pattern, repo/paper ID로 빠른 기본 태깅을 한다.
-4. **discovery / engagement 필터**
-   단순 누적 인기만 보지 않고, `새로 생겼는가`, `지금 반짝이는가`, `기본 인기/안정성이 있는가`를 함께 본다. 특히 모델 섹션은 `hf_models_new + hf_trending_models + hf_models_likes`를 같이 보고, selection은 discovery 우선으로 잡는다. 이 단계에서 화면 정렬용 `ranking.feed_score`도 같이 계산해 상단에는 새롭고 핫한 정보를, 하단에는 이전 정보를 배치한다.
-5. **title 키워드 클러스터링 (LLM 불필요)**
-   title에서 키워드(모델명, 회사명, 기술명 등)를 추출하고, 같은 키워드를 공유하는 문서끼리 묶는다. 이 단계는 규칙 기반이며 밀리초 단위로 처리된다. embedding이나 벡터 DB는 사용하지 않는다.
-6. **Company panel filter**
-   `company`, `company_kr`, `company_cn` 문서에 대해 instruction-only keep/drop 분류를 수행한다. item chunk 단위 batch inference로 처리한다.
-7. **섹션별 배치 LLM 호출 (in-context learning)**
-   섹션(Papers, Community, Company, OSS, Benchmark 등)별로 `ranking.feed_score` 기준 상위 문서 N개를 모아 **LLM 1회 호출**로 처리한다.
-   - 프롬프트: instruction + few-shot 예시가 미리 세팅된 prompt pack
-   - 입력: 해당 섹션의 문서들 (title + body excerpt + discovery + engagement metadata)
-   - 출력: 구조화된 JSON (Level 1 한 줄 요약 + Level 2 상세 요약 + 레퍼런스 매핑)
-   - 호출 횟수: **~6-7회** (섹션 수만큼, 문서 수가 아님)
-   - 소요 시간: GPU 기준 섹션당 2-3초, **전체 ~15-20초**
-8. **서빙 (3단계 드릴다운)**
-   - **Level 1 (홈)**: 섹션별 핫 토픽 한 줄씩 표시
-   - **Level 2 (상세)**: 클릭 시 관련 소스들의 상세 요약 + 원본 레퍼런스 목록
-   - **Level 3 (원본)**: 클릭 시 원본 기사/페이지로 이동
-
-### 4-3. 이전 파이프라인과의 차이
-
-| 항목 | 이전 (문서 단위) | 현재 (섹션 배치) |
-|------|-----------------|-----------------|
-| LLM 호출 횟수 | ~100회 (문서당 1회) | **~7회** (섹션당 1회) |
-| 클러스터링 | embedding similarity | **title 키워드 매칭** (LLM 불필요) |
-| 도메인 분류 | LLM classification | **source→도메인 매핑 테이블** (LLM 불필요) |
-| 비용 | API 기준 ~$0.03/일 | **$0 (로컬 GPU)** |
-| 처리 시간 | API latency 의존 | **~15-20초 (GPU)** |
-| 벡터 DB / RAG | chunking + embedding 필요 | **불필요** (문서 누적 수만 개 전까지) |
-
-핵심 변경: 도메인 분류와 클러스터링을 LLM에서 규칙 기반으로 내렸고, LLM은 **요약 생성에만 집중**한다. 호출 단위도 문서→섹션으로 올려서 횟수를 대폭 줄였다.
-
-### 4-4. 데이터 처리 예시 (실제 수집 데이터 기반)
-
-아래는 `2026-03-23` 수집 데이터(69개 문서, 소스당 3개 limit)를 기준으로 파이프라인이 어떻게 동작하는지 보여주는 예시다.
-
-#### Step 1: 수집 + 정규화 결과
-
-```
-총 69개 문서 (36개 소스 × limit 3)
-실운영 시 ~400개/일 예상
+    style A fill:#fff3e0,stroke:#f5a623
+    style B fill:#e8f4fd,stroke:#4a90d9
+    style C fill:#e8f5e9,stroke:#4caf50
+    style D fill:#f3e5f5,stroke:#9c27b0
 ```
 
-#### Step 2: discovery / engagement 필터
+**Step 1 — 입력 선별** (rule-based)
 
-source별 새로움(discovery)과 engagement 지표를 같이 보고 문서를 선별한다.
-
-```
-[hn_topstories]  score=620, comments=288  "PC Gamer recommends RSS readers..."     ✓ 통과
-[hn_topstories]  score=113, comments=26   "POSSE – Publish on your Own Site..."    ✓ 통과
-[hn_topstories]  score=59,  comments=34   "Walmart: ChatGPT checkout converted..." ✓ 통과
-
-[reddit_localllama]  score=180  "I came from Data Engineering stuff..."            ✓ 통과
-[reddit_localllama]  score=164  "So cursor admits Kimi K2.5 is the best..."        ✓ 통과
-[reddit_localllama]  score=137  "Announcing LocalLlama discord server..."          ✗ 제외 (공지성)
-
-[hf_models_new]       age=0.2h   "vadimbelsky/qwen3.5-medical-ft-stage3-dpo-lora" ✓ 통과
-[hf_trending_models]  likes=1062 "Qwen3.5-27B-Claude-4.6-Opus-Reasoning..."       ✓ 통과
-[hf_trending_models]  likes=821  "Qwen3.5-35B-A3B-Uncensored-HauhauCS..."         ✓ 통과
-[hf_models_likes]     likes=13100 "deepseek-ai/DeepSeek-R1"                       ✓ 통과
-
-[arxiv_rss_cs_ai]     engagement 없음 → 전부 통과 (논문은 필터 안 함)
-[openai_news_rss]     engagement 없음 → 전부 통과 (기업 발표는 필터 안 함)
-...
-```
-
-engagement가 없는 소스(논문, 기업 블로그, 벤치마크)는 **전부 통과**시킨다. 커뮤니티는 노이즈 제거, 모델은 discovery 우선 정렬이 핵심이다.
-
-#### Step 3: title 키워드 클러스터링 (LLM 불필요)
-
-title에서 키워드를 추출하고, 같은 키워드를 공유하는 문서끼리 묶는다.
-
-```python
-# 규칙 기반 — 밀리초 단위로 처리
-keywords_extracted = {
-    "Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled"  → ["qwen", "reasoning"]
-    "Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive"   → ["qwen"]
-    "Qwen3Guard: Real-time Safety for Your Token Stream" → ["qwen"]
-    "Qwen-Image-Edit: Image Editing with Higher Quality" → ["qwen"]
-    "Qwen-Image: Crafting with Native Text Rendering"    → ["qwen"]
-}
-```
-
-결과:
-
-```
-클러스터 "qwen" (5개 문서)
-├── [hf_trending_models] Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled   likes=1062
-├── [hf_trending_models] Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive    likes=821
-├── [qwen_blog_rss]      Qwen3Guard: Real-time Safety for Your Token Stream
-├── [qwen_blog_rss]      Qwen-Image-Edit: Image Editing with Higher Quality
-└── [qwen_blog_rss]      Qwen-Image: Crafting with Native Text Rendering
-
-클러스터 "agent" (10개 문서)
-├── [amazon_science]     How agentic AI helps heal the systems we can't replace
-├── [arxiv_rss_cs_ai]    Hyperagents
-├── [lg_ai_research_blog] A Design Guide for Organizations Implementing Agentic AI
-├── [microsoft_research] Systematic debugging for AI agents: AgentRx framework
-├── [microsoft_research] PlugMem: Transforming raw agent interactions into knowledge
-├── [openai_news_rss]    How we monitor internal coding agents for misalignment
-├── [salesforce_ai_research_rss] Poisoning the Well: Search Agents Get Tricked...
-└── ...
-
-클러스터 "nvidia" (3개 문서)
-├── [nvidia_deep_learning] NVIDIA Rubin Platform, Open Models, Autonomous Driving
-├── [nvidia_deep_learning] As AI Grows More Complex, Model Builders Rely on NVIDIA
-└── [nvidia_deep_learning] Reaching Across the Isles: UK-LLM Brings AI to UK Languages
-
-클러스터 "reasoning" (3개 문서)
-├── [apple_ml]           Goldilocks RL: Tuning Task Difficulty to Escape Sparse Rewards
-├── [hf_trending_models] Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled
-└── [microsoft_research] Phi-4-reasoning-vision and the lessons of training...
-
-(단독 문서는 클러스터 없이 섹션에 개별 표시)
-```
-
-#### Step 4: 섹션별 배치 LLM 호출
-
-소스→섹션 매핑 테이블로 문서를 섹션에 배치하고, 섹션당 LLM 1회 호출한다.
-
-```
-섹션 "Community" → hn_topstories, reddit_localllama, reddit_machinelearning
-섹션 "Papers"    → arxiv_rss_cs_ai, arxiv_rss_cs_lg, hf_daily_papers
-섹션 "Company"   → openai_news_rss, qwen_blog_rss, nvidia_deep_learning, ...
-섹션 "Models"    → hf_models_new, hf_trending_models, hf_models_likes
-섹션 "OSS"       → hf_blog, github_curated_repos
-섹션 "Benchmark" → lmarena_overview, open_llm_leaderboard
-```
-
-**예시: "Models" 섹션 LLM 호출**
-
-입력 프롬프트:
-
-```
-[System] 당신은 AI/Tech 트렌드 요약 전문가입니다.
-아래 문서들을 읽고, 핫 토픽별로 Level 1 한 줄 요약과 Level 2 상세 요약을 생성하세요.
-
-[Few-shot 예시]
-입력: { "title": "Meta releases Llama 4 Scout", "source": "hf_trending_models", ... }
-출력: { "topic": "Llama 4 Scout 공개", "level1": "Meta, Llama 4 Scout 공개 — MoE 기반 10B 활성 파라미터로 효율성 강조", ... }
-
-[문서 목록]
-1. { "title": "vadimbelsky/qwen3.5-medical-ft-stage3-dpo-lora", "source": "hf_models_new", "age_hours": 0.2, "spark_score": 94 }
-2. { "title": "Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled", "source": "hf_trending_models", "likes": 1062, "downloads": 151482, "spark_score": 88 }
-3. { "title": "Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive", "source": "hf_trending_models", "likes": 821, "downloads": 299865, "spark_score": 84 }
-4. { "title": "deepseek-ai/DeepSeek-R1", "source": "hf_models_likes", "likes": 13100, "downloads": 1649989, "spark_score": 42 }
-5. { "title": "black-forest-labs/FLUX.1-dev", "source": "hf_models_likes", "likes": 12497, "downloads": 783227, "spark_score": 38 }
-```
-
-LLM 출력 (구조화된 JSON):
-
-```json
-{
-  "section": "models",
-  "topics": [
-    {
-      "topic_id": "qwen35_distilled",
-      "level1": "방금 올라온 Qwen 파생 모델과 트렌딩 변형이 동시에 급부상",
-      "level2": {
-        "summary": "새로 생성된 Qwen 3.5 파생 모델이 바로 관측됐고, 동시에 기존 커뮤니티 변형 두 개가 트렌딩 상위권에 올랐다. 즉 단순 장기 인기보다 '지금 막 생기고 바로 퍼지는' 움직임이 강하게 보인다.",
-        "references": [
-          { "doc_idx": 1, "source": "hf_models_new", "note": "created < 1h — spark_score 94" },
-          { "doc_idx": 2, "source": "hf_trending_models", "note": "Reasoning Distilled 27B — likes 1,062" },
-          { "doc_idx": 3, "source": "hf_trending_models", "note": "Uncensored 35B — downloads 299K" }
-        ]
-      }
-    },
-    {
-      "topic_id": "deepseek_r1_steady",
-      "level1": "DeepSeek-R1, likes 13,100으로 HuggingFace 전체 1위 유지",
-      "level2": {
-        "summary": "DeepSeek-R1이 HuggingFace에서 likes 기준 1위를 유지하고 있다. 다운로드 164만 건으로 추론 특화 모델에 대한 수요가 여전히 강하다.",
-        "references": [
-          { "doc_idx": 3, "source": "hf_models_likes", "note": "likes 13,100 / downloads 1.6M" }
-        ]
-      }
-    },
-    {
-      "topic_id": "image_gen_models",
-      "level1": "이미지 생성 모델 FLUX.1-dev와 SDXL, 다운로드 합산 290만 건으로 꾸준한 인기",
-      "level2": {
-        "summary": "FLUX.1-dev(likes 12,497)와 Stable Diffusion XL(downloads 213만)이 이미지 생성 분야에서 여전히 강세다.",
-        "references": [
-          { "doc_idx": 4, "source": "hf_models_likes", "note": "FLUX.1-dev — likes 12,497" },
-          { "doc_idx": 5, "source": "hf_models_likes", "note": "SDXL — downloads 2.1M" }
-        ]
-      }
-    }
-  ]
-}
-```
-
-#### Step 5: 서빙 (3단계 드릴다운)
-
-위 LLM 출력이 그대로 UI에 매핑된다.
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ 🔥 Models                                               │
-│                                                         │
-│  • Qwen 3.5 기반 커뮤니티 파생 모델 급증               │ ← Level 1
-│    — Reasoning Distilled 버전 다운로드 15만 돌파        │
-│                                                         │
-│  • DeepSeek-R1, likes 13,100으로 HF 전체 1위 유지      │ ← Level 1
-│                                                         │
-│  • 이미지 생성 모델 FLUX.1-dev와 SDXL, 합산 290만 DL   │ ← Level 1
-└─────────────────────────────────────────────────────────┘
-                          ↓ 클릭: "Qwen 3.5 기반..."
-┌─────────────────────────────────────────────────────────┐
-│ Qwen 3.5 기반 커뮤니티 파생 모델 급증                   │
-│                                                         │
-│ Qwen 3.5를 기반으로 한 커뮤니티 파생 모델이 빠르게      │ ← Level 2
-│ 확산 중이다. Claude 4.6 Opus의 추론 능력을 증류한       │    상세 요약
-│ 27B 모델이 likes 1,062를 기록했고...                    │
-│                                                         │
-│ References:                                             │
-│  📄 Qwen3.5-27B-Claude-Reasoning-Distilled  [HF ↗]    │ ← 레퍼런스
-│     likes 1,062 · downloads 151K                        │
-│  📄 Qwen3.5-35B-Uncensored-HauhauCS        [HF ↗]    │
-│     likes 821 · downloads 299K                          │
-└─────────────────────────────────────────────────────────┘
-                          ↓ 클릭: [HF ↗]
-              → huggingface.co/Jackrong/Qwen3.5-...        ← Level 3 원본
-```
-
-#### 전체 처리 시간 예상 (GPU)
-
-```
-Step 2  discovery 필터      ~10ms   (메모리 내 비교)
-Step 3  키워드 클러스터링    ~50ms   (title 문자열 매칭)
-Step 4  LLM 6-7회 호출      ~15-20s (섹션당 2-3초, GPU)
-────────────────────────────────────────
-합계                         ~20초
-```
-
----
-
-## 5. DB에 어떻게 연결할까
-
-현재 runtime flow의 enrichment 레이어를 확장해서 아래 엔터티를 두는 것을 권장한다.
-
-| 테이블 | 역할 |
-|--------|------|
-| `document_filters` | panel 적합 여부와 제외 사유 기록 |
-| `document_summaries` | 문서 1개 단위 요약 결과 |
-| `topic_clusters` | 같은 이벤트/주제를 묶는 cluster 헤더 |
-| `cluster_members` | cluster와 document의 연결 테이블 |
-| `cluster_summaries` | cluster 단위 대표 요약 |
-| `domain_digests` | domain 단위 일정 시간창 요약 |
-| `summary_evidence` | summary와 chunk/doc 사이의 근거 연결 |
-| `llm_runs` | 어떤 모델/프롬프트/설정으로 생성했는지 기록 |
-
-### 최소 필드 제안
-
-#### `document_filters`
-
-```json
-{
-  "document_id": "doc_123",
-  "filter_scope": "company_panel",
-  "decision": "keep",
-  "section": "company_release",
-  "reason": "제품/API 릴리즈 성격이 강하고 panel 목적과 직접 연결된다.",
-  "confidence": 0.93,
-  "model_name": "Qwen/Qwen3-8B",
-  "prompt_version": "company_filter_v1",
-  "generated_at": "2026-03-23T07:00:00Z"
-}
-```
-
-#### `document_summaries`
-
-```json
-{
-  "document_id": "doc_123",
-  "summary_1l": "OpenAI가 새로운 추론 최적화 모델을 공개했다.",
-  "summary_short": "새 모델의 핵심 변화와 배포 범위를 3문장 안으로 요약",
-  "key_points": ["포인트 1", "포인트 2"],
-  "entities": ["OpenAI", "o3-mini"],
-  "primary_domain": "models",
-  "subdomains": ["reasoning"],
-  "importance_score": 88,
-  "evidence_chunk_ids": ["chunk_1", "chunk_4"],
-  "model_name": "Qwen/Qwen3-8B",
-  "prompt_version": "doc_summary_v1",
-  "generated_at": "2026-03-23T07:00:00Z"
-}
-```
-
-#### `cluster_summaries`
-
-```json
-{
-  "cluster_id": "cluster_456",
-  "cluster_title": "Qwen3 계열 공개와 추론 모드 전환 기능이 화제",
-  "what_happened": "관련 문서들을 합쳐 3~5문장으로 정리한 본문",
-  "why_it_matters": "왜 중요한지 한 문단",
-  "representative_doc_ids": ["doc_12", "doc_19", "doc_25"],
-  "evidence_chunk_ids": ["chunk_20", "chunk_44"],
-  "model_name": "Qwen/Qwen3-14B",
-  "prompt_version": "cluster_summary_v1"
-}
-```
-
-#### `domain_digests`
-
-```json
-{
-  "domain": "models",
-  "window": "24h",
-  "headline": "오늘은 오픈모델 공개와 벤치마크 비교가 핵심 이슈였다.",
-  "overview": "도메인 전체를 4~6문장으로 압축",
-  "top_cluster_ids": ["cluster_456", "cluster_461", "cluster_488"],
-  "watchouts": ["평가 방식이 서로 다름", "벤치마크 수치 해석 주의"],
-  "model_name": "Qwen/Qwen3-14B",
-  "prompt_version": "domain_digest_v1"
-}
-```
-
-### 클릭 시 DB 조회 흐름
-
-1. 홈 화면에서 domain card를 그릴 때 `domain_digests`를 읽는다
-2. domain을 누르면 `top_cluster_ids`로 `cluster_summaries`를 불러온다
-3. event를 누르면 `cluster_members`를 통해 관련 `documents`와 `document_summaries`를 가져온다
-4. 근거를 누르면 `summary_evidence`를 통해 관련 chunk를 보여준다
-
-이렇게 하면 "요약 글을 누르면 관련된 DB들이 펼쳐지는" 형태를 자연스럽게 만들 수 있다.
-
-여기서 `cluster_members`는 source 레이어를 지우는 것이 아니라, **여러 source의 관련 문서를 summary 아래에 모아 보여주는 용도**다. 따라서 event view 안에는 비슷한 내용을 다루는 링크가 source별로 함께 보일 수 있다.
-
-### Reference 노출 원칙
-
-1. 모든 summary card에는 최소 1개 이상의 `representative_doc_id`가 연결되어야 한다
-2. event view에서는 항상 실제 `source`, `원문 URL`, `짧은 요약`, `세부 요약`을 같이 보여준다
-3. detailed summary는 원문을 덮어쓰는 용도가 아니라, 사용자가 reference를 읽기 전에 빠르게 맥락을 잡도록 돕는 레이어다
-4. 사용자가 원하면 언제든 원문 링크를 바로 열 수 있어야 한다
-5. Ask Agent 응답에도 가능하면 관련 `reference doc`를 함께 노출한다
-6. 여러 source의 유사 링크가 함께 보여도 괜찮다. 이 레이어의 목적은 dedup보다 `맥락 묶기`에 가깝다
-
-### LLM-Ready Document Contract
-
-LLM 레이어를 안정적으로 붙이려면, source마다 정보량이 다르더라도 **공통 placeholder를 항상 유지하는 document contract** 가 필요하다. 값이 없으면 `null`, 빈 배열, 빈 객체로 두고 shape는 되도록 유지하는 편이 낫다.
-
-현재 PoC 기준으로 normalized document는 아래 필드를 우선 공통으로 가진다고 가정한다.
-
-| 필드 | 의미 | 비어 있을 수 있나 |
-|------|------|------------------|
-| `document_id` | `source:source_item_id` 형태의 내부 식별자 | 아니오 |
-| `source`, `source_category`, `source_method` | source와 수집 방식 | 일부는 가능하지만 가급적 채움 |
-| `title` | 카드와 summary의 기본 제목 | 아니오 |
-| `url` | 원문 또는 대표 URL | 예 |
-| `canonical_url` | 실제 원문/대표 페이지 | 예 |
-| `reference_url` | 클릭 시 우선 보여줄 reference URL | 예 |
-| `published_at`, `updated_at`, `sort_at` | 시간 정보 | 예 |
-| `ranking` | 화면용 live ordering block | 아니오 |
-| `time_semantics` | `published`, `updated`, `snapshot`, `submission`, `observed` 등 | 아니오 |
-| `doc_type`, `content_type` | 원문 유형과 서빙용 유형 | 아니오 |
-| `description` | 짧은 설명/요약용 본문 | 예 |
-| `body_text` | 실제 본문이나 본문 대용 텍스트 | 예 |
-| `summary_input_text` | LLM 입력용으로 정리된 텍스트 | 아니오 |
-| `text_scope` | `full_text`, `abstract`, `excerpt`, `metadata_only`, `metric_summary`, `empty` 등 | 아니오 |
-| `author`, `authors` | 작성자 1명 표시와 다중 작성자 보존 | 예 |
-| `tags` | source/doc_type/category를 포함한 display keyword | 예 |
-| `engagement`, `engagement_primary` | 커뮤니티/benchmark 반응 수치 | 예 |
-| `benchmark` | benchmark panel용 요약 block | 예 |
-| `external_ids` | `arxiv_id`, `hf_model_id`, `hn_id`, `model_sha` 같은 외부 식별자 | 예 |
-| `related_urls` | repo, 썸네일, 토론 링크, detail 링크 등 보조 URL | 예 |
-| `reference` | UI에 그대로 쓸 reference block | 아니오 |
-| `llm` | 후속 분류/요약 placeholder | 아니오 |
-| `raw_ref` | 원본 payload를 다시 찾기 위한 포인터 | 아니오 |
-
-이 contract의 핵심은 다음과 같다.
-
-1. `published_at` 하나만 믿지 않는다. `time_semantics`로 이 시간이 무엇을 뜻하는지 함께 저장한다.
-2. `canonical_url`과 `reference_url`을 분리한다. 예를 들어 HN/Reddit는 원문 URL과 토론 URL이 다를 수 있다.
-3. `body_text`가 약한 source도 있으므로, LLM 입력은 항상 `summary_input_text`를 우선 사용한다.
-4. benchmark나 repo처럼 일반 article이 아닌 source도 `text_scope`, `content_type`, `external_ids`로 meaning을 보존한다.
-5. `author`는 없어도 된다. 반대로 `title + displayable URL + time_semantics`는 없으면 안 된다.
-
-### LLM 관점에서 생길 수 있는 문제
-
-source를 많이 붙일수록 LLM은 풍부해지지만, 아래 문제가 같이 생긴다.
-
-1. **시간 의미 혼합**
-   `published_at`이 기사 게시일일 수도 있고, repo 갱신일, leaderboard snapshot 시점, submission 시점일 수도 있다. 따라서 정렬/집계는 `sort_at + time_semantics` 기준으로 해석해야 한다.
-2. **본문 품질 차이**
-   RSS feed나 scrape source는 `body_text`가 거의 없거나 boilerplate만 있을 수 있다. 이런 경우 `summary_input_text`, `description`, `text_scope`를 먼저 보고 요약해야 한다.
-3. **원문 URL과 토론 URL 혼합**
-   Reddit/HN/GitHub release처럼 “무엇을 읽게 할 것인가”가 source마다 다르다. UI와 Ask Agent는 `reference_url`을 기본 클릭 대상으로 삼는 편이 안전하다.
-4. **구조화 데이터와 자유 텍스트 혼합**
-   Open LLM Leaderboard, LMArena, GitHub repo는 사실상 구조화된 metric source에 가깝다. 이런 항목은 article처럼 길게 요약하기보다 `metadata + metrics + short explanation` 형태가 더 적절하다.
-5. **cluster 충돌**
-   비슷한 모델명, 회사명, release note가 반복되면 cluster가 섞일 수 있다. URL, 외부 식별자, source type을 우선 사용하고, embedding 기반 유사도는 그다음에 쓰는 편이 낫다.
-6. **engagement / discovery 편향**
-   커뮤니티 반응만 보면 paper/company/release 중요도가 묻힐 수 있고, 반대로 새로움만 보면 품질이 낮은 early noise가 과대표현될 수 있다. panel별로 importance 기준을 분리하고 `discovery + engagement + source type`을 함께 보는 편이 안전하다.
-
-실무적으로는 아래 순서를 권장한다.
-
-1. source별 raw/doc는 그대로 유지한다.
-2. LLM 분류/요약은 `summary_input_text`, `external_ids`, `reference`, `metadata`를 함께 읽는다.
-3. cluster/domain digest를 만들 때만 여러 source를 묶는다.
-4. UI에서는 항상 summary와 reference를 같이 보여준다.
-
-### Benchmark Contract
-
-benchmark는 요약 이전에 아래 block을 먼저 고정해두는 편이 좋다.
-
-```json
-{
-  "benchmark": {
-    "kind": "leaderboard_panel",
-    "board_id": "lmarena:/leaderboard/text",
-    "board_name": "LMArena Text",
-    "snapshot_at": "2026-03-20T11:00:00Z",
-    "rank": 1,
-    "score_label": "Arena rating",
-    "score_value": 1502.13,
-    "score_unit": "elo_like_rating",
-    "votes": 11801,
-    "model_name": "claude-opus-4-6-thinking",
-    "organization": "Anthropic",
-    "total_models": 330,
-    "total_votes": 5602397
-  }
-}
-```
-
-LMArena, Open LLM Leaderboard 같은 source는 정보가 매우 압축돼 있으므로, 긴 article summary보다 `benchmark block + metadata + metrics`를 기본 표시 단위로 보는 편이 더 적합하다.
-
----
-
-## 6. 프롬프트와 in-context learning 사용법
-
-훈련을 하지 않을 계획이라면, 품질은 **prompt pack + few-shot example + schema 고정**에서 대부분 결정된다.
-
-### 6-1. 공통 원칙
-
-1. **taxonomy를 먼저 고정한다**
-   domain, subdomain, content type 목록을 먼저 정하고 계속 바꾸지 않는다.
-2. **JSON schema를 먼저 고정한다**
-   응답 자유도를 줄여야 파이프라인이 안정적이다.
-3. **few-shot은 edge case 위주로 넣는다**
-   쉬운 예시보다 헷갈리는 예시가 더 중요하다.
-4. **negative example도 넣는다**
-   "이건 models가 아니라 benchmark다" 같은 반례가 필요하다.
-5. **문서 종류별 prompt를 분리한다**
-   paper, news, forum post, release note는 분리하는 것이 좋다.
-
-### 6-2. 추천 prompt pack
-
-| prompt pack | 목적 | 주로 쓰는 입력 |
-|-------------|------|----------------|
-| `company_filter_v1` | company panel keep/drop 판정 | title, source, tags, body excerpt, published_at |
-| `doc_classify_v1` | domain/subdomain/content_type 분류 | title, source, body excerpt |
-| `doc_summary_v1` | 문서 요약 | title, body chunks, metadata |
-| `cluster_summary_v1` | event 묶음 요약 | 대표 문서 요약 + 핵심 chunk |
-| `domain_digest_v1` | 홈 화면용 domain digest | top cluster summaries |
-| `ask_domain_v1` | 질의응답 | domain digest + cluster summaries + evidence |
-
-### 6-3. few-shot으로 잘 먹는 작업
-
-| 작업 | few-shot 효과 |
-|------|---------------|
-| **domain 분류** | 매우 큼 |
-| **content type 분류** | 매우 큼 |
-| **JSON 구조화 출력** | 매우 큼 |
-| **문서 1줄 요약** | 큼 |
-| **cluster 대표 제목 생성** | 큼 |
-| **긴 종합 분석** | 중간 |
-
-즉, 지금 프로젝트에선 few-shot이 특히 잘 맞는다. 분류와 구조화, 짧은 요약은 소형 모델도 꽤 안정적으로 수행한다.
-
-### 6-4. 추천 출력 스키마 예시
-
-#### 분류
-
-```json
-{
-  "primary_domain": "models",
-  "secondary_domains": ["benchmark"],
-  "content_type": "release_note",
-  "subdomains": ["reasoning", "agents"],
-  "entities": ["OpenAI", "o3-mini"],
-  "importance_score": 91,
-  "importance_reason": "배포 범위가 넓고 여러 후속 기사에 인용될 가능성이 높다.",
-  "needs_human_review": false
-}
-```
-
-#### grounded summary
-
-```json
-{
-  "summary_1l": "핵심만 1문장",
-  "summary_short": "3문장 이하 짧은 요약",
-  "key_points": ["핵심 1", "핵심 2", "핵심 3"],
-  "watchouts": ["과장되기 쉬운 부분", "비교시 주의점"],
-  "evidence_chunk_ids": ["chunk_10", "chunk_14"]
-}
-```
-
----
-
-## 7. 추천 모델 운용 방식
-
-훈련 없이 쓸 것이고, 팀원마다 `24GB`급 GPU가 있다고 가정하면 아래처럼 역할을 나누는 것이 좋다.
-
-### 기본 선택
-
-| 모델 | 추천 용도 | 메모 |
-|------|-----------|------|
-| **Qwen/Qwen3.5-8B** | 섹션별 배치 요약, company filter, JSON 출력 | 기본 운영 모델, 빠름 |
-| **Qwen/Qwen3.5-14B** | Level 1 홈 화면 요약, 고품질 배치 | 품질 우선 |
-| **google/gemma-3-12b-it** | 이미지 포함 포스트, 멀티모달 확장 | 라이선스 동의 필요 |
-
-### 현재 프로젝트에 가장 잘 맞는 추천
-
-1. **기본 운영 모델**: `Qwen/Qwen3.5-8B` — 섹션별 배치 요약, company filter
-2. **홈 화면 digest**: `Qwen/Qwen3.5-14B` — Level 1 한 줄 요약 품질이 중요하므로
-3. **이미지/스크린샷까지 볼 때만 추가**: `google/gemma-3-12b-it`
-
-### 왜 이런 배치가 좋은가
-
-1. 섹션별 배치 호출(~7회)이므로 모델 크기를 올려도 총 처리 시간 부담이 적다
-2. 홈 화면 한 줄 요약은 사용자가 가장 먼저 보는 텍스트이므로 14B급 품질이 가치 있다
-3. 로컬 GPU 구동이므로 모델 교체 비용이 0이다 — 실험 후 더 나은 모델로 교체 가능
-4. 훈련 대신 prompt pack + few-shot으로 품질을 관리한다
-
----
-
-## 8. 추천 운용 규칙
-
-### 8-1. 캐싱
-
-| 규칙 | 이유 |
+| 조건 | 내용 |
 |------|------|
-| document summary는 문서 변경 시에만 재생성 | 비용 절감 |
-| cluster summary는 cluster 멤버가 바뀔 때만 재생성 | 불필요한 재요약 방지 |
-| domain digest는 `15~60분` 단위 재생성 | 홈 화면 freshness 유지 |
+| 포함 source | `arxiv_rss_cs_ai`, `cs_lg`, `cs_cl`, `cs_cv`, `cs_ro`, `cs_ir`, `cs_cr`, `stat_ml`, `hf_daily_papers` |
+| 정렬 | sort_at DESC |
+| recency 필터 | 없음 (RSS 피드 자체가 최신) |
 
-### 8-2. grounding
+**Step 2 — LLM에 넘기는 필드** (title만 — 매우 경량)
 
-1. summary에는 항상 `evidence_chunk_ids`를 저장한다
-2. summary만 저장하지 말고 representative document도 같이 저장한다
-3. UI에서 원문 링크를 항상 보여준다
-4. 근거 chunk를 숨기지 말고 클릭 가능하게 둔다
+```json
+{
+  "id":    "arxiv_rss_cs_ai:2603.19429",
+  "title": "AgentSwarm: Cooperative Multi-Agent Planning with Tool Use"
+}
+```
 
-### 8-3. versioning
+> abstract(description)는 넘기지 않는다. title만으로 분류하므로 chunk 크기를 크게 잡을 수 있다 (default chunk_size: 100).
 
-반드시 저장해야 하는 필드:
+**Step 3 — LLM 출력** (각 논문마다 정확히 하나)
 
-| 필드 | 이유 |
-|------|------|
-| `model_name` | 모델 교체 시 품질 비교 |
-| `prompt_version` | 프롬프트 변경 추적 |
-| `fewshot_pack_version` | example pack 변경 추적 |
-| `generated_at` | 재생성 시점 추적 |
+```json
+{
+  "document_id": "arxiv_rss_cs_ai:2603.19429",
+  "paper_domain": "agents"
+}
+```
+
+> pipeline이 자동으로 `filter_scope("paper_panel")`, `model_name`, `runtime`, `prompt_version`, `schema_version`, `generated_at`을 추가한다.
+
+### 4-3. Paper Domain Enum (22개)
+
+<!-- ────────────────────────────────────────────
+     arXiv 카테고리보다 세밀한 연구 분야 분류.
+     사용자가 "LLM 관련 논문만", "agent 관련만"
+     처럼 필터하기 위한 것.
+     ──────────────────────────────────────────── -->
+
+| domain | 의미 | 키워드 예시 |
+|--------|------|------------|
+| `llm` | 대규모 언어 모델 아키텍처, 사전학습, 스케일링 | GPT, LLaMA, pretraining |
+| `vlm` | 비전-언어 모델, 멀티모달 이해 | CLIP, LLaVA, image-text |
+| `diffusion` | 확산 모델, 이미지/비디오 생성 | Stable Diffusion, text-to-image |
+| `agents` | AI 에이전트, 도구 사용, 계획 | tool use, web agent, planning |
+| `reasoning` | 추론, 수학, 코드 생성, chain-of-thought | CoT, math reasoning |
+| `rlhf_alignment` | RLHF, DPO, 정렬, 선호 학습 | preference, alignment |
+| `safety` | AI 안전, 탈옥, 독성, guardrail | jailbreak, red-teaming |
+| `rag_retrieval` | 검색증강생성, 임베딩, 리랭킹 | RAG, dense retrieval |
+| `efficient_inference` | 양자화, 증류, 프루닝, 서빙 최적화 | quantization, KV cache |
+| `finetuning` | LoRA, 어댑터, PEFT, instruction tuning | adapter, PEFT |
+| `evaluation` | 벤치마크, 평가 방법론 | benchmark, leaderboard |
+| `nlp` | 전통 NLP, 번역, 요약, NER | summarization, NER |
+| `speech_audio` | 음성, 오디오, TTS, ASR | TTS, voice, ASR |
+| `robotics_embodied` | 로봇, embodied AI | manipulation, navigation |
+| `video` | 비디오 이해/생성, temporal modeling | video generation |
+| `3d_spatial` | 3D 비전, NeRF, gaussian splatting | point cloud, NeRF |
+| `graph_structured` | 그래프 신경망, knowledge graph | GNN, molecular |
+| `continual_learning` | 지속 학습, catastrophic forgetting | incremental learning |
+| `federated_privacy` | 연합학습, 차등 프라이버시 | federated, DP |
+| `medical_bio` | 의료 AI, 바이오, 단백질 | drug discovery, biomedical |
+| `science` | 과학 AI, 기후, 물리, 수학, 재료 | climate, physics |
+| `others` | 위에 해당 없음 | — |
+
+**domain 우선순위 규칙:**
+- `LLM + agent` → `agents` (응용이 우선)
+- `LLM + reasoning` → `reasoning` (능력이 우선)
+- `VLM + video` → `video` (modality가 우선)
+- `diffusion + 3D` → `3d_spatial` (출력 modality가 우선)
+
+### 4-4. 이 enrichment 후 활용 가능한 것
+
+Paper domain 분류가 완료되면 아래가 가능해진다:
+
+1. **연구 분야별 필터** — "agent 논문만 보기", "safety 논문만 보기" 가능
+2. **분야별 트렌드** — 오늘 어떤 분야의 논문이 많이 올라왔는지 분포 확인
+3. **arXiv 카테고리 보완** — cs.AI에 섞여 있던 agent/safety/eval 논문을 분리
+4. **관심 분야 알림** — 사용자가 관심 domain을 설정하면 해당 논문만 하이라이트
 
 ---
 
-## 9. 추천하지 않는 방식
+## 5. 모델 & 런타임
 
-1. 원문 수백 개를 한 프롬프트에 넣고 한 번에 홈 요약을 만들기
-2. summary만 저장하고 어떤 문서에서 나온 말인지 저장하지 않기
-3. domain 분류를 entirely free-form text로 두기
-4. cluster 생성까지 전부 LLM 한 번에 맡기기
-5. 홈 화면이 raw document query에 직접 의존하도록 만들기
+<!-- ────────────────────────────────────────────
+     현재 쓰고 있는 모델과 서빙 설정.
+     ──────────────────────────────────────────── -->
 
-특히 1번과 2번은 나중에 디버깅이 거의 불가능해진다.
+### 5-1. 4B-first 전략
+
+현재는 `Qwen/Qwen3.5-4B`를 **경량/실험용 기본 모델**로 쓴다.
+
+목적:
+1. 가장 좁고 구조화된 enrichment가 4B에서 안정적으로 돌아가는지 본다
+2. prompt, schema, retry 전략을 먼저 고정한다
+3. 품질이 부족한 단계만 나중에 9B 이상으로 올린다
+
+### 5-2. 런타임 설정
+
+| 항목 | 값 | 비고 |
+|------|-----|------|
+| runtime | Ollama | Docker 기반, 로컬 GPU |
+| model | `qwen3.5:4b` | Ollama tag 기준 |
+| mode | text-only | vision encoder 제외 |
+| thinking | off | `think: false` |
+| API | `http://localhost:11434/api/chat` | — |
+
+### 5-3. 샘플링 파라미터
+
+HF 공식 non-thinking 일반 작업 권장값을 초기값으로 쓴다.
+
+| 파라미터 | 값 | 출처 |
+|----------|-----|------|
+| `temperature` | `0.7` | HF model card |
+| `top_p` | `0.8` | HF model card |
+| `top_k` | `20` | HF model card |
+| `min_p` | `0.0` | HF model card |
+| `repeat_penalty` | `1.0` | HF의 `repetition_penalty` 대응 |
+| `num_ctx` | `8192` | Ollama default |
+
+> `presence_penalty=1.5` (HF 권장)는 Ollama native chat options에 1:1 대응이 없어 reference로만 남긴다.
+
+### 5-4. Token budget 측정값 (Company filter 기준)
+
+`company_filter_v2` prompt pack과 실제 company candidate 문서로 측정한 입력 토큰:
+
+| docs 수 | prompt_eval_count |
+|---------|-------------------|
+| 1 | 585 |
+| 2 | 886 |
+| 4 | 1,466 |
+| 8 | 2,624 |
+| 12 | 3,695 |
+
+근사식: **`input_tokens ≈ 321 + 283 × doc_count`**
+
+`num_ctx=8192`에서 output reserve 1,200~2,000을 남기면 이론상 20~23 docs까지 가능하지만, `reason` 자유 문자열 때문에 output이 예상보다 커질 수 있다.
+
+| 설정 | doc 수 | 상태 |
+|------|--------|------|
+| 기본 batch | 8~12 | 안전 |
+| 품질 검증 후 확장 | 16 | 후보 |
+| 비권장 | 20+ | output 초과 위험 |
+
+> Paper domain 분류는 title만 넘기므로 item당 토큰이 훨씬 적다.
+> 현재 default chunk_size는 `100`으로, 대부분의 run에서 한 번에 처리 가능하다.
 
 ---
 
-## 10. 구현 순서 제안
+## 6. 공통 기술 설계
 
-| 단계 | 할 일 |
-|------|-------|
-| **Step 1** | `document_summaries`와 `llm_runs`부터 만든다 |
-| **Step 2** | domain/content_type 분류를 JSON schema로 고정한다 |
-| **Step 3** | 간단한 cluster 생성 로직을 붙인다 |
-| **Step 4** | `cluster_summaries`를 만든다 |
-| **Step 5** | `domain_digests`를 만들어 홈 화면과 연결한다 |
-| **Step 6** | domain 클릭 -> event 클릭 -> document/evidence drill-down UI를 붙인다 |
-| **Step 7** | 마지막에만 Ask Panel 같은 query-time QA를 붙인다 |
+<!-- ────────────────────────────────────────────
+     Company filter와 Paper domain 모두에 공통으로 적용되는 설계 원칙.
+     ──────────────────────────────────────────── -->
 
-해커톤에서는 `Step 1 ~ Step 5`까지만 돼도 world monitor의 핵심 경험은 충분히 나온다.
+### 6-1. 강한 JSON schema (guided_json)
+
+`4B`는 자유 서술보다 **고정된 구조 출력**에서 더 안정적이다.
+
+- Ollama의 `format` 파라미터에 JSON schema를 직접 전달한다
+- enum 값은 코드에 상수로 고정하고, schema에서 강제한다
+- 출력은 JSON array만 허용, 설명 문장이나 markdown은 금지
+
+### 6-2. instruction-first, few-shot-later
+
+현재 모든 pack은 `instruction-first`로 간다.
+
+- 강한 instruction과 좁은 schema를 먼저 고정한다
+- few-shot 예시는 prompt pack 문서에 남기되 runtime 기본값으로는 넣지 않는다
+- domain confusion이 반복될 때만 few-shot을 추가한다
+
+### 6-3. chunked batch
+
+긴 prompt 하나보다 작은 chunk 여러 개가 더 안전하다.
+
+- Company filter: default chunk_size `30`
+- Paper domain: default chunk_size `100` (title-only라 작음)
+- 초기 실험에서는 보수적으로 시작
+
+### 6-4. validate → retry → bisect
+
+작은 모델일수록 schema 이탈이 더 쉽게 난다. 실패 처리가 설계에 포함되어 있다.
+
+1. **schema validate** — JSON 파싱 + enum 값 + document_id 검증
+2. **bisect retry** — 실패 시 chunk를 반으로 나눠 재시도 (recursive)
+3. **단일 item fallback** — 1개까지 내려가도 실패하면:
+   - Company → `decision=needs_review`, `reason_code=runtime_fallback`
+   - Paper → `paper_domain=others`, `failure_reason=fallback`
+
+### 6-5. Prompt pack → 코드 연결
+
+runtime script는 prompt를 코드 상수로 두지 않고, Markdown prompt pack 파일에서 직접 읽는다.
+
+| prompt pack 파일 내 블록 | 용도 |
+|------------------------|------|
+| `` ```prompt-system``` `` | system message로 사용 |
+| `` ```prompt-user-template``` `` | user message 템플릿으로 사용 (`{documents_json}` 자리에 실제 데이터 삽입) |
+
+prompt 변경 = Markdown 파일 수정만으로 반영.
+
+### 6-6. prefix caching
+
+같은 system prompt, 같은 schema, 같은 few-shot 예시를 반복해서 쓰므로 prefix caching 이득이 크다.
+반복 batch 작업에서는 켜는 편이 맞다.
 
 ---
 
-## 11. 바로 써먹을 수 있는 결론
+## 7. 검증 기준
 
-1. 지금 구상한 "domain 요약을 누르면 관련 DB가 펼쳐지는 world monitor"는 충분히 가능하다
-2. 구현 포인트는 **요약 레이어와 근거 레이어를 분리하되 연결시키는 것**이다
-3. 훈련 없이도 `Qwen3-8B + few-shot + JSON schema`만으로 document 분류와 요약은 충분히 시작할 수 있다
-4. 홈 화면 품질은 `cluster summary`와 `domain digest` 품질에 달려 있다
-5. 먼저 문서 요약과 cluster 연결부터 만들고, 마지막에 대화형 QA를 얹는 순서가 가장 안전하다
+<!-- ────────────────────────────────────────────
+     "잘 되고 있는가"를 어떻게 판단하는가.
+     ──────────────────────────────────────────── -->
+
+### Company filter
+
+| 지표 | 무엇을 보나 |
+|------|------------|
+| JSON schema 준수율 | `runtime_fallback` 비율이 낮아야 함 |
+| keep/drop precision | 사람이 보기에 맞는 판정인가 |
+| company_domain 일관성 | 같은 유형의 글에 같은 domain을 붙이는가 |
+
+### Paper domain
+
+| 지표 | 무엇을 보나 |
+|------|------------|
+| JSON schema 준수율 | `fallback_items` 비율이 낮아야 함 |
+| domain 분포 | `others`에 몰리지 않고 적절히 분산되는가 |
+| domain 정확도 | title 기준으로 사람이 보기에 맞는 분류인가 |
+
+지금은 "얼마나 똑똑한 요약을 하느냐"보다, **안정적으로 저장 가능한 구조 결과를 만들 수 있느냐**가 더 중요하다.
 
 ---
 
-## 12. 참고 모델 카드
+## 8. Enrichment 전후 비교 — 무엇이 달라지는가
 
-- [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B)
-- [Qwen/Qwen3-14B](https://huggingface.co/Qwen/Qwen3-14B)
-- [google/gemma-3-12b-it](https://huggingface.co/google/gemma-3-12b-it)
-- [meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)
-- [mistralai/Mistral-Nemo-Instruct-2407](https://huggingface.co/mistralai/Mistral-Nemo-Instruct-2407)
+<!-- ────────────────────────────────────────────
+     enrichment를 거치면 데이터에 어떤 개념이 추가되는지.
+     프론트엔드나 다음 파이프라인 단계에서
+     무엇을 새로 할 수 있게 되는지.
+     ──────────────────────────────────────────── -->
+
+### Before (수집만 완료)
+
+`documents.ndjson`의 각 문서가 이미 갖고 있는 것:
+
+| 있는 것 | 필드 | 용도 |
+|---------|------|------|
+| 원문 텍스트 | `title`, `description`, `body_text` | 카드 표시, 검색 |
+| 출처 분류 | `source`, `source_category`, `doc_type` | 패널 배치 |
+| 인기도 수치 | `engagement`, `engagement_primary` | 정렬, 핫한 정도 |
+| 새로움/트렌딩 | `discovery` (spark_score 등) | 신규 아이템 하이라이트 |
+| 화면 정렬 점수 | `ranking` (feed_score 등) | 상단/하단 배치 |
+| 키워드 | `tags` | 필터, 클러스터링 |
+| 원문 링크 | `reference_url` | 드릴다운 |
+
+이 시점에서 **할 수 없는 것:**
+- "이 company 글이 panel에 올릴 가치가 있는가?" → 판단 불가
+- "이 논문이 어떤 연구 분야인가?" → arXiv 카테고리만 (너무 넓음)
+- "채용 글과 기술 블로그를 어떻게 구분하나?" → 규칙으로 불가능
+
+### After (enrichment 완료)
+
+| 추가된 것 | 파일 | 필드 | 용도 |
+|-----------|------|------|------|
+| panel 노출 여부 | `document_filters.ndjson` | `decision` | keep/drop/needs_review |
+| 발표 유형 | `document_filters.ndjson` | `company_domain` | model_release, product_update 등 |
+| 판단 근거 | `document_filters.ndjson` | `reason_code` | model_signal, recruiting_or_pr 등 |
+| 연구 분야 | `paper_domains.ndjson` | `paper_domain` | agents, llm, safety 등 |
+
+**프론트엔드가 활용 가능한 새로운 축:**
+
+1. Company panel 필터링 — `drop` 제거로 노이즈 없는 피드
+2. Company domain별 탭/그룹 — "모델 발표"만, "연구"만 보기
+3. Paper domain별 탭/그룹 — "agent 논문만", "safety만" 보기
+4. 분야별 논문 수 분포 차트
+5. needs_review 큐 — 수동 검토 대상 관리
+
+---
+
+## 9. 다음 단계
+
+<!-- ────────────────────────────────────────────
+     현재 구현된 두 단계 이후의 확장 방향.
+     아직 구현되지 않았으므로 간략하게만 남긴다.
+     ──────────────────────────────────────────── -->
+
+현재 두 단계(Company filter, Paper domain)가 안정적으로 통과하면 다음으로 넓힌다.
+
+1. 품질이 부족한 단계만 `Qwen3.5-9B`로 승격
+2. Summary digest 소규모 시험
+3. Community panel enrichment 검토
+
+확장 순서는 `all-in`이 아니라 **단계별 승격**이다.
+
+---
+
+## 10. 참고 링크
+
+- [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B)
+- [Ollama Structured Outputs](https://docs.ollama.com/capabilities/structured-outputs)

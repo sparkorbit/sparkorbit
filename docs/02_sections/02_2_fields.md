@@ -1,4 +1,4 @@
-[Index](../README.md) · [01. Overall Flow](../01_overall_flow.md) · [02. Sections](./README.md) · [02.1 Sources](./02_1_sources.md) · **02.2 Fields** · [03. Runtime Flow](../03_runtime_flow_draft.md) · [04. LLM Usage](../04_llm_usage.md) · [05. Data Collection Pipeline](../05_data_collection_pipeline.md)
+[Index](../README.md) · [01. Overall Flow](../01_overall_flow.md) · [02. Sections](./README.md) · [02.1 Sources](./02_1_sources.md) · **02.2 Fields** · [03. Runtime Flow Draft](../03_runtime_flow_draft.md) · [04. LLM Usage](../04_llm_usage.md) · [05. Data Collection Pipeline](../05_data_collection_pipeline.md)
 
 ---
 
@@ -10,6 +10,19 @@
 ## Purpose
 
 이 문서는 수집 → 정규화를 거친 문서가 **어떤 필드를 갖고, 각 필드에 어떤 값이 들어가는지**를 정리한다. Enrichment, LLM 파이프라인, 프론트엔드 서빙에서 "이 필드에 뭐가 들어있지?"를 확인할 때 쓴다.
+
+<!-- ────────────────────────────────────────────
+     이 문서의 읽는 순서 가이드:
+     1~1.4  필드 정의 (필수/보조/내부)
+     2      enum 값 정의 (source_category, doc_type 등)
+     3      engagement 상세 (소스별 지표, 스케일, discovery, ranking)
+     4      external IDs
+     5      URL 패턴 (소스별 원본 링크)
+     6      reference 블록
+     7      tags 체계
+     8      LLM enrichment 결과 (company filter, paper domain)
+     9      소스별 필드 커버리지 매트릭스
+     ──────────────────────────────────────────── -->
 
 ---
 
@@ -112,10 +125,11 @@ body_text:   "Qwen3Guard is designed to... (full article)"
 
 | 값 | 의미 | 해당 소스 |
 |----|------|-----------|
-| `papers` | 논문/모델 | arxiv_rss_cs_ai, arxiv_rss_cs_lg, hf_daily_papers, hf_models_likes, hf_models_new, hf_trending_models |
+| `papers` | 논문 | arxiv_rss_cs_ai, arxiv_rss_cs_lg, arxiv_rss_cs_cl, arxiv_rss_cs_cv, arxiv_rss_cs_ro, arxiv_rss_cs_ir, arxiv_rss_cs_cr, arxiv_rss_stat_ml, hf_daily_papers |
+| `models` | HF 모델 카드 | hf_models_likes, hf_models_new, hf_trending_models |
 | `community` | 커뮤니티/개발자 | hn_topstories, reddit_localllama, reddit_machinelearning, github_curated_repos |
 | `company` | 글로벌 기업 | openai_news_rss, google_ai_blog, microsoft_research, nvidia_deep_learning, apple_ml, amazon_science, hf_blog, anthropic_news, deepmind_blog, groq_newsroom, mistral_news, stability_news, salesforce_ai_research_rss |
-| `company_kr` | 한국 기업 | samsung_research_posts, kakao_tech_rss, lg_ai_research_blog, lg_ai_research_news, naver_cloud_blog_rss, upstage_blog |
+| `company_kr` | 한국 기업 | samsung_research_posts, kakao_tech_rss, lg_ai_research_blog, naver_cloud_blog_rss, upstage_blog |
 | `company_cn` | 중국 기업 | qwen_blog_rss, deepseek_updates, github_tencent_hunyuan_repos, github_paddlepaddle_repos, github_bytedance_repos, github_mindspore_repos |
 | `benchmark` | 벤치마크 | lmarena_overview, open_llm_leaderboard |
 
@@ -127,7 +141,7 @@ body_text:   "Qwen3Guard is designed to... (full article)"
 |----|------|-----------|
 | `paper` | 학술 논문/프리프린트 | arxiv_rss_cs_ai, arxiv_rss_cs_lg, hf_daily_papers |
 | `blog` | 블로그/기술 포스트 | openai_news_rss, google_ai_blog, microsoft_research, nvidia_deep_learning, apple_ml, amazon_science, hf_blog, qwen_blog_rss, salesforce_ai_research_rss, kakao_tech_rss, naver_cloud_blog_rss, samsung_research_posts, lg_ai_research_blog, upstage_blog |
-| `news` | 뉴스/발표 | anthropic_news, mistral_news, stability_news, groq_newsroom, lg_ai_research_news |
+| `news` | 뉴스/발표 | anthropic_news, mistral_news, stability_news, groq_newsroom |
 | `post` | 커뮤니티 게시글 | reddit_localllama, reddit_machinelearning |
 | `story` | HN 링크 포스트 | hn_topstories |
 | `model` | HF 모델 카드 | hf_models_likes, hf_models_new |
@@ -191,7 +205,6 @@ body_text:   "Qwen3Guard is designed to... (full article)"
 | **github_*_repos** | `stars`, `forks`, `watchers`, `open_issues` | 위와 동일 (org별 repos) |
 | **github_curated_repos** (release) | `assets` | 릴리즈 첨부 파일 수 |
 | **lg_ai_research_blog** | `read_count` | 블로그 조회수 (내부 집계) |
-| **lg_ai_research_news** | `read_count` | 뉴스 조회수 (내부 집계) |
 | **lmarena_overview** | `votes`, `rating`, `rank` | votes = 사용자 투표 수, rating = Elo 유사 점수, rank = 순위 |
 
 engagement가 **없는** 소스 (빈 `{}` 반환):
@@ -403,8 +416,7 @@ score > upvotes > likes > stars > votes > downloads > comments > read_count
 |------|--------------|-------------------|
 | `samsung_research_posts` | `https://research.samsung.com/blogMain/list.json` | `https://research.samsung.com/blog/{slug}` |
 | `kakao_tech_rss` | `https://tech.kakao.com/feed/` | `https://tech.kakao.com/posts/{id}` |
-| `lg_ai_research_blog` | `https://www.lgresearch.ai/api/board/blog/list` | ⚠️ **URL 없음** (API가 페이지 URL을 제공하지 않음) |
-| `lg_ai_research_news` | `https://www.lgresearch.ai/api/board/news/list` | ⚠️ **URL 없음** (위와 동일) |
+| `lg_ai_research_blog` | `https://www.lgresearch.ai/api/board/blog/list` | `https://www.lgresearch.ai/blog/view?seq={seq}` |
 | `naver_cloud_blog_rss` | `https://rss.blog.naver.com/n_cloudplatform.xml` | `https://blog.naver.com/n_cloudplatform/{id}` |
 | `upstage_blog` | `https://www.upstage.ai/blog` | `https://www.upstage.ai/blog/en/{slug}` |
 
@@ -445,6 +457,7 @@ score > upvotes > likes > stars > votes > downloads > comments > read_count
 | **deepmind_blog** | 원본 URL, 대표 이미지 |
 | **google_ai_blog** | 블로그 이미지들 |
 | **github_*_repos** | 프로젝트 홈페이지 (있을 때) |
+| **lg_ai_research_blog** | 썸네일 이미지, 본문 이미지, VOD URL |
 | **nvidia_deep_learning** | 대표 이미지 |
 | **samsung_research_posts** | 썸네일 이미지 |
 | **lmarena_overview** | 1위 모델 관련 뉴스 링크 |
@@ -453,8 +466,7 @@ score > upvotes > likes > stars > votes > downloads > comments > read_count
 
 | 소스 | 상태 | 대응 |
 |------|------|------|
-| `lg_ai_research_blog` | API가 페이지 URL을 제공하지 않음 | Hard Exclusion 규칙에 따라 기본 feed에서 제외 대상 |
-| `lg_ai_research_news` | 위와 동일 | 동일 |
+| `lg_ai_research_news` | stable public detail URL이 없고 공개 `news/view` route도 불안정 | crawl list/watchlist에서 제외 |
 | `hn_topstories` | `body_text` 없음 (외부 링크만) | `text_scope: empty`, 제목 + 원문 링크 + engagement로 활용 |
 
 ---
@@ -480,7 +492,7 @@ UI에서 문서를 표시할 때 바로 쓸 수 있는 pre-formatted 블록.
 
 | 레이어 | 예시 | 부여 기준 |
 |--------|------|-----------|
-| 소스 카테고리 | `community`, `company`, `benchmark`, `paper` | `source_category`에서 파생 |
+| 소스 카테고리 | `community`, `company`, `benchmark`, `papers`, `models` | `source_category`에서 파생 |
 | 지역 | `kr`, `cn` | 한국/중국 소스일 때 |
 | 소스 이름 | `reddit`, `hn`, `arxiv`, `openai`, `nvidia` | 소스 어댑터에서 고정 |
 | 서브 소스 | `localllama`, `machinelearning`, `huggingface` | 세부 채널 구분 |
@@ -526,7 +538,15 @@ cs.AI, cs.LG, cs.LO, cs.SC
 
 ---
 
-## 8. LLM Placeholder
+## 8. LLM Enrichment 결과
+
+<!-- ────────────────────────────────────────────
+     documents.ndjson 자체에는 llm placeholder만 있다.
+     실제 enrichment 결과는 별도 NDJSON 파일에 저장된다.
+     document_id로 join해서 사용한다.
+     ──────────────────────────────────────────── -->
+
+### 8.1 documents.ndjson 내 `llm` 블록
 
 모든 문서에 `llm` 블록이 포함되며, Enrichment 전에는 아래 상태로 초기화된다.
 
@@ -539,24 +559,44 @@ cs.AI, cs.LG, cs.LO, cs.SC
 }
 ```
 
-Enrichment 후 예상 구조:
+### 8.2 현재 구현된 Enrichment 출력 (별도 파일)
+
+Enrichment 결과는 `documents.ndjson`을 수정하지 않고, `enriched/` 디렉토리에 별도 NDJSON로 저장된다.
+프론트엔드는 `document_id`를 키로 join해서 사용한다.
+
+**Company filter** → `enriched/document_filters.ndjson`
 
 ```json
 {
-  "llm": {
-    "status": "completed",
-    "run_meta": {
-      "model_name": "Qwen/Qwen3.5-8B",
-      "prompt_version": "doc_summary_v1",
-      "generated_at": "2026-03-23T12:00:00Z"
-    },
-    "summary_1l": "...",
-    "key_points": ["...", "..."],
-    "primary_domain": "models",
-    "importance_score": 85
-  }
+  "document_id": "openai_news_rss:gpt5-turbo",
+  "filter_scope": "company_panel",
+  "decision": "keep",
+  "company_domain": "model_release",
+  "reason_code": "model_signal",
+  "model_name": "qwen3.5:4b",
+  "runtime": "ollama",
+  "prompt_version": "company_filter_v2",
+  "schema_version": "document_filter_v2",
+  "generated_at": "2026-03-24T12:00:00Z"
 }
 ```
+
+**Paper domain** → `enriched/paper_domains.ndjson`
+
+```json
+{
+  "document_id": "arxiv_rss_cs_ai:2603.19429",
+  "filter_scope": "paper_panel",
+  "paper_domain": "agents",
+  "model_name": "qwen3.5:4b",
+  "runtime": "ollama",
+  "prompt_version": "paper_domain_v1",
+  "schema_version": "paper_domain_v1",
+  "generated_at": "2026-03-24T12:00:00Z"
+}
+```
+
+상세 enum 정의와 활용 방법은 [04. LLM Usage](../04_llm_usage.md) 를 참조한다.
 
 ---
 
@@ -578,6 +618,6 @@ Enrichment 후 예상 구조:
 | OpenAI/Google/MS/NVIDIA 등 (RSS) | ✓ | full_text | ✗ | feed_entry_id | ✗ |
 | Anthropic/DeepMind 등 (Scrape) | ✓ | full_text/excerpt | ✗ | ✗ | hero_image 등 |
 | Samsung Research | ✓ | excerpt | ✗ | ✗ | thumbnail |
-| LG AI Research | ✓ | full_text | read_count | ✗ | ✗ |
+| LG AI Research Blog | ✓ | full_text | read_count | ✗ | image/VOD |
 | LMArena | ✗ | generated_panel | votes, rating, rank | ✗ | ✗ |
 | Open LLM Leaderboard | ✗ | metric_summary | ✗ | ✗ | ✗ |

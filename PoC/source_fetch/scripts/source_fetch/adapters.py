@@ -4,8 +4,9 @@ import html as html_lib
 import hashlib
 import json
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from time import perf_counter
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -25,7 +26,7 @@ DEFAULT_HEADERS = {
 
 
 def now_utc_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def make_client(timeout: float = DEFAULT_TIMEOUT) -> httpx.Client:
@@ -34,6 +35,52 @@ def make_client(timeout: float = DEFAULT_TIMEOUT) -> httpx.Client:
         follow_redirects=True,
         headers=DEFAULT_HEADERS,
     )
+
+
+def timed_request(
+    result: FetchResult,
+    client: httpx.Client,
+    method: str,
+    url: str,
+    *,
+    request_name: str,
+    **kwargs: Any,
+) -> httpx.Response:
+    started_at = perf_counter()
+    try:
+        response = client.request(method, url, **kwargs)
+    except Exception as exc:
+        duration_ms = int((perf_counter() - started_at) * 1000)
+        result.request_traces.append(
+            {
+                "request_name": request_name,
+                "method": method.upper(),
+                "url": url,
+                "status_code": None,
+                "duration_ms": duration_ms,
+                "content_bytes": None,
+                "ok": False,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            }
+        )
+        raise
+
+    duration_ms = int((perf_counter() - started_at) * 1000)
+    result.request_traces.append(
+        {
+            "request_name": request_name,
+            "method": method.upper(),
+            "url": str(response.request.url),
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+            "content_bytes": len(response.content),
+            "ok": response.is_success,
+            "error_type": None,
+            "error_message": None,
+        }
+    )
+    return response
 
 
 def to_jsonable(value: Any) -> Any:
@@ -69,11 +116,20 @@ def normalize_text_value(value: str | None) -> str:
     return normalize_space(text)
 
 
+def resolve_absolute_url(base_url: str, value: str | None) -> str | None:
+    candidate = normalize_space(value)
+    if not candidate:
+        return None
+    if candidate.startswith(("http://", "https://")):
+        return candidate
+    return urljoin(base_url, candidate)
+
+
 def parse_date(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     if isinstance(value, str):
         stripped = value.strip()
         if stripped.lower().startswith("on "):
@@ -82,19 +138,19 @@ def parse_date(value: Any) -> str | None:
             return None
         for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y.%m.%d", "%Y-%m-%d", "%Y/%m/%d", "%m/%d/%y", "%m/%d/%Y"):
             try:
-                return datetime.strptime(stripped, fmt).replace(tzinfo=UTC).isoformat().replace("+00:00", "Z")
+                return datetime.strptime(stripped, fmt).replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
             except ValueError:
                 pass
         try:
-            return datetime.fromisoformat(stripped.replace("Z", "+00:00")).astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            return datetime.fromisoformat(stripped.replace("Z", "+00:00")).astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         except ValueError:
             pass
         try:
-            return parsedate_to_datetime(stripped).astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            return parsedate_to_datetime(stripped).astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         except (TypeError, ValueError):
             return None
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        return datetime.fromtimestamp(value, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     if hasattr(value, "tm_year"):
         try:
             dt = datetime(
@@ -104,7 +160,7 @@ def parse_date(value: Any) -> str | None:
                 value.tm_hour,
                 value.tm_min,
                 value.tm_sec,
-                tzinfo=UTC,
+                tzinfo=timezone.utc,
             )
             return dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
         except Exception:
@@ -674,8 +730,14 @@ def wrap_raw_item(
 RSS_SOURCES: list[SourceConfig] = [
     SourceConfig("arxiv_rss_cs_ai", "papers", "rss", "https://rss.arxiv.org/rss/cs.AI", "paper", "rss", ("paper", "arxiv", "cs.AI")),
     SourceConfig("arxiv_rss_cs_lg", "papers", "rss", "https://rss.arxiv.org/rss/cs.LG", "paper", "rss", ("paper", "arxiv", "cs.LG")),
+    SourceConfig("arxiv_rss_cs_cl", "papers", "rss", "https://rss.arxiv.org/rss/cs.CL", "paper", "rss", ("paper", "arxiv", "cs.CL")),
+    SourceConfig("arxiv_rss_cs_cv", "papers", "rss", "https://rss.arxiv.org/rss/cs.CV", "paper", "rss", ("paper", "arxiv", "cs.CV")),
+    SourceConfig("arxiv_rss_cs_ro", "papers", "rss", "https://rss.arxiv.org/rss/cs.RO", "paper", "rss", ("paper", "arxiv", "cs.RO")),
+    SourceConfig("arxiv_rss_cs_ir", "papers", "rss", "https://rss.arxiv.org/rss/cs.IR", "paper", "rss", ("paper", "arxiv", "cs.IR")),
+    SourceConfig("arxiv_rss_cs_cr", "papers", "rss", "https://rss.arxiv.org/rss/cs.CR", "paper", "rss", ("paper", "arxiv", "cs.CR")),
+    SourceConfig("arxiv_rss_stat_ml", "papers", "rss", "https://rss.arxiv.org/rss/stat.ML", "paper", "rss", ("paper", "arxiv", "stat.ML")),
     SourceConfig("openai_news_rss", "company", "rss", "https://openai.com/news/rss.xml", "blog", "rss", ("company", "openai")),
-    SourceConfig("google_ai_blog", "company", "rss", "https://blog.research.google/feeds/posts/default", "blog", "rss", ("company", "google")),
+    SourceConfig("google_ai_blog", "company", "rss", "https://blog.google/technology/ai/rss/", "blog", "rss", ("company", "google")),
     SourceConfig("microsoft_research", "company", "rss", "https://www.microsoft.com/en-us/research/feed/", "blog", "rss", ("company", "microsoft")),
     SourceConfig("nvidia_deep_learning", "company", "rss", "https://blogs.nvidia.com/blog/category/deep-learning/feed/", "blog", "rss", ("company", "nvidia")),
     SourceConfig("apple_ml", "company", "rss", "https://machinelearning.apple.com/rss.xml", "blog", "rss", ("company", "apple")),
@@ -696,16 +758,15 @@ def register(config: SourceConfig) -> None:
 
 
 register(SourceConfig("hf_daily_papers", "papers", "api", "https://huggingface.co/api/daily_papers", "paper", "hf_daily_papers", ("paper", "huggingface")))
-register(SourceConfig("hf_models_likes", "papers", "api", "https://huggingface.co/api/models?sort=likes&limit=20", "model", "hf_models_likes", ("model", "huggingface")))
-register(SourceConfig("hf_models_new", "papers", "api", "https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=20", "model", "hf_models_likes", ("model", "huggingface", "new"), {"sort": "createdAt", "direction": "-1"}))
-register(SourceConfig("hf_trending_models", "papers", "api", "https://huggingface.co/api/trending?type=model", "model_trending", "hf_trending", ("model", "huggingface", "trending")))
+register(SourceConfig("hf_models_likes", "models", "api", "https://huggingface.co/api/models?sort=likes&limit=20", "model", "hf_models_likes", ("model", "huggingface")))
+register(SourceConfig("hf_models_new", "models", "api", "https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=20", "model", "hf_models_likes", ("model", "huggingface", "new"), {"sort": "createdAt", "direction": "-1"}))
+register(SourceConfig("hf_trending_models", "models", "api", "https://huggingface.co/api/trending?type=model", "model_trending", "hf_trending", ("model", "huggingface", "trending")))
 register(SourceConfig("hn_topstories", "community", "api", "https://hacker-news.firebaseio.com/v0/topstories.json", "post", "hn_topstories", ("community", "hn")))
 register(SourceConfig("reddit_machinelearning", "community", "json", "https://www.reddit.com/r/MachineLearning/.json?limit=20", "post", "reddit_listing", ("community", "reddit", "machinelearning")))
 register(SourceConfig("reddit_localllama", "community", "json", "https://www.reddit.com/r/LocalLLaMA/.json?limit=20", "post", "reddit_listing", ("community", "reddit", "localllama")))
 register(SourceConfig("open_llm_leaderboard", "benchmark", "api", "https://datasets-server.huggingface.co/rows?dataset=open-llm-leaderboard/contents&config=default&split=train&offset=0&length=20", "benchmark", "open_llm_leaderboard", ("benchmark", "leaderboard")))
 register(SourceConfig("samsung_research_posts", "company_kr", "api", "https://research.samsung.com/blogMain/list.json", "blog", "samsung_research_posts", ("company", "kr", "samsung")))
 register(SourceConfig("lg_ai_research_blog", "company_kr", "api", "https://www.lgresearch.ai/api/board/blog/list", "blog", "lg_ai_research_api", ("company", "kr", "lgai"), {"kind": "blog"}))
-register(SourceConfig("lg_ai_research_news", "company_kr", "api", "https://www.lgresearch.ai/api/board/news/list", "news", "lg_ai_research_api", ("company", "kr", "lgai"), {"kind": "news"}))
 register(SourceConfig("github_curated_repos", "community", "api", "https://api.github.com/repos", "repo", "github_watchlist_repos", ("community", "github"), {"repos": ["huggingface/transformers", "vllm-project/vllm", "openai/openai-python", "ggerganov/llama.cpp", "ollama/ollama", "langchain-ai/langchain"]}))
 register(SourceConfig("github_tencent_hunyuan_repos", "company_cn", "api", "https://api.github.com/orgs/Tencent-Hunyuan/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "tencent"), {"org": "Tencent-Hunyuan"}))
 register(SourceConfig("github_paddlepaddle_repos", "company_cn", "api", "https://api.github.com/orgs/PaddlePaddle/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "paddlepaddle"), {"org": "PaddlePaddle"}))
@@ -743,10 +804,10 @@ def fetch_source(client: httpx.Client, config: SourceConfig, run_id: str, limit:
 
 def fetch_rss_source(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    response = client.get(config.endpoint)
+    result = FetchResult(source=config.name, endpoint=config.endpoint)
+    response = timed_request(result, client, "GET", config.endpoint, request_name="feed")
     response.raise_for_status()
     parsed = feedparser.parse(response.text)
-    result = FetchResult(source=config.name, endpoint=config.endpoint)
     result.raw_responses.append(RawResponse(filename="fetch_001.xml", body=response.content))
 
     for idx, entry in enumerate(parsed.entries[:limit]):
@@ -778,7 +839,13 @@ def fetch_rss_source(client: httpx.Client, config: SourceConfig, run_id: str, li
         if arxiv_id:
             external_ids["arxiv_id"] = arxiv_id
         if config.extra.get("fetch_detail") and url:
-            detail_response = client.get(url)
+            detail_response = timed_request(
+                result,
+                client,
+                "GET",
+                url,
+                request_name=f"detail_{idx + 1:03d}",
+            )
             detail_response.raise_for_status()
             detail_fetch_id = f"fetch_detail_{idx + 1:03d}"
             result.raw_responses.append(RawResponse(filename=f"{detail_fetch_id}.html", body=detail_response.content))
@@ -839,10 +906,10 @@ def fetch_rss_source(client: httpx.Client, config: SourceConfig, run_id: str, li
 
 def fetch_hf_daily_papers(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    response = client.get(config.endpoint)
+    result = FetchResult(source=config.name, endpoint=config.endpoint)
+    response = timed_request(result, client, "GET", config.endpoint, request_name="feed")
     response.raise_for_status()
     items = response.json()[:limit]
-    result = FetchResult(source=config.name, endpoint=config.endpoint)
     result.raw_responses.append(RawResponse(filename="fetch_001.json", body=response.content))
 
     for idx, item in enumerate(items):
@@ -917,13 +984,17 @@ def fetch_hf_models_likes(client: httpx.Client, config: SourceConfig, run_id: st
     fetched_at = now_utc_iso()
     sort_key = config.extra.get("sort", "likes")
     direction = config.extra.get("direction", "-1")
-    response = client.get(
+    result = FetchResult(source=config.name, endpoint=config.endpoint)
+    response = timed_request(
+        result,
+        client,
+        "GET",
         "https://huggingface.co/api/models",
+        request_name="feed",
         params={"sort": sort_key, "direction": direction, "limit": limit},
     )
     response.raise_for_status()
     items = response.json()
-    result = FetchResult(source=config.name, endpoint=config.endpoint)
     result.raw_responses.append(RawResponse(filename="fetch_001.json", body=response.content))
 
     for idx, item in enumerate(items):
@@ -1012,11 +1083,11 @@ def fetch_hf_models_likes(client: httpx.Client, config: SourceConfig, run_id: st
 
 def fetch_hf_trending(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    response = client.get(config.endpoint, params={"type": "model"})
+    result = FetchResult(source=config.name, endpoint=config.endpoint)
+    response = timed_request(result, client, "GET", config.endpoint, request_name="feed", params={"type": "model"})
     response.raise_for_status()
     payload = response.json()
     items = payload.get("recentlyTrending", [])[:limit]
-    result = FetchResult(source=config.name, endpoint=config.endpoint)
     result.raw_responses.append(RawResponse(filename="fetch_001.json", body=response.content))
 
     for idx, item in enumerate(items):
@@ -1091,16 +1162,21 @@ def fetch_hf_trending(client: httpx.Client, config: SourceConfig, run_id: str, l
 
 def fetch_hn_topstories(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    ids_response = client.get(config.endpoint)
+    result = FetchResult(source=config.name, endpoint=config.endpoint)
+    ids_response = timed_request(result, client, "GET", config.endpoint, request_name="topstories_ids")
     ids_response.raise_for_status()
     story_ids = ids_response.json()[:limit]
     items: list[dict[str, Any]] = []
     for story_id in story_ids:
-        item_response = client.get(f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json")
+        item_response = timed_request(
+            result,
+            client,
+            "GET",
+            f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json",
+            request_name=f"item_{story_id}",
+        )
         item_response.raise_for_status()
         items.append(item_response.json())
-
-    result = FetchResult(source=config.name, endpoint=config.endpoint)
     result.raw_responses.append(RawResponse(filename="fetch_001_ids.json", body=ids_response.content))
     result.raw_responses.append(RawResponse(filename="fetch_002_items.json", body=json.dumps(items, ensure_ascii=False, indent=2).encode("utf-8")))
 
@@ -1156,15 +1232,19 @@ def fetch_hn_topstories(client: httpx.Client, config: SourceConfig, run_id: str,
 
 def fetch_samsung_research_posts(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    response = client.post(
+    result = FetchResult(source=config.name, endpoint=config.endpoint)
+    response = timed_request(
+        result,
+        client,
+        "POST",
         config.endpoint,
+        request_name="feed",
         json={"startIndex": 1, "currentPageNo": 1, "endIndex": max(limit, 9)},
         headers={"Content-Type": "application/json", **DEFAULT_HEADERS},
     )
     response.raise_for_status()
     payload = response.json()
     items = (payload.get("value") or [])[:limit]
-    result = FetchResult(source=config.name, endpoint=config.endpoint)
     result.raw_responses.append(RawResponse(filename="fetch_001.json", body=response.content))
 
     for idx, item in enumerate(items):
@@ -1233,21 +1313,36 @@ def fetch_samsung_research_posts(client: httpx.Client, config: SourceConfig, run
 
 def fetch_lg_ai_research_api(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    response = client.get(config.endpoint)
+    result = FetchResult(source=config.name, endpoint=config.endpoint)
+    response = timed_request(result, client, "GET", config.endpoint, request_name="feed")
     response.raise_for_status()
     payload = response.json()
     items = ((payload.get("data") or {}).get("list") or [])[:limit]
-    result = FetchResult(source=config.name, endpoint=config.endpoint)
     result.raw_responses.append(RawResponse(filename="fetch_001.json", body=response.content))
+    lg_base_url = "https://www.lgresearch.ai"
+    kind = normalize_space(str(config.extra.get("kind") or "blog")).lower()
+    filled_detail_url_count = 0
 
     for idx, item in enumerate(items):
         source_item_id = stable_id(item.get("seq"), item.get("ttl"))
         body_text = clean_html(item.get("cont") or item.get("description") or item.get("hdlnCont"))
-        tags = ["company", "kr", "lgai", config.extra.get("kind", "blog")]
+        tags = ["company", "kr", "lgai", kind]
         if item.get("catgCd"):
             tags.append(str(item.get("catgCd")))
         blog_writers = extract_name_list(item.get("blogWriters"))
-        related_urls = [value for value in (item.get("thmnlImg"), item.get("img"), item.get("vodUrl")) if value]
+        related_urls = [
+            value
+            for value in (
+                resolve_absolute_url(lg_base_url, item.get("thmnlImg")),
+                resolve_absolute_url(lg_base_url, item.get("img")),
+                resolve_absolute_url(lg_base_url, item.get("vodUrl")),
+            )
+            if value
+        ]
+        resolved_url = resolve_absolute_url(lg_base_url, item.get("linkUrl"))
+        if not resolved_url and kind == "blog" and item.get("seq"):
+            resolved_url = f"{lg_base_url}/blog/view?seq={item.get('seq')}"
+            filled_detail_url_count += 1
         result.raw_items.append(
             wrap_raw_item(
                 source=config.name,
@@ -1268,9 +1363,9 @@ def fetch_lg_ai_research_api(client: httpx.Client, config: SourceConfig, run_id:
                 doc_type=config.doc_type,
                 title=item.get("ttl") or source_item_id,
                 description=item.get("description") or item.get("hdlnCont"),
-                url=item.get("linkUrl"),
-                canonical_url=item.get("linkUrl"),
-                reference_url=item.get("linkUrl"),
+                url=resolved_url,
+                canonical_url=resolved_url,
+                reference_url=resolved_url,
                 author=blog_writers[0] if blog_writers else None,
                 authors=blog_writers,
                 published_at=parse_date(item.get("rgstYmd")),
@@ -1280,6 +1375,8 @@ def fetch_lg_ai_research_api(client: httpx.Client, config: SourceConfig, run_id:
                 tags=tags,
                 engagement={"read_count": item.get("readCnt")},
                 metadata={
+                    "lg_kind": kind,
+                    "link_url_raw": item.get("linkUrl"),
                     "thumbnail": item.get("thmnlImg"),
                     "lang_tp": item.get("langTp"),
                     "news_tags": item.get("newsTags"),
@@ -1296,13 +1393,20 @@ def fetch_lg_ai_research_api(client: httpx.Client, config: SourceConfig, run_id:
                 fetched_at=fetched_at,
             )
         )
+    if filled_detail_url_count:
+        result.notes.append(f"Filled {filled_detail_url_count} LG AI Research blog detail URL(s) from the public seq-based route.")
     return result
 
 
 def fetch_reddit_listing(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    response = client.get(
+    result = FetchResult(source=config.name, endpoint=config.endpoint)
+    response = timed_request(
+        result,
+        client,
+        "GET",
         config.endpoint,
+        request_name="feed",
         headers={
             "User-Agent": "SparkOrbitSourceTester/0.1 by /u/sparkorbit-dev",
             "Accept": "application/json",
@@ -1311,7 +1415,6 @@ def fetch_reddit_listing(client: httpx.Client, config: SourceConfig, run_id: str
     response.raise_for_status()
     payload = response.json()
     children = payload.get("data", {}).get("children", [])[:limit]
-    result = FetchResult(source=config.name, endpoint=config.endpoint)
     result.raw_responses.append(RawResponse(filename="fetch_001.json", body=response.content))
 
     for idx, child in enumerate(children):
@@ -1383,8 +1486,13 @@ def fetch_reddit_listing(client: httpx.Client, config: SourceConfig, run_id: str
 
 def fetch_open_llm_leaderboard(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    response = client.get(
+    result = FetchResult(source=config.name, endpoint=config.endpoint)
+    response = timed_request(
+        result,
+        client,
+        "GET",
         "https://datasets-server.huggingface.co/rows",
+        request_name="feed",
         params={
             "dataset": "open-llm-leaderboard/contents",
             "config": "default",
@@ -1396,7 +1504,6 @@ def fetch_open_llm_leaderboard(client: httpx.Client, config: SourceConfig, run_i
     response.raise_for_status()
     payload = response.json()
     rows = payload.get("rows", [])
-    result = FetchResult(source=config.name, endpoint=config.endpoint)
     result.raw_responses.append(RawResponse(filename="fetch_001.json", body=response.content))
 
     metric_fields = [
@@ -1628,7 +1735,14 @@ def add_github_release_document(
     fetch_index: int,
 ) -> bool:
     releases_url = f"https://api.github.com/repos/{repo.get('full_name')}/releases/latest"
-    response = client.get(releases_url, headers=github_headers())
+    response = timed_request(
+        result,
+        client,
+        "GET",
+        releases_url,
+        request_name=f"release_{fetch_index:03d}",
+        headers=github_headers(),
+    )
     if response.status_code == 404:
         return True
     if response.status_code in {403, 429} and "rate limit" in response.text.lower():
@@ -1700,7 +1814,14 @@ def fetch_github_watchlist_repos(client: httpx.Client, config: SourceConfig, run
 
     release_fetch_enabled = True
     for index, full_name in enumerate(repos, start=1):
-        response = client.get(f"https://api.github.com/repos/{full_name}", headers=github_headers())
+        response = timed_request(
+            result,
+            client,
+            "GET",
+            f"https://api.github.com/repos/{full_name}",
+            request_name=f"repo_{index:03d}",
+            headers=github_headers(),
+        )
         if is_github_rate_limited(response):
             result.notes.append("Skipped remaining GitHub repo fetches after hitting unauthenticated rate limits.")
             break
@@ -1715,8 +1836,16 @@ def fetch_github_watchlist_repos(client: httpx.Client, config: SourceConfig, run
 
 def fetch_github_org_repos(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    response = client.get(config.endpoint, params={"sort": "updated", "per_page": limit}, headers=github_headers())
     result = FetchResult(source=config.name, endpoint=config.endpoint)
+    response = timed_request(
+        result,
+        client,
+        "GET",
+        config.endpoint,
+        request_name="repo_feed",
+        params={"sort": "updated", "per_page": limit},
+        headers=github_headers(),
+    )
     if is_github_rate_limited(response):
         result.notes.append(f"Skipped GitHub org repo fetch for {config.extra.get('org')} after hitting unauthenticated rate limits.")
         return result
@@ -1735,16 +1864,34 @@ def fetch_github_org_repos(client: httpx.Client, config: SourceConfig, run_id: s
 
 def fetch_html_listing_with_detail(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    response = client.get(config.endpoint)
-    response.raise_for_status()
     result = FetchResult(source=config.name, endpoint=config.endpoint)
+    try:
+        response = timed_request(result, client, "GET", config.endpoint, request_name="list")
+        response.raise_for_status()
+    except Exception as exc:
+        if config.name == "deepseek_updates":
+            block_probe_url = config.endpoint.replace("https://", "http://", 1)
+            try:
+                block_response = timed_request(result, client, "GET", block_probe_url, request_name="list_block_probe")
+                block_text = normalize_space(block_response.text)
+            except Exception:
+                block_text = ""
+            if "사이트 차단 안내" in block_text or "This website is blocked due to UNIST's information security policy." in block_text:
+                raise RuntimeError("DeepSeek is blocked by the current network policy (UNIST blacklist), so this source cannot be collected from this environment.") from exc
+        raise
     result.raw_responses.append(RawResponse(filename="fetch_001_list.html", body=response.content))
     if config.extra.get("note"):
         result.notes.append(str(config.extra["note"]))
 
     candidates = collect_html_candidates(config, response.text)[:limit]
     for index, candidate in enumerate(candidates, start=1):
-        detail_response = client.get(candidate["url"])
+        detail_response = timed_request(
+            result,
+            client,
+            "GET",
+            candidate["url"],
+            request_name=f"detail_{index:03d}",
+        )
         detail_response.raise_for_status()
         detail_fetch_id = f"fetch_detail_{index:03d}"
         result.raw_responses.append(RawResponse(filename=f"{detail_fetch_id}.html", body=detail_response.content))
@@ -1814,61 +1961,147 @@ def fetch_html_listing_with_detail(client: httpx.Client, config: SourceConfig, r
     return result
 
 
+LM_ARENA_BOARD_LINK_PATTERN = re.compile(r'leaderboardLink\\":\\"(/leaderboard/[^\\"]+)')
+
+
+def extract_escaped_json_array(raw_text: str, marker: str) -> str | None:
+    start = raw_text.find(marker)
+    if start == -1:
+        return None
+
+    idx = start + len(marker)
+    depth = 1
+    in_string = False
+    escape = False
+    while idx < len(raw_text):
+        ch = raw_text[idx]
+        if escape:
+            escape = False
+        elif ch == "\\":
+            escape = True
+        elif ch == '"':
+            in_string = not in_string
+        elif not in_string:
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    return raw_text[start + len(marker) - 1 : idx + 1]
+        idx += 1
+    return None
+
+
+def decode_escaped_json_value(raw_value: str) -> Any:
+    return json.loads(raw_value.encode("utf-8").decode("unicode_escape"))
+
+
+def parse_lmarena_board_page(html: str) -> dict[str, Any]:
+    entries_raw = extract_escaped_json_array(html, '\\"entries\\":[')
+    if not entries_raw:
+        raise ValueError("Could not locate LMArena entries array.")
+
+    scalar_match = re.search(
+        r'\\"voteCutoffISOString\\":\\"([^\\"]+)\\",\\"totalVotes\\":(\d+),\\"totalModels\\":(\d+)',
+        html,
+    )
+    if not scalar_match:
+        raise ValueError("Could not locate LMArena board summary fields.")
+
+    vote_cutoff, total_votes, total_models = scalar_match.groups()
+    entries_payload = decode_escaped_json_value(entries_raw)
+    if not isinstance(entries_payload, list):
+        raise ValueError("Decoded LMArena entries payload is not a list.")
+
+    entries: list[dict[str, Any]] = []
+    for item in entries_payload:
+        if not isinstance(item, dict):
+            continue
+        rank = item.get("rank")
+        rating = item.get("rating")
+        votes = item.get("votes")
+        if not isinstance(rank, int) or not isinstance(votes, int):
+            continue
+        if not isinstance(rating, (int, float)):
+            continue
+        entries.append(
+            {
+                "rank": rank,
+                "model_name": normalize_space(item.get("modelDisplayName")),
+                "rating": float(rating),
+                "votes": votes,
+                "organization": normalize_space(item.get("modelOrganization")) or None,
+                "url": normalize_space(item.get("modelUrl")) or None,
+                "license": normalize_space(item.get("license")) or None,
+                "input_price_per_million": item.get("inputPricePerMillion"),
+                "output_price_per_million": item.get("outputPricePerMillion"),
+                "context_length": item.get("contextLength"),
+            }
+        )
+
+    return {
+        "vote_cutoff": vote_cutoff,
+        "total_votes": int(total_votes),
+        "total_models": int(total_models),
+        "entries": entries,
+    }
+
+
 def fetch_lmarena_overview(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
-    response = client.get(config.endpoint)
+    result = FetchResult(source=config.name, endpoint=config.endpoint)
+    response = timed_request(result, client, "GET", config.endpoint, request_name="overview")
     response.raise_for_status()
     text = response.text
-    result = FetchResult(source=config.name, endpoint=config.endpoint)
     result.raw_responses.append(RawResponse(filename="fetch_001.html", body=response.content))
-    result.notes.append("LMArena overview scrape. Each normalized document represents one leaderboard panel with top rows stored in metadata.")
+    result.notes.append("LMArena overview scrape. Overview page discovers board links, and each board page is fetched to capture all available rows.")
 
-    block_pattern = re.compile(
-        r'\\\"entries\\\":\[(.*?)\],\\\"voteCutoffISOString\\\":\\\"([^\\\"]+)\\\",\\\"totalVotes\\\":(\d+),\\\"totalModels\\\":(\d+)\},\\\"leaderboardLink\\\":\\\"(/leaderboard/[^\\\"]+)\\\"',
-        re.S,
-    )
-    entry_pattern = re.compile(
-        r'\\\"rank\\\":(\d+).*?\\\"modelDisplayName\\\":\\\"([^\\\"]+)\\\".*?\\\"rating\\\":([0-9.]+).*?\\\"votes\\\":(\d+).*?\\\"modelOrganization\\\":\\\"([^\\\"]*)\\\".*?\\\"modelUrl\\\":\\\"([^\\\"]*)\\\".*?\\\"license\\\":\\\"([^\\\"]*)\\\".*?\\\"inputPricePerMillion\\\":([0-9.]+).*?\\\"outputPricePerMillion\\\":([0-9.]+).*?\\\"contextLength\\\":(\d+)',
-        re.S,
-    )
+    board_links: list[str] = []
+    for leaderboard_link in LM_ARENA_BOARD_LINK_PATTERN.findall(text):
+        if leaderboard_link not in board_links:
+            board_links.append(leaderboard_link)
 
-    for idx, match in enumerate(block_pattern.finditer(text)):
-        entries_blob, vote_cutoff, total_votes, total_models, leaderboard_link = match.groups()
-        top_entries: list[dict[str, Any]] = []
-        for entry_match in entry_pattern.finditer(entries_blob):
-            rank, model_name, rating, votes, organization, model_url, license_name, input_price, output_price, context_length = entry_match.groups()
-            top_entries.append(
-                {
-                    "rank": int(rank),
-                    "model_name": model_name,
-                    "rating": float(rating),
-                    "votes": int(votes),
-                    "organization": organization,
-                    "url": model_url,
-                    "license": license_name or None,
-                    "input_price_per_million": float(input_price),
-                    "output_price_per_million": float(output_price),
-                    "context_length": int(context_length),
-                }
-            )
-            if len(top_entries) >= limit:
-                break
+    for idx, leaderboard_link in enumerate(board_links, start=1):
+        board_url = urljoin(config.endpoint, leaderboard_link)
+        board_response = timed_request(
+            result,
+            client,
+            "GET",
+            board_url,
+            request_name=f"board_{idx:02d}",
+        )
+        board_response.raise_for_status()
+        board_fetch_id = f"fetch_board_{idx:02d}"
+        result.raw_responses.append(RawResponse(filename=f"{board_fetch_id}.html", body=board_response.content))
+        try:
+            board_payload = parse_lmarena_board_page(board_response.text)
+        except Exception as exc:
+            result.notes.append(f"Skipped malformed LMArena board payload for {leaderboard_link}: {exc}")
+            continue
+
+        entries = board_payload["entries"]
+        top_entries = entries[:limit] if limit > 0 else list(entries)
+        vote_cutoff = board_payload["vote_cutoff"]
+        total_votes = board_payload["total_votes"]
+        total_models = board_payload["total_models"]
         source_item_id = stable_id(leaderboard_link, vote_cutoff)
         title = leaderboard_link.rsplit("/", 1)[-1].replace("-", " ").title()
         if title == "Leaderboard":
             title = "Overview"
-        top_model = top_entries[0] if top_entries else {}
+        top_model = entries[0] if entries else {}
         result.raw_items.append(
             wrap_raw_item(
                 source=config.name,
                 source_item_id=source_item_id,
-                fetch_id="fetch_001",
+                fetch_id=board_fetch_id,
                 fetched_at=fetched_at,
                 payload={
                     "leaderboard_link": leaderboard_link,
                     "vote_cutoff": vote_cutoff,
-                    "total_votes": int(total_votes),
-                    "total_models": int(total_models),
+                    "total_votes": total_votes,
+                    "total_models": total_models,
+                    "captured_entry_count": len(entries),
+                    "entries": entries,
                     "top_entries": top_entries,
                 },
             )
@@ -1910,16 +2143,18 @@ def fetch_lmarena_overview(client: httpx.Client, config: SourceConfig, run_id: s
                 metadata={
                     "leaderboard_link": leaderboard_link,
                     "vote_cutoff": vote_cutoff,
-                    "total_votes": int(total_votes),
-                    "total_models": int(total_models),
+                    "total_votes": total_votes,
+                    "total_models": total_models,
+                    "captured_entry_count": len(entries),
                     "top_model_name": top_model.get("model_name"),
                     "top_model_org": top_model.get("organization"),
                     "top_model_rating": top_model.get("rating"),
                     "top_model_votes": top_model.get("votes"),
+                    "entries": entries,
                     "top_entries": top_entries,
                 },
                 external_ids={"leaderboard_link": leaderboard_link},
-                related_urls=[entry["url"] for entry in top_entries if entry.get("url")],
+                related_urls=[entry["url"] for entry in entries if entry.get("url")][:20],
                 benchmark={
                     "kind": "leaderboard_panel",
                     "board_id": leaderboard_link,
@@ -1932,10 +2167,10 @@ def fetch_lmarena_overview(client: httpx.Client, config: SourceConfig, run_id: s
                     "votes": top_model.get("votes"),
                     "model_name": top_model.get("model_name"),
                     "organization": top_model.get("organization"),
-                    "total_models": int(total_models),
-                    "total_votes": int(total_votes),
+                    "total_models": total_models,
+                    "total_votes": total_votes,
                 },
-                raw_ref={"fetch_id": "fetch_001", "line_index": idx},
+                raw_ref={"fetch_id": board_fetch_id, "line_index": idx - 1},
                 fetched_at=fetched_at,
             )
         )

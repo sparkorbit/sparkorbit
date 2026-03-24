@@ -31,3 +31,4 @@ class FetchResult:
     documents: list[dict[str, Any]] = field(default_factory=list)
     metrics: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    request_traces: list[dict[str, Any]] = field(default_factory=list)
