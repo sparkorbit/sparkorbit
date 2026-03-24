@@ -8,7 +8,6 @@ import {
 import {
   PanelWorkspace,
 } from "./components/dashboard/PanelWorkspace";
-import { SessionPanel } from "./components/dashboard/SessionPanel";
 import { SourcePanel } from "./components/dashboard/SourcePanel";
 import { SummaryPanel } from "./components/dashboard/SummaryPanel";
 import { resetPanelWorkspaceStorage } from "./components/dashboard/panelWorkspaceStorage";
@@ -28,6 +27,8 @@ import type {
   DashboardLoading,
   DashboardResponse,
   DigestDetailResponse,
+  SessionArenaBoard,
+  SessionArenaBoardEntry,
   SessionArenaOverview,
   SessionReloadStateResponse,
 } from "./types/dashboard";
@@ -53,6 +54,7 @@ type DetailState =
   | null;
 
 const UI_SETTINGS_STORAGE_KEY = "sparkorbit-ui-settings-v1";
+const EMPTY_ARENA_BOARDS: readonly SessionArenaBoard[] = [];
 
 const ROW_HEIGHT_MODE_OPTIONS: Array<{
   id: RowHeightMode;
@@ -207,24 +209,6 @@ function buildPanelSessionLabel(sessionDate: string, windowLabel: string) {
   return `${compactDate} / ${windowLabel}`;
 }
 
-function formatIsoDate(value: string | null | undefined) {
-  if (!value) {
-    return "-";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("ko-KR", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
 function compactText(value: string | null | undefined, maxLength = 160) {
   if (!value) {
     return "";
@@ -261,6 +245,20 @@ function formatLeaderboardValue(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: Number.isInteger(numeric) ? 0 : 2,
   }).format(numeric);
+}
+
+function buildLeaderboardEntries(
+  board: SessionArenaBoard | null,
+): SessionArenaBoardEntry[] {
+  if (!board) {
+    return [];
+  }
+
+  if (board.topEntries.length > 0) {
+    return board.topEntries;
+  }
+
+  return board.topModel.modelName ? [board.topModel] : [];
 }
 
 type DetailField = {
@@ -350,16 +348,6 @@ function buildRecordFields(
   );
 }
 
-function buildDocumentSignalWindow(document: SessionDocument) {
-  return [
-    formatIsoDate(document.published_at ?? document.updated_at ?? document.sort_at),
-    document.source_method,
-    document.time_semantics,
-  ]
-    .filter((value): value is string => Boolean(value) && value !== "-")
-    .join(" · ");
-}
-
 function buildDocumentIdentityFields(document: SessionDocument) {
   return filterDetailFields([
     createDetailField("document_id", document.document_id),
@@ -388,19 +376,21 @@ function buildDocumentTimeFields(document: SessionDocument) {
 }
 
 function buildDocumentSignalFields(document: SessionDocument) {
-  const engagementPrimary =
-    document.engagement_primary?.name && document.engagement_primary?.value != null
-      ? `${document.engagement_primary.name}: ${document.engagement_primary.value}`
-      : null;
-
   return filterDetailFields([
     createDetailField("feed_score", document.ranking.feed_score),
+    createDetailField("priority_reason", document.ranking.priority_reason),
     createDetailField("spark_score", document.discovery.spark_score),
+    createDetailField("discovery_reason", document.discovery.primary_reason),
     createDetailField("importance_score", document.llm.importance_score),
     createDetailField("importance_reason", document.llm.importance_reason),
-    createDetailField("priority_reason", document.ranking.priority_reason),
-    createDetailField("discovery_reason", document.discovery.primary_reason),
-    createDetailField("engagement_primary", engagementPrimary),
+    createDetailField(
+      "engagement_primary_name",
+      document.engagement_primary.name,
+    ),
+    createDetailField(
+      "engagement_primary_value",
+      document.engagement_primary.value,
+    ),
   ]);
 }
 
@@ -456,13 +446,9 @@ function buildDocumentBenchmarkFields(document: SessionDocument) {
     createDetailField("board_name", benchmark.board_name),
     createDetailField("kind", benchmark.kind),
     createDetailField("rank", benchmark.rank),
-    createDetailField(
-      "score",
-      benchmark.score_value != null
-        ? `${benchmark.score_value}${benchmark.score_unit ?? ""}`
-        : null,
-    ),
     createDetailField("score_label", benchmark.score_label),
+    createDetailField("score_value", benchmark.score_value),
+    createDetailField("score_unit", benchmark.score_unit),
     createDetailField("votes", benchmark.votes),
     createDetailField("model_name", benchmark.model_name),
     createDetailField("organization", benchmark.organization),
@@ -485,100 +471,30 @@ function buildDocumentRawRefFields(document: SessionDocument) {
 }
 
 function buildDocumentTagItems(document: SessionDocument) {
-  return Array.from(
-    new Set(
-      document.tags
-        .map((tag) => tag.trim())
-        .filter((tag) => tag.length > 0),
-    ),
-  );
+  return document.tags.filter((tag) => tag.trim().length > 0);
 }
 
 function buildDocumentAuthorItems(document: SessionDocument) {
-  return Array.from(
-    new Set(
-      (document.authors.length > 0
-        ? document.authors
-        : document.author
-          ? [document.author]
-          : []
-      )
-        .map((author) => author.trim())
-        .filter((author) => author.length > 0),
-    ),
-  );
+  const authors =
+    document.authors.length > 0
+      ? document.authors
+      : document.author
+        ? [document.author]
+        : [];
+
+  return authors.filter((author) => author.trim().length > 0);
 }
 
 function buildDocumentEntityItems(document: SessionDocument) {
-  return Array.from(
-    new Set(
-      [...document.llm.entities, ...document.llm.subdomains]
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0),
-    ),
+  return [...document.llm.entities, ...document.llm.subdomains].filter(
+    (item) => item.trim().length > 0,
   );
 }
 
 function buildDocumentEvidenceChunkItems(document: SessionDocument) {
-  return Array.from(
-    new Set(
-      document.llm.evidence_chunk_ids
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0),
-    ),
+  return document.llm.evidence_chunk_ids.filter(
+    (item) => item.trim().length > 0,
   );
-}
-
-function buildDocumentConfidence(document: SessionDocument) {
-  const signals = [
-    toNumber(document.ranking.feed_score),
-    toNumber(document.discovery.spark_score),
-    toNumber(document.llm.importance_score),
-    document.reference.display_url ? 1 : null,
-  ].filter((value) => value != null).length;
-
-  if (signals >= 4) return "high";
-  if (signals >= 3) return "medium";
-  return "low";
-}
-
-function buildDocumentSummary(document: SessionDocument) {
-  return (
-    document.llm.summary_short ||
-    document.description ||
-    document.reference.snippet ||
-    document.summary_input_text ||
-    document.body_text ||
-    "요약 텍스트가 아직 준비되지 않았습니다."
-  );
-}
-
-function statusLabel(status: DashboardResponse["status"]) {
-  if (status === "ready") return "ready";
-  if (status === "partial_error") return "partial-error";
-  if (status === "summarizing") return "summarizing";
-  if (status === "published") return "published";
-  if (status === "collecting") return "collecting";
-  return "error";
-}
-
-function statusDescription(status: DashboardResponse["status"]) {
-  if (status === "ready") {
-    return "feed와 digest가 모두 준비된 상태입니다.";
-  }
-  if (status === "partial_error") {
-    return "일부 요약은 실패했지만 session과 drill-down은 계속 사용할 수 있습니다.";
-  }
-  if (status === "summarizing") {
-    return "feed는 바로 보이고 digest와 일부 document summary가 계속 채워지고 있습니다.";
-  }
-  if (status === "published") {
-    return "run publish는 끝났고, Redis feed/doc/dashboard가 준비된 상태입니다.";
-  }
-  if (status === "collecting") {
-    return "새 session run을 수집 중입니다.";
-  }
-  return "세션 처리 중 오류가 발생했습니다.";
 }
 
 function buildPlaceholderSteps(
@@ -1046,38 +962,12 @@ function SettingsModal({
   );
 }
 
-function DetailMetric({
-  label,
-  value,
-  note,
-}: {
-  label: string;
-  value: string;
-  note: string;
-}) {
-  return (
-    <article className="border border-orbit-border bg-orbit-bg-elevated p-3">
-      <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-        {label}
-      </p>
-      <p className="orbit-wrap-anywhere mt-2 font-mono text-[0.88rem] leading-[1.5] tracking-[0.06em] text-orbit-text">
-        {value}
-      </p>
-      <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
-        {note}
-      </p>
-    </article>
-  );
-}
-
 function DetailFieldGrid({
   label,
   fields,
-  note,
 }: {
   label: string;
   fields: readonly DetailField[];
-  note?: string;
 }) {
   if (fields.length === 0) {
     return null;
@@ -1088,11 +978,6 @@ function DetailFieldGrid({
       <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
         {label}
       </p>
-      {note ? (
-        <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
-          {note}
-        </p>
-      ) : null}
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {fields.map((field) => (
           <article
@@ -1126,19 +1011,21 @@ function DetailFieldGrid({
 function DetailChipBlock({
   label,
   items,
-  emptyText = "표시할 항목이 없습니다.",
 }: {
   label: string;
   items: readonly string[];
-  emptyText?: string;
 }) {
+  if (items.length === 0) {
+    return null;
+  }
+
   return (
     <section className="border border-orbit-border bg-orbit-bg-elevated p-3">
       <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
         {label}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
-        {(items.length > 0 ? items : [emptyText]).map((item) => (
+        {items.map((item) => (
           <span
             key={`${label}-${item}`}
             className="orbit-chip-wrap max-w-full border border-orbit-border bg-orbit-bg px-3 py-2 text-[0.72rem] leading-[1.45] text-orbit-text"
@@ -1154,11 +1041,9 @@ function DetailChipBlock({
 function DetailTextBlock({
   label,
   text,
-  note,
 }: {
   label: string;
   text: string | null | undefined;
-  note?: string;
 }) {
   if (!text) {
     return null;
@@ -1169,11 +1054,6 @@ function DetailTextBlock({
       <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
         {label}
       </p>
-      {note ? (
-        <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
-          {note}
-        </p>
-      ) : null}
       <div className="mt-3 border border-orbit-border bg-orbit-bg px-3 py-3">
         <p className="orbit-wrap-anywhere text-[0.76rem] leading-[1.7] text-orbit-text">
           {text}
@@ -1209,13 +1089,9 @@ function buildDigestDetailPanel(
     createDetailField("session_id", payload.sessionId),
     createDetailField("status", payload.status),
     createDetailField("domain", payload.digest.domain),
-    createDetailField("documents", payload.digest.documentIds.length),
+    createDetailField("evidence", payload.digest.evidence),
     createDetailField("updated_at", payload.digest.updatedAt),
   ]);
-  const focusItems = payload.documents.map(
-    (document) =>
-      `${document.source} / ${document.doc_type} / ${compactText(buildDocumentSummary(document), 120)}`,
-  );
 
   return {
     title: `${payload.digest.domain} Detail`,
@@ -1242,51 +1118,25 @@ function buildDigestDetailPanel(
                     기본 정보 패널
                   </button>
                 </div>
-
-                <p className="orbit-wrap-anywhere mt-3 text-[0.78rem] leading-[1.7] text-orbit-text">
-                  {payload.digest.summary}
-                </p>
               </section>
             </HackerRevealCard>
 
-            <div className="grid gap-2 md:grid-cols-2">
-              <HackerRevealCard delayMs={90}>
-                <DetailMetric
-                  label="Evidence"
-                  value={payload.digest.evidence}
-                  note="현재 digest가 참조한 문서 수와 대표 문서 타입을 표시합니다."
-                />
-              </HackerRevealCard>
-              <HackerRevealCard delayMs={140}>
-                <DetailMetric
-                  label="Updated"
-                  value={formatIsoDate(payload.digest.updatedAt)}
-                  note="digest가 마지막으로 materialize된 시점입니다."
-                />
-              </HackerRevealCard>
-            </div>
+            <HackerRevealCard delayMs={90}>
+              <DetailTextBlock label="summary" text={payload.digest.summary} />
+            </HackerRevealCard>
 
-            <HackerRevealCard delayMs={200}>
+            <HackerRevealCard delayMs={140}>
               <DetailFieldGrid
                 label="Digest Context"
                 fields={digestFields}
-                note="digest payload에 포함된 세션/상태 메타데이터입니다."
               />
+            </HackerRevealCard>
+
+            <HackerRevealCard delayMs={200}>
+              <DetailChipBlock label="Document IDs" items={payload.digest.documentIds} />
             </HackerRevealCard>
 
             <HackerRevealCard delayMs={260}>
-              <DetailChipBlock
-                label="Document IDs"
-                items={payload.digest.documentIds}
-                emptyText="연결된 document id가 없습니다."
-              />
-            </HackerRevealCard>
-
-            <HackerRevealCard delayMs={320}>
-              <DetailChipBlock label="Focus Documents" items={focusItems} />
-            </HackerRevealCard>
-
-            <HackerRevealCard delayMs={380}>
               <section className="border border-orbit-border bg-orbit-bg-elevated p-3">
                 <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
                   Linked Documents
@@ -1316,11 +1166,13 @@ function buildDigestDetailPanel(
                         </span>
                       </div>
                       <p className="orbit-wrap-anywhere mt-2 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                        {document.source} / {document.doc_type} / feed {formatDetailValue(document.ranking.feed_score)}
+                        {document.source} / {document.doc_type}
                       </p>
-                      <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
-                        {compactText(buildDocumentSummary(document), 150)}
-                      </p>
+                      {document.llm.summary_short ? (
+                        <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
+                          {document.llm.summary_short}
+                        </p>
+                      ) : null}
                     </button>
                   ))}
                 </div>
@@ -1353,10 +1205,6 @@ function buildDocumentDetailPanel(
   const tagItems = buildDocumentTagItems(document);
   const entityItems = buildDocumentEntityItems(document);
   const evidenceChunkItems = buildDocumentEvidenceChunkItems(document);
-  const referenceSnippet =
-    document.reference.snippet || document.description || null;
-  const summaryInputPreview =
-    document.summary_input_text || document.body_text || null;
 
   return {
     title: `${document.source} Document`,
@@ -1382,7 +1230,10 @@ function buildDocumentDetailPanel(
                     <button
                       type="button"
                       className="border border-orbit-border bg-orbit-bg px-3 py-1.5 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-text transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
-                      onClick={() => referenceUrl && window.open(referenceUrl, "_blank", "noopener,noreferrer")}
+                      onClick={() =>
+                        referenceUrl &&
+                        window.open(referenceUrl, "_blank", "noopener,noreferrer")
+                      }
                     >
                       open source
                     </button>
@@ -1395,94 +1246,39 @@ function buildDocumentDetailPanel(
                     </button>
                   </div>
                 </div>
-
-                <p className="orbit-wrap-anywhere mt-3 text-[0.78rem] leading-[1.7] text-orbit-text">
-                  {buildDocumentSummary(document)}
-                </p>
               </section>
             </HackerRevealCard>
 
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              <HackerRevealCard delayMs={90}>
-                <DetailMetric
-                  label="Signal Window"
-                  value={buildDocumentSignalWindow(document)}
-                  note="정렬과 요약 판단에 사용된 시간/수집 메타데이터입니다."
-                />
-              </HackerRevealCard>
-              <HackerRevealCard delayMs={140}>
-                <DetailMetric
-                  label="Confidence"
-                  value={buildDocumentConfidence(document)}
-                  note="현재 노출 신호와 reference 가용성 기준의 간단한 confidence입니다."
-                />
-              </HackerRevealCard>
-              <HackerRevealCard delayMs={190}>
-                <DetailMetric
-                  label="Feed Score"
-                  value={formatDetailValue(document.ranking.feed_score)}
-                  note="source feed 정렬에 사용되는 ranking score입니다."
-                />
-              </HackerRevealCard>
-              <HackerRevealCard delayMs={240}>
-                <DetailMetric
-                  label="Spark Score"
-                  value={formatDetailValue(document.discovery.spark_score)}
-                  note="discovery layer가 계산한 novelty/importance 점수입니다."
-                />
-              </HackerRevealCard>
-            </div>
-
-            <HackerRevealCard delayMs={280}>
-              <DetailFieldGrid
-                label="Identity"
-                fields={identityFields}
-                note="문서의 source 계약과 분류 메타데이터입니다."
-              />
+            <HackerRevealCard delayMs={90}>
+              <DetailTextBlock label="description" text={document.description} />
             </HackerRevealCard>
 
-            <HackerRevealCard delayMs={340}>
-              <DetailFieldGrid
-                label="Timing"
-                fields={timeFields}
-                note="정렬과 관측 타이밍에 사용되는 timestamp 필드입니다."
-              />
+            <HackerRevealCard delayMs={140}>
+              <DetailFieldGrid label="Identity" fields={identityFields} />
             </HackerRevealCard>
 
-            <HackerRevealCard delayMs={400}>
-              <DetailFieldGrid
-                label="Signals"
-                fields={signalFields}
-                note="ranking/discovery/LLM 신호를 한 곳에 모았습니다."
-              />
+            <HackerRevealCard delayMs={200}>
+              <DetailFieldGrid label="Timing" fields={timeFields} />
             </HackerRevealCard>
 
-            <HackerRevealCard delayMs={460}>
-              <DetailChipBlock
-                label="Authors"
-                items={authorItems}
-                emptyText="작성자 정보가 없습니다."
-              />
+            <HackerRevealCard delayMs={260}>
+              <DetailFieldGrid label="Signals" fields={signalFields} />
             </HackerRevealCard>
 
-            <HackerRevealCard delayMs={520}>
-              <DetailChipBlock
-                label="Tags"
-                items={tagItems}
-                emptyText="태그 정보가 없습니다."
-              />
+            <HackerRevealCard delayMs={320}>
+              <DetailChipBlock label="Authors" items={authorItems} />
             </HackerRevealCard>
 
-            <HackerRevealCard delayMs={580}>
-              <DetailChipBlock
-                label="Entities / Subdomains"
-                items={entityItems}
-                emptyText="엔티티 추출 결과가 없습니다."
-              />
+            <HackerRevealCard delayMs={380}>
+              <DetailChipBlock label="Tags" items={tagItems} />
+            </HackerRevealCard>
+
+            <HackerRevealCard delayMs={440}>
+              <DetailChipBlock label="Entities / Subdomains" items={entityItems} />
             </HackerRevealCard>
 
             {evidenceChunkItems.length > 0 ? (
-              <HackerRevealCard delayMs={640}>
+              <HackerRevealCard delayMs={500}>
                 <DetailChipBlock
                   label="Evidence Chunk IDs"
                   items={evidenceChunkItems}
@@ -1490,81 +1286,60 @@ function buildDocumentDetailPanel(
               </HackerRevealCard>
             ) : null}
 
-            <HackerRevealCard delayMs={700}>
-              <DetailFieldGrid
-                label="Source Links"
-                fields={referenceFields}
-                note="BFF가 반환한 reference 계열 링크입니다."
-              />
+            <HackerRevealCard delayMs={560}>
+              <DetailFieldGrid label="Source Links" fields={referenceFields} />
             </HackerRevealCard>
 
             {relatedFields.length > 0 ? (
-              <HackerRevealCard delayMs={760}>
-                <DetailFieldGrid
-                  label="Related URLs"
-                  fields={relatedFields}
-                />
+              <HackerRevealCard delayMs={620}>
+                <DetailFieldGrid label="Related URLs" fields={relatedFields} />
               </HackerRevealCard>
             ) : null}
 
-            <HackerRevealCard delayMs={820}>
-              <DetailFieldGrid
-                label="LLM / Summary Block"
-                fields={llmFields}
-                note="현재 summary provider가 채운 문서 단위 요약 상태입니다."
-              />
+            <HackerRevealCard delayMs={680}>
+              <DetailFieldGrid label="LLM / Summary Block" fields={llmFields} />
             </HackerRevealCard>
 
             {benchmarkFields.length > 0 ? (
-              <HackerRevealCard delayMs={880}>
-                <DetailFieldGrid
-                  label="Benchmark"
-                  fields={benchmarkFields}
-                />
+              <HackerRevealCard delayMs={740}>
+                <DetailFieldGrid label="Benchmark" fields={benchmarkFields} />
               </HackerRevealCard>
             ) : null}
 
             {metadataFields.length > 0 ? (
-              <HackerRevealCard delayMs={940}>
-                <DetailFieldGrid
-                  label="Metadata"
-                  fields={metadataFields}
-                />
+              <HackerRevealCard delayMs={800}>
+                <DetailFieldGrid label="Metadata" fields={metadataFields} />
               </HackerRevealCard>
             ) : null}
 
             {externalIdFields.length > 0 ? (
-              <HackerRevealCard delayMs={1000}>
-                <DetailFieldGrid
-                  label="External IDs"
-                  fields={externalIdFields}
-                />
+              <HackerRevealCard delayMs={860}>
+                <DetailFieldGrid label="External IDs" fields={externalIdFields} />
               </HackerRevealCard>
             ) : null}
 
             {rawRefFields.length > 0 ? (
-              <HackerRevealCard delayMs={1060}>
-                <DetailFieldGrid
-                  label="Raw Trace"
-                  fields={rawRefFields}
-                />
+              <HackerRevealCard delayMs={920}>
+                <DetailFieldGrid label="Raw Trace" fields={rawRefFields} />
               </HackerRevealCard>
             ) : null}
 
-            <HackerRevealCard delayMs={1120}>
+            <HackerRevealCard delayMs={980}>
               <DetailTextBlock
-                label="Reference Snippet"
-                text={referenceSnippet}
-                note="reference.snippet 또는 description 계열 preview입니다."
+                label="reference.snippet"
+                text={document.reference.snippet}
               />
             </HackerRevealCard>
 
-            <HackerRevealCard delayMs={1180}>
+            <HackerRevealCard delayMs={1040}>
               <DetailTextBlock
-                label="Summary Input Preview"
-                text={summaryInputPreview}
-                note="summary provider가 읽게 되는 본문/입력 텍스트 preview입니다."
+                label="summary_input_text"
+                text={document.summary_input_text}
               />
+            </HackerRevealCard>
+
+            <HackerRevealCard delayMs={1100}>
+              <DetailTextBlock label="body_text" text={document.body_text} />
             </HackerRevealCard>
           </div>
         </div>
@@ -1637,8 +1412,7 @@ function App() {
           payload.status === "summarizing"
         ) {
           setBlockingLoadingState(
-            payload.loading ??
-              buildReloadLoadingState(dashboard.session.loading ?? undefined),
+            payload.loading ?? buildReloadLoadingState(),
           );
           setIsReloading(true);
         }
@@ -1838,7 +1612,7 @@ function App() {
     return () => {
       isDisposed = true;
     };
-  }, [dashboard.session.sessionId]);
+  }, [dashboard.session.sessionId, dashboard.status]);
 
   function resetWorkspaceLayout() {
     resetPanelWorkspaceStorage();
@@ -1943,12 +1717,13 @@ function App() {
     dashboard.status === "collecting";
   const resolvedArenaOverview =
     leaderboardOverview ?? dashboard.session.arenaOverview;
-  const arenaBoards = resolvedArenaOverview?.boards ?? [];
+  const arenaBoards = resolvedArenaOverview?.boards ?? EMPTY_ARENA_BOARDS;
   const arenaBoardIdsKey = arenaBoards.map((board) => board.id).join("::");
   const selectedArenaBoard =
     arenaBoards.find((board) => board.id === selectedLeaderboardId) ??
     arenaBoards[0] ??
     null;
+  const leaderboardEntries = buildLeaderboardEntries(selectedArenaBoard);
   useEffect(() => {
     if (arenaBoards.length === 0) {
       if (selectedLeaderboardId !== null) {
@@ -1965,23 +1740,9 @@ function App() {
     }
 
     setSelectedLeaderboardId(arenaBoards[0].id);
-  }, [arenaBoardIdsKey, selectedLeaderboardId]);
+  }, [arenaBoardIdsKey, selectedLeaderboardId, arenaBoards]);
 
-  const infoItems = [
-    {
-      id: "session",
-      node: (
-        <SessionPanel
-          title={resolvedArenaOverview?.title ?? dashboard.session.title}
-          sessionDate={dashboard.session.sessionDate}
-          window={dashboard.session.window}
-          arenaOverview={resolvedArenaOverview}
-        />
-      ),
-      defaultRowSpan: 1,
-      defaultColSpan: 1,
-    },
-    ...dashboard.feeds.map((feed) => ({
+  const infoItems = dashboard.feeds.map((feed) => ({
       id: feed.id,
       node: (
         <SourcePanel
@@ -1993,13 +1754,11 @@ function App() {
       ),
       defaultRowSpan: 1,
       defaultColSpan: 1,
-    })),
-  ];
+    }));
 
   const summaryPanel = (
     <SummaryPanel
       title={dashboard.summary.title}
-      headline={dashboard.summary.headline}
       digests={dashboard.summary.digests}
       sessionLabel={panelSessionLabel}
       selectedDigestId={selectedDigestId}
@@ -2034,9 +1793,6 @@ function App() {
           <h1 className="orbit-wrap-anywhere mt-2 font-display text-[1.12rem] font-semibold text-orbit-text md:text-[1.32rem]">
             {dashboard.brand.name} Main Panel
           </h1>
-          <p className="orbit-wrap-anywhere mt-2 text-[0.76rem] leading-[1.6] text-orbit-text">
-            {statusDescription(dashboard.status)}
-          </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           <span className="orbit-token-ellipsis inline-flex max-w-[16rem] border border-orbit-border-strong bg-orbit-bg px-2 py-1 font-mono text-[0.66rem] uppercase tracking-[0.14em] text-orbit-text">
@@ -2054,34 +1810,15 @@ function App() {
       </div>
 
       <div className="mt-4 flex min-h-0 flex-1 flex-col border border-orbit-border bg-orbit-bg p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orbit-border pb-3">
-          <div className="min-w-0 flex-1">
-            <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-              Leaderboard Workspace
-            </p>
-            <h2 className="orbit-wrap-anywhere mt-2 font-display text-[1rem] font-semibold text-orbit-text md:text-[1.16rem]">
-              {selectedArenaBoard?.boardName ??
-                resolvedArenaOverview?.title ??
-                "Type Leaderboards"}
-            </h2>
-            <p className="orbit-wrap-anywhere mt-2 text-[0.76rem] leading-[1.6] text-orbit-text">
-              {selectedArenaBoard?.description ??
-                "메인 패널은 leaderboard만 표시하고, 탭으로 타입별 순위를 전환합니다."}
-            </p>
-          </div>
-          <div className="grid shrink-0 gap-1 text-right">
-            <span className="font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-muted">
-              status {statusLabel(dashboard.status)}
-            </span>
-            <span className="font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-muted">
-              boards {arenaBoards.length}
-            </span>
-            {selectedArenaBoard?.updatedAt ? (
-              <span className="font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-muted">
-                updated {selectedArenaBoard.updatedAt.slice(0, 10)}
-              </span>
-            ) : null}
-          </div>
+        <div className="border-b border-orbit-border pb-3">
+          <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
+            Leaderboard Workspace
+          </p>
+          <h2 className="orbit-wrap-anywhere mt-2 font-display text-[1rem] font-semibold text-orbit-text md:text-[1.16rem]">
+            {selectedArenaBoard?.boardName ??
+              resolvedArenaOverview?.title ??
+              "Type Leaderboards"}
+          </h2>
         </div>
 
         <div className="mt-4 flex gap-1 overflow-x-auto border border-orbit-border bg-orbit-panel p-1">
@@ -2125,189 +1862,55 @@ function App() {
               </p>
             </div>
           ) : selectedArenaBoard ? (
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.55fr)]">
-              <div className="grid gap-3">
-                <article className="border border-orbit-border-strong bg-orbit-panel p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="border border-orbit-accent bg-orbit-bg px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-accent">
-                          {selectedArenaBoard.label}
-                        </span>
-                        <span className="border border-orbit-border bg-orbit-bg px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-text">
-                          {formatLeaderboardValue(selectedArenaBoard.totalModels)} models
-                        </span>
-                        <span className="border border-orbit-border bg-orbit-bg px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-text">
-                          {formatLeaderboardValue(selectedArenaBoard.totalVotes)} votes
-                        </span>
+            <div className="grid gap-2">
+              {leaderboardEntries.map((entry, index) => (
+                <HackerRevealCard
+                  key={`${selectedArenaBoard.id}-${entry.rank}-${entry.modelName}`}
+                  delayMs={index * 70}
+                >
+                  <article className="orbit-leaderboard-entry grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 p-3">
+                    <div className="orbit-leaderboard-entry__rank flex h-10 min-w-10 items-center justify-center px-2 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-orbit-accent">
+                      #{entry.rank ?? "-"}
+                    </div>
+                    <div className="orbit-leaderboard-entry__body min-w-0">
+                      {entry.url ? (
+                        <a
+                          href={entry.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="orbit-wrap-anywhere font-display text-[0.9rem] font-semibold leading-[1.45] text-orbit-text underline underline-offset-4 hover:text-orbit-accent"
+                        >
+                          {entry.modelName ?? "-"}
+                        </a>
+                      ) : (
+                        <h3 className="orbit-wrap-anywhere font-display text-[0.9rem] font-semibold leading-[1.45] text-orbit-text">
+                          {entry.modelName ?? "-"}
+                        </h3>
+                      )}
+
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {entry.organization ? (
+                          <span className="border border-orbit-border bg-orbit-bg px-2 py-1 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-text">
+                            {entry.organization}
+                          </span>
+                        ) : null}
+                        {entry.rating != null ? (
+                          <span className="border border-orbit-border bg-orbit-bg px-2 py-1 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-text">
+                            {selectedArenaBoard.scoreLabel
+                              ? `${selectedArenaBoard.scoreLabel} ${formatLeaderboardValue(entry.rating)}`
+                              : formatLeaderboardValue(entry.rating)}
+                          </span>
+                        ) : null}
+                        {entry.votes != null ? (
+                          <span className="border border-orbit-border bg-orbit-bg px-2 py-1 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-text">
+                            votes {formatLeaderboardValue(entry.votes)}
+                          </span>
+                        ) : null}
                       </div>
-                      <h3 className="orbit-wrap-anywhere mt-3 font-display text-[1.04rem] font-semibold leading-[1.35] text-orbit-text">
-                        {selectedArenaBoard.boardName}
-                      </h3>
-                      <p className="orbit-wrap-anywhere mt-2 max-w-3xl text-[0.76rem] leading-[1.65] text-orbit-text">
-                        {selectedArenaBoard.description ??
-                          "이 leaderboard는 해당 타입의 상위 모델 순위를 보여줍니다."}
-                      </p>
                     </div>
-                    {selectedArenaBoard.referenceUrl ? (
-                      <a
-                        href={selectedArenaBoard.referenceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="shrink-0 border border-orbit-border bg-orbit-bg px-3 py-2 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-accent underline underline-offset-4 hover:text-orbit-text"
-                      >
-                        open board
-                      </a>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-4 grid gap-2 md:grid-cols-3">
-                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
-                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
-                        top item
-                      </p>
-                      <p className="orbit-wrap-anywhere mt-1 text-[0.78rem] leading-[1.5] text-orbit-text">
-                        {selectedArenaBoard.topModel.modelName ?? "top model 없음"}
-                      </p>
-                    </div>
-                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
-                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
-                        score
-                      </p>
-                      <p className="mt-1 font-mono text-[0.82rem] tracking-[-0.03em] text-orbit-text">
-                        {formatLeaderboardValue(selectedArenaBoard.topModel.rating)}
-                      </p>
-                    </div>
-                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
-                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
-                        snapshot
-                      </p>
-                      <p className="mt-1 font-mono text-[0.72rem] uppercase tracking-[0.1em] text-orbit-text">
-                        {formatIsoDate(selectedArenaBoard.updatedAt)}
-                      </p>
-                    </div>
-                  </div>
-                </article>
-
-                {selectedArenaBoard.topEntries.length > 0 ? (
-                  <div className="grid gap-2">
-                    {selectedArenaBoard.topEntries.map((entry) => (
-                      <article
-                        key={`${selectedArenaBoard.id}-${entry.rank}-${entry.modelName}`}
-                        className="orbit-leaderboard-entry grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 p-3"
-                      >
-                        <div className="orbit-leaderboard-entry__rank flex h-10 min-w-10 items-center justify-center px-2 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-orbit-accent">
-                          #{entry.rank ?? "-"}
-                        </div>
-                        <div className="orbit-leaderboard-entry__body min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            {entry.url ? (
-                              <a
-                                href={entry.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="orbit-wrap-anywhere font-display text-[0.86rem] font-semibold leading-[1.45] text-orbit-text underline underline-offset-4 hover:text-orbit-accent"
-                              >
-                                {entry.modelName ?? "Unknown model"}
-                              </a>
-                            ) : (
-                              <h3 className="orbit-wrap-anywhere font-display text-[0.86rem] font-semibold leading-[1.45] text-orbit-text">
-                                {entry.modelName ?? "Unknown model"}
-                              </h3>
-                            )}
-                            {entry.license ? (
-                              <span className="inline-flex border border-orbit-border bg-orbit-bg px-2 py-1 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
-                                {entry.license}
-                              </span>
-                            ) : null}
-                          </div>
-                          <p className="orbit-wrap-anywhere mt-1 text-[0.72rem] leading-[1.55] text-orbit-text">
-                            {entry.organization ?? "Unknown org"} ·{" "}
-                            {selectedArenaBoard.scoreLabel ?? "rating"}{" "}
-                            {formatLeaderboardValue(entry.rating)} · votes{" "}
-                            {formatLeaderboardValue(entry.votes)}
-                          </p>
-                          {(entry.contextLength ||
-                            entry.inputPricePerMillion ||
-                            entry.outputPricePerMillion) ? (
-                            <p className="orbit-wrap-anywhere mt-1 text-[0.64rem] leading-[1.5] text-orbit-muted">
-                              ctx {formatLeaderboardValue(entry.contextLength)} · in{" "}
-                              {formatLeaderboardValue(entry.inputPricePerMillion)} · out{" "}
-                              {formatLeaderboardValue(entry.outputPricePerMillion)}
-                            </p>
-                          ) : null}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="border border-dashed border-orbit-border bg-orbit-panel px-4 py-4">
-                    <p className="orbit-wrap-anywhere text-[0.74rem] leading-[1.6] text-orbit-muted">
-                      이 보드는 top entry 목록이 없는 snapshot입니다.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <aside className="grid gap-3">
-                <article className="border border-orbit-border bg-orbit-panel p-4">
-                  <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-                    Featured Item
-                  </p>
-                  {selectedArenaBoard.topModel.modelName ? (
-                    <>
-                      <p className="mt-3 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                        #{selectedArenaBoard.topModel.rank ?? "-"}
-                      </p>
-                      <p className="orbit-wrap-anywhere mt-2 font-display text-[0.98rem] font-semibold leading-[1.4] text-orbit-text">
-                        {selectedArenaBoard.topModel.modelName}
-                      </p>
-                      <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
-                        {selectedArenaBoard.topModel.organization ?? "Unknown org"} ·{" "}
-                        {selectedArenaBoard.scoreLabel ?? "rating"}{" "}
-                        {formatLeaderboardValue(selectedArenaBoard.topModel.rating)} · votes{" "}
-                        {formatLeaderboardValue(selectedArenaBoard.topModel.votes)}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="orbit-wrap-anywhere mt-3 text-[0.72rem] leading-[1.55] text-orbit-muted">
-                      top model 정보가 아직 없습니다.
-                    </p>
-                  )}
-                </article>
-
-                <article className="border border-orbit-border bg-orbit-panel p-4">
-                  <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-                    Board Stats
-                  </p>
-                  <div className="mt-3 grid gap-2">
-                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
-                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
-                        total models
-                      </p>
-                      <p className="mt-1 font-mono text-[0.9rem] tracking-[-0.03em] text-orbit-text">
-                        {formatLeaderboardValue(selectedArenaBoard.totalModels)}
-                      </p>
-                    </div>
-                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
-                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
-                        total votes
-                      </p>
-                      <p className="mt-1 font-mono text-[0.9rem] tracking-[-0.03em] text-orbit-text">
-                        {formatLeaderboardValue(selectedArenaBoard.totalVotes)}
-                      </p>
-                    </div>
-                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
-                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
-                        score unit
-                      </p>
-                      <p className="mt-1 font-mono text-[0.72rem] uppercase tracking-[0.1em] text-orbit-text">
-                        {selectedArenaBoard.scoreUnit ?? "-"}
-                      </p>
-                    </div>
-                  </div>
-                </article>
-              </aside>
+                  </article>
+                </HackerRevealCard>
+              ))}
             </div>
           ) : (
             <div className="border border-dashed border-orbit-border bg-orbit-panel px-4 py-4">

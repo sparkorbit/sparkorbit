@@ -6,7 +6,6 @@ import { card } from "./styles";
 
 type SummaryPanelProps = {
   title: string;
-  headline: string;
   digests: readonly DigestItem[];
   sessionLabel: string;
   selectedDigestId?: string | null;
@@ -16,7 +15,6 @@ type SummaryPanelProps = {
 
 export function SummaryPanel({
   title,
-  headline,
   digests,
   sessionLabel,
   selectedDigestId,
@@ -31,15 +29,6 @@ export function SummaryPanel({
       style={style}
     >
       <div className="flex h-full min-h-0 flex-col gap-2.5">
-        <div className="border border-orbit-border-strong bg-orbit-bg p-3">
-          <p className="font-mono text-[0.66rem] uppercase tracking-[0.22em] text-orbit-accent">
-            도메인 다이제스트
-          </p>
-          <p className="orbit-wrap-anywhere mt-2 text-[0.78rem] leading-[1.65] text-orbit-text">
-            {headline}
-          </p>
-        </div>
-
         <div className="grid min-h-0 flex-1 gap-2">
           {digests.map((digest) => (
             <button
