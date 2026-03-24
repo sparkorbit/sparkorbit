@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "python3 -m backend.app api-server",
     "build": "tsc -b && vite build",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:runtime": "python3 -m unittest discover -s tests -p 'test_*.py'"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",

@@ -1,18 +1,20 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap");
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-sans: "IBM Plex Sans KR", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-display: "IBM Plex Sans KR", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-  --font-body: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-  --color-orbit-bg: #040b08;
-  --color-orbit-text: #ddffe6;
-  --color-orbit-muted: #79a78a;
-  --color-orbit-accent: #7cff9b;
-  --color-orbit-accent-strong: #baff63;
-  --color-orbit-teal: #55f3cc;
-  --color-orbit-gold: #e4ff7a;
-  --shadow-panel: 0 28px 60px rgba(0, 0, 0, 0.42);
+  --font-body: "IBM Plex Sans KR", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-mono: "IBM Plex Mono", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", monospace;
+  --color-orbit-bg: #050705;
+  --color-orbit-bg-elevated: #0b100b;
+  --color-orbit-panel: #0d130d;
+  --color-orbit-border: #233223;
+  --color-orbit-border-strong: #3a5a33;
+  --color-orbit-text: #d6f5d0;
+  --color-orbit-muted: #7e957d;
+  --color-orbit-accent: #8dfc54;
+  --color-orbit-accent-dim: #4f7a43;
 }
 
 html {
@@ -22,23 +24,240 @@ html {
 body {
   font-family: var(--font-body);
   color-scheme: dark;
-  background:
-    radial-gradient(circle at top right, rgba(85, 243, 204, 0.08), transparent 28%),
-    radial-gradient(circle at bottom left, rgba(124, 255, 155, 0.08), transparent 32%),
-    var(--color-orbit-bg);
+  background: var(--color-orbit-bg);
   color: var(--color-orbit-text);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
 
-@keyframes rise-in {
+.orbit-grid {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M0 0.5H24M0.5 0V24' stroke='%238dfc54' stroke-opacity='0.04'/%3E%3C/svg%3E");
+  background-size: 24px 24px;
+}
+
+.orbit-scanlines {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' viewBox='0 0 4 4'%3E%3Crect width='4' height='1' fill='%23d6f5d0' fill-opacity='0.018'/%3E%3C/svg%3E");
+  background-size: 100% 4px;
+}
+
+@keyframes fade-in {
   from {
     opacity: 0;
-    transform: translateY(18px) scale(0.98);
   }
 
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
   }
+}
+
+@keyframes orbit-hacker-frame {
+  0% {
+    opacity: 0;
+  }
+
+  20% {
+    opacity: 0.92;
+  }
+
+  55% {
+    opacity: 0.45;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes orbit-hacker-scan-band {
+  0% {
+    opacity: 0;
+    transform: translateY(-130%);
+  }
+
+  12% {
+    opacity: 0.38;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(340%);
+  }
+}
+
+@keyframes orbit-hacker-scan-line {
+  0% {
+    opacity: 0;
+    transform: translateY(-130%);
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(880%);
+  }
+}
+
+@keyframes orbit-hacker-content {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+    clip-path: inset(0 0 100% 0);
+  }
+
+  45% {
+    opacity: 0.55;
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes orbit-loading-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.orbit-loader-shell {
+  border: 1px solid var(--color-orbit-border-strong);
+  background:
+    linear-gradient(180deg, rgb(11 16 11 / 0.96), rgb(5 7 5 / 0.98)),
+    var(--color-orbit-bg);
+  box-shadow:
+    0 0 0 1px rgb(141 252 84 / 0.06),
+    0 18px 60px rgb(0 0 0 / 0.45);
+  padding: 2rem 1.4rem;
+}
+
+.orbit-loading-bar {
+  position: relative;
+  overflow: hidden;
+  height: 14px;
+  border: 1px solid var(--color-orbit-border-strong);
+  background:
+    linear-gradient(
+      90deg,
+      rgb(141 252 84 / 0.05),
+      rgb(141 252 84 / 0.02) 35%,
+      transparent 35%,
+      transparent 100%
+    ),
+    var(--color-orbit-bg);
+}
+
+.orbit-loading-bar__fill {
+  height: 100%;
+  background:
+    linear-gradient(
+      90deg,
+      rgb(141 252 84 / 0.22),
+      rgb(141 252 84 / 0.92) 45%,
+      rgb(214 245 208 / 0.92) 100%
+    );
+  box-shadow: 0 0 24px rgb(141 252 84 / 0.18);
+  transition: width 280ms ease-out;
+}
+
+.orbit-loading-bar__fill--indeterminate {
+  width: 28%;
+  animation: orbit-loading-sweep 1.4s linear infinite;
+}
+
+.orbit-hacker-reveal {
+  --hacker-delay: 0ms;
+  --hacker-content-delay: calc(var(--hacker-delay) + 40ms);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.orbit-hacker-reveal::before,
+.orbit-hacker-reveal::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.orbit-hacker-reveal::before {
+  z-index: 3;
+  border: 1px solid var(--color-orbit-accent);
+  opacity: 0;
+  animation: orbit-hacker-frame 300ms steps(4, end) var(--hacker-delay)
+    forwards;
+}
+
+.orbit-hacker-reveal::after {
+  top: -26%;
+  bottom: auto;
+  z-index: 2;
+  height: 26%;
+  background: rgb(141 252 84 / 0.08);
+  border-top: 1px solid rgb(141 252 84 / 0.35);
+  border-bottom: 1px solid rgb(141 252 84 / 0.35);
+  opacity: 0;
+  animation: orbit-hacker-scan-band 520ms steps(8, end) var(--hacker-delay)
+    forwards;
+}
+
+.orbit-hacker-reveal__content {
+  position: relative;
+  z-index: 1;
+  opacity: 0;
+  clip-path: inset(0 0 100% 0);
+  animation: orbit-hacker-content 420ms steps(9, end)
+    var(--hacker-content-delay) forwards;
+}
+
+.orbit-hacker-reveal__content::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 4;
+  height: 1px;
+  background: var(--color-orbit-accent);
+  opacity: 0;
+  pointer-events: none;
+  animation: orbit-hacker-scan-line 540ms steps(12, end) var(--hacker-delay)
+    forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-hacker-reveal::before,
+  .orbit-hacker-reveal::after,
+  .orbit-hacker-reveal__content,
+  .orbit-hacker-reveal__content::before {
+    animation: none;
+  }
+
+  .orbit-hacker-reveal__content {
+    opacity: 1;
+    transform: none;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+[data-orbit-motion="off"] .orbit-hacker-reveal::before,
+[data-orbit-motion="off"] .orbit-hacker-reveal::after,
+[data-orbit-motion="off"] .orbit-hacker-reveal__content,
+[data-orbit-motion="off"] .orbit-hacker-reveal__content::before {
+  animation: none;
+}
+
+[data-orbit-motion="off"] .orbit-hacker-reveal__content {
+  opacity: 1;
+  transform: none;
+  clip-path: inset(0 0 0 0);
 }

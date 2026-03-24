@@ -1,4 +1,4 @@
-[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [03. Runtime Flow Draft](./03_runtime_flow_draft.md) · **04. LLM Usage** · [05. Data Collection Pipeline](./05_data_collection_pipeline.md)
+[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · **04. LLM Usage** · [05. Data Collection Pipeline](./05_data_collection_pipeline.md)
 
 ---
 
@@ -447,7 +447,7 @@ Step 4  LLM 6-7회 호출      ~15-20s (섹션당 2-3초, GPU)
 
 ## 5. DB에 어떻게 연결할까
 
-현재 runtime draft의 enrichment 레이어를 확장해서 아래 엔터티를 두는 것을 권장한다.
+현재 runtime flow의 enrichment 레이어를 확장해서 아래 엔터티를 두는 것을 권장한다.
 
 | 테이블 | 역할 |
 |--------|------|

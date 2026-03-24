@@ -6,7 +6,7 @@ import subprocess
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from source_fetch.adapters import (
     build_summary_input,
@@ -530,13 +530,20 @@ def run_collection(
     output_dir: str,
     run_label: str,
     timeout: float,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], Path]:
+    def emit_progress(**payload: Any) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(payload)
+
     run_id = utc_run_id(run_label)
     run_dir = Path(output_dir) / run_id
     paths = ensure_dirs(run_dir)
     selected_sources = resolve_sources(sources)
     applied_limit = effective_limit(profile, limit)
     started_at = now_utc_iso()
+    total_sources = len(selected_sources)
 
     run_manifest: dict[str, Any] = {
         "run_id": run_id,
@@ -557,8 +564,25 @@ def run_collection(
 
     client = make_client(timeout=timeout)
     try:
+        emit_progress(
+            stage="starting",
+            run_id=run_id,
+            total_sources=total_sources,
+            completed_sources=0,
+            current_source=None,
+            detail=f"Preparing {total_sources} source(s) for collection.",
+        )
         for source in selected_sources:
             source_started_at = datetime.now(UTC)
+            emit_progress(
+                stage="fetching_sources",
+                run_id=run_id,
+                total_sources=total_sources,
+                completed_sources=len(source_manifest_entries),
+                current_source=source.name,
+                source_index=len(source_manifest_entries) + 1,
+                detail=f"Fetching {source.name} ({len(source_manifest_entries) + 1}/{total_sources}).",
+            )
             try:
                 result = fetch_source(client, source, run_id, applied_limit)
                 result.documents = [normalize_document_contract(document) for document in result.documents]
@@ -640,6 +664,15 @@ def run_collection(
                     run_manifest["excluded_count"] += 1
                 else:
                     run_manifest["success_count"] += 1
+                emit_progress(
+                    stage="fetching_sources",
+                    run_id=run_id,
+                    total_sources=total_sources,
+                    completed_sources=len(source_manifest_entries),
+                    current_source=source.name,
+                    source_index=len(source_manifest_entries),
+                    detail=f"Completed {source.name} with status {status}.",
+                )
             except Exception as exc:
                 duration_ms = int((datetime.now(UTC) - source_started_at).total_seconds() * 1000)
                 error_entry = {
@@ -679,9 +712,26 @@ def run_collection(
                     }
                 )
                 run_manifest["error_count"] += 1
+                emit_progress(
+                    stage="fetching_sources",
+                    run_id=run_id,
+                    total_sources=total_sources,
+                    completed_sources=len(source_manifest_entries),
+                    current_source=source.name,
+                    source_index=len(source_manifest_entries),
+                    detail=f"{source.name} failed with {type(exc).__name__}.",
+                )
     finally:
         client.close()
 
+    emit_progress(
+        stage="writing_artifacts",
+        run_id=run_id,
+        total_sources=total_sources,
+        completed_sources=len(source_manifest_entries),
+        current_source=None,
+        detail="Writing manifests, normalized outputs, and contract report.",
+    )
     append_ndjson(paths["root"] / "source_manifest.ndjson", source_manifest_entries)
     append_ndjson(paths["logs"] / "fetch.ndjson", fetch_log_rows)
     append_ndjson(paths["logs"] / "errors.ndjson", error_rows)

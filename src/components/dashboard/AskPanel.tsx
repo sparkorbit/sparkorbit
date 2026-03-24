@@ -33,25 +33,25 @@ export function AskPanel({
           {description}
         </p>
 
-        <div className="rounded-[1rem] border border-[rgba(85,243,204,0.16)] bg-[linear-gradient(135deg,rgba(12,44,29,0.98),rgba(4,17,10,0.98)_58%,rgba(7,38,26,0.94))] p-3 text-[#eaffef] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-          <p className="font-display text-[0.67rem] uppercase tracking-[0.18em] text-[rgba(197,255,214,0.7)]">
+        <div className="border border-orbit-border-strong bg-orbit-bg p-3 text-orbit-text">
+          <p className="font-mono text-[0.66rem] uppercase tracking-[0.22em] text-orbit-accent">
             근거 기반 프롬프트
           </p>
           <div className="mt-2 space-y-1.5">
             {prompts.map((prompt, index) => (
               <article
                 key={prompt.question}
-                className="rounded-[0.95rem] border border-[rgba(124,255,155,0.12)] bg-[rgba(4,20,12,0.5)] p-2.5"
+                className="border border-orbit-border bg-orbit-panel p-2.5"
               >
                 <div className="flex items-start gap-2">
-                  <span className="font-display mt-0.5 text-[0.64rem] font-bold tracking-[0.14em] text-[rgba(197,255,214,0.56)]">
+                  <span className="font-mono mt-0.5 text-[0.64rem] font-semibold tracking-[0.16em] text-orbit-accent">
                     0{index + 1}
                   </span>
                   <div className="min-w-0">
                     <h3 className="font-display text-[0.8rem] font-semibold leading-[1.4]">
                       {prompt.question}
                     </h3>
-                    <p className="mt-1.5 text-[0.72rem] leading-[1.45] text-[rgba(232,255,238,0.74)]">
+                    <p className="mt-1.5 text-[0.72rem] leading-[1.45] text-orbit-muted">
                       {prompt.grounding}
                     </p>
                   </div>

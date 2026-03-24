@@ -40,7 +40,7 @@ export function EvidencePanel({
           {steps.map((step) => (
             <article key={step.step} className={`${card} space-y-1.5`}>
               <div className="flex items-center justify-between gap-2">
-                <span className="rounded-full border border-[rgba(124,255,155,0.14)] bg-[rgba(124,255,155,0.08)] px-2 py-1 text-[0.66rem] leading-none text-orbit-accent">
+                <span className="border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.64rem] uppercase tracking-[0.12em] text-orbit-accent">
                   {step.step}
                 </span>
                 <span className={pill}>{step.title}</span>

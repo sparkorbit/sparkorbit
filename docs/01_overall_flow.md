@@ -1,130 +1,144 @@
-[Index](./README.md) · **01. Overall Flow** · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [03. Runtime Flow Draft](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md)
+[Index](./README.md) · **01. Overall Flow** · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md)
 
 ---
 
 # SparkOrbit Docs - 01. Overall Flow
 
 > Canonical overview
-> Last updated: 2026-03-23
+> Last updated: 2026-03-24
 
 ## Current Status
 
-- 현재 저장소에서 실제로 구현된 것은 `PoC/source_fetch` 데이터 수집 파이프라인이다.
-- 아래의 Redis, digest, cluster, Ask Agent, `docker compose up` 기반 전체 구조는 제품 목표와 target architecture 설명이다.
-- 구현된 실행 경로는 [05. Data Collection Pipeline](./05_data_collection_pipeline.md) 을 기준으로 본다.
+- 현재 저장소에는 세 층이 모두 구현돼 있다.
+  - `PoC/source_fetch`: source collection pipeline
+  - `backend/app`: FastAPI backend + Redis session runtime
+  - `src`: React dashboard frontend
+- collection run output는 여전히 `PoC/source_fetch/data/runs/<run_id>/` 아래 JSONL/JSON 산출물이 canonical artifact다.
+- Redis는 장기 저장소가 아니라 현재 세션을 빠르게 서빙하기 위한 materialized session layer다.
+- `cluster / event / Ask Agent` 같은 상위 레이어는 아직 제품 목표 성격이 더 강하고, 현재 구현의 핵심은 `summary + source feed + document drill-down + live loading`이다.
 
 ## What We Are Building
 
-SparkOrbit는 AI/Tech 분야의 최신 정보를 **앱 시작 시 수집해 한 화면에 모아서 보여주는 Open World Agents 기반 인터페이스**다. 논문, 오픈소스, 기업 발표, 커뮤니티 반응, 벤치마크를 동시에 보고, LLM 요약을 통해 빠르게 훑은 뒤 원문까지 drill-down할 수 있어야 한다.
+SparkOrbit는 AI/Tech 분야의 최신 정보를 한 화면에서 빠르게 훑고, 바로 원문까지 drill-down할 수 있는 live monitor다. 논문, 커뮤니티, 기업 발표, 벤치마크를 함께 보되, source feed는 source별로 유지하고, 여러 source를 한 문맥으로 엮는 일은 summary/digest 레이어에서만 처리한다.
 
-핵심은 "요약만 보여주는 화면"이 아니라, **요약 -> 관련 이벤트 -> 실제 문서와 링크**로 자연스럽게 이어지는 구조다.
+현재 구현의 중요한 특징은 아래 두 가지다.
 
-## Screen Shape
+1. 앱이 빈 상태로 뜨면 홈페이지 진입 시 backend가 실제 source collection을 시작한다.
+2. frontend는 SSE로 bootstrap/reload 진행 상태를 실시간으로 받아 fullscreen loader와 stage panel에 반영한다.
 
-| Lane | What the user sees | Main backing data |
-|------|--------------------|-------------------|
-| **Summary Lane** | domain headline, short digest, key change | `digest`, `cluster summary` |
-| **SNS / Community Lane** | Reddit, HN, 공개 커뮤니티 반응 | source feed |
-| **Paper Lane** | arXiv, HF paper, research update | source feed |
-| **Company / Release Lane** | 회사 뉴스, changelog, release note | source feed |
-| **Open Source Lane** | GitHub repo/release 변화 | source feed |
-| **Benchmark Lane** | leaderboard, model comparison | benchmark snapshot |
-| **Ask / Agent Lane** | 현재 화면 기준 follow-up 질문 | digest + cluster + document retrieval |
+## Current Screen Shape
 
-## Architecture Diagram
+| Surface | Status | Main backing data |
+|---------|--------|-------------------|
+| **Summary Panel** | 구현됨 | `digest:{category}`, `dashboard.summary` |
+| **Source Panels** | 구현됨 | `feed:{source}`, `doc:{document_id}` |
+| **Session / Runtime Panel** | 구현됨 | `meta`, `bootstrap_state`, `reload_state` |
+| **Digest Detail** | 구현됨 | `digest:{category}` + referenced documents |
+| **Document Detail** | 구현됨 | `doc:{document_id}` |
+| **Ask / Agent Lane** | 목표 | digest + retrieval layer |
+
+## Actual Runtime Shape
 
 ```mermaid
-flowchart TB
-    subgraph Sources["Source Adapters"]
-        direction LR
-        S1["arXiv /\nHF Papers"]
-        S2["Reddit /\nHN"]
-        S3["Company Blogs\n(RSS + Scrape)"]
-        S4["Tech News\n(RSS)"]
-        S5["GitHub\nReleases"]
-        S6["Benchmarks\n(LMArena,\nOpen LLM)"]
-        S1 ~~~ S2 ~~~ S3 ~~~ S4 ~~~ S5 ~~~ S6
+flowchart LR
+    subgraph Collect["PoC/source_fetch"]
+        A["Source adapters"]
+        B["run_collection(...)"]
+        C["run outputs\nraw + normalized + logs"]
     end
 
-    subgraph Storage["Storage  (Redis)"]
-        RAW["raw:{source}:{id}\n원본 payload"]
-        DOC["doc:{source}:{id}\n정규화 문서"]
-        FEED["feed:{source}\n소스별 최신 목록"]
+    subgraph Runtime["FastAPI backend"]
+        D["collector wrapper"]
+        E["publish_run(...)"]
+        F["run_session_enrichment(...)"]
+        G["/api/dashboard\n/api/sessions/reload\nSSE streams"]
     end
 
-    subgraph Enrichment["Enrichment  (high-engagement only)"]
-        SUM["summary:{source}:{id}\nLLM 요약"]
-        CLUSTER["cluster\n주제 단위 묶음"]
-        DIGEST["digest:{domain}:{window}\n홈 화면 요약"]
+    subgraph Redis["Redis session store"]
+        H["bootstrap_state / reload_state"]
+        I["session meta"]
+        J["doc / feed / digest / dashboard"]
+        K["active session pointer"]
     end
 
-    subgraph UI["Open World Agents UI"]
-        direction LR
-        L1["Summary\nLane"]
-        L2["SNS /\nCommunity"]
-        L3["Paper\nLane"]
-        L4["Company /\nRelease"]
-        L5["Open Source\nLane"]
-        L6["Benchmark\nLane"]
-        L7["Ask /\nAgent"]
+    subgraph UI["React frontend"]
+        L["fullscreen loading"]
+        M["session panel"]
+        N["summary + source panels"]
+        O["digest / document detail"]
     end
 
-    Sources -->|collect| RAW
-    RAW -->|normalize + dedup| DOC
-    DOC --> FEED
-
-    DOC -->|"discovery + engagement 기준 상위 문서"| SUM
-    SUM --> CLUSTER
-    CLUSTER --> DIGEST
-
-    FEED --> UI
-    DIGEST --> L1
-    FEED --> L2 & L3 & L4 & L5 & L6
-    DIGEST --> L7
-
-    style Sources fill:#e8f4fd,stroke:#4a90d9
-    style Storage fill:#fff3e0,stroke:#f5a623
-    style Enrichment fill:#e8f5e9,stroke:#4caf50
-    style UI fill:#f3e5f5,stroke:#9c27b0
+    A --> B --> C
+    D --> B
+    C --> E --> I
+    E --> J
+    E --> K
+    E --> F --> J
+    G --> H
+    G --> I
+    G --> J
+    G --> K
+    H --> G
+    I --> G
+    J --> G
+    G --> L
+    G --> M
+    G --> N
+    G --> O
 ```
-
-**Drill-down 흐름:** `digest → cluster → document → original URL`
 
 ## User Flow
 
-1. 앱이 시작되면 source별 데이터를 먼저 수집한다.
-2. 홈 화면에서는 summary 카드와 source panel이 함께 보인다.
-3. 사용자가 summary 카드를 누르면 해당 domain/event의 묶음이 열린다.
-4. event를 누르면 관련 문서와 실제 URL이 source별로 펼쳐진다.
-5. 사용자는 요약을 읽다가 바로 원문으로 들어가거나, agent에게 추가 질문을 던질 수 있다.
+### Homepage Entry
+
+1. 브라우저가 `/api/dashboard/stream?session=active`에 연결한다.
+2. active session이 있으면 backend가 바로 current dashboard를 stream으로 보낸다.
+3. active session이 없으면 backend가 `bootstrap_state`를 만들고 실제 collection을 시작한다.
+4. frontend는 fullscreen loader에서 `Prepare -> Collect -> Normalize -> Publish Docs -> Publish Views -> Summarize -> Digests` 단계를 실시간으로 보여준다.
+5. publish가 끝나면 active session이 교체되고, summary/digest가 채워지면서 일반 dashboard 화면으로 이어진다.
+
+### Manual Reload
+
+1. 사용자가 `reload session`을 누르면 `POST /api/sessions/reload`가 새 run을 시작한다.
+2. frontend는 `/api/sessions/reload/stream`에 연결해 reload 전용 진행 상태를 받는다.
+3. 새로고침하더라도 frontend가 `/api/sessions/reload` state를 다시 읽어 fullscreen loader를 복구한다.
+4. reload가 끝나면 active session이 새 run으로 교체되고, dashboard SSE가 새 상태를 계속 반영한다.
+
+### Drill-down
+
+1. summary digest 클릭
+2. `/api/digests/{id}` 호출
+3. referenced documents 확인
+4. 문서 클릭 시 `/api/documents/{document_id}` 호출
+5. 필요하면 원문 URL 오픈
 
 ## Operating Principles
 
-1. 목표 상태에서는 `docker compose up` 후 바로 동작해야 한다.
-2. 무료, 인증 없는 소스를 우선한다.
-3. source feed는 섞지 않는다.
-4. 여러 source를 묶는 일은 summary / cluster / digest 레이어에서만 한다.
-5. 요약은 원문을 대체하지 않고 항상 원문 링크와 근거를 동반해야 한다.
-6. 데이터는 세션 기반으로 보고, `Clear` 또는 날짜 변경 시 같은 실행 환경 안에서 다시 로딩한다.
-7. 이 프로젝트는 대규모 운영 시스템보다 해커톤용 동작 가능한 흐름을 우선한다.
-8. 크롤링 결과에는 `&amp;`, `&#39;`, `&nbsp;` 같은 HTML entity나 인코딩 깨짐이 섞일 수 있다고 가정한다.
-9. 따라서 `raw`에는 원본을 그대로 남기고, 화면/검색/요약용 `normalized` 레이어에서 entity decode와 공백 정리를 수행한다.
+1. collection source of truth는 항상 JSONL run output다.
+2. Redis는 현재 세션을 빠르게 읽기 위한 서빙 계층이다.
+3. source feed는 source별로 분리하고, cross-source mixing은 digest에서만 한다.
+4. URL 없는 문서는 기본 서빙 대상에서 제외한다.
+5. homepage와 reload는 둘 다 실제 source collection을 다시 실행할 수 있어야 한다.
+6. 로딩 상태는 단순 spinner가 아니라 단계, 퍼센트, 현재 source를 보여주는 운영 콘솔 UX를 우선한다.
+7. 이 프로젝트는 대규모 운영 시스템보다 해커톤용으로 바로 띄워서 볼 수 있는 흐름을 우선한다.
 
 ## Document Map
 
 - [02. Sections](./02_sections/README.md)
 - [02.1 Sources](./02_sections/02_1_sources.md)
-- [03. Runtime Flow Draft](./03_runtime_flow_draft.md)
+- [02.2 Fields](./02_sections/02_2_fields.md)
+- [03. Runtime Flow](./03_runtime_flow_draft.md)
 - [04. LLM Usage](./04_llm_usage.md)
+- [05. Data Collection Pipeline](./05_data_collection_pipeline.md)
+- [06. UI Design Guide](./06_ui_design_guide.md)
 
-## Why The Docs Were Split
+## Why The Docs Are Split
 
-기존에는 source research와 runtime/storage draft가 한 파일 안에 같이 있었다. 지금 구조에서는:
+- `01`은 제품 전체 흐름과 현재 구현 범위를 설명한다.
+- `02.1`은 source 선정과 그룹을 관리한다.
+- `02.2`는 normalized document contract를 관리한다.
+- `03`은 backend, Redis, SSE, session serving 흐름을 설명한다.
+- `05`는 collection pipeline 자체만 설명한다.
+- `06`은 현재 프론트엔드의 시각/상태 표현 규칙을 설명한다.
 
-- `01`은 제품 전체 흐름
-- `02`는 화면/섹션 관점 정리
-- `02.1`은 source research
-- `03`은 아직 검토 중인 runtime / plan draft
-- `04`는 LLM usage
-
-로 역할을 분리해서, 나중에 정확도가 다른 내용이 서로 섞이지 않도록 관리한다.
+이렇게 나누는 이유는 `collection`, `runtime serving`, `UI design`을 한 문서에 섞지 않기 위해서다.

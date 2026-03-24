@@ -1,69 +1,78 @@
 # SparkOrbit
 
 AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world monitor 프로젝트다.
-현재 저장소에서 실제로 구현된 코드는 `PoC/source_fetch` 아래의 JSONL 기반 source collection pipeline이고, Redis/UI까지 포함한 구조는 아직 target architecture 문서 단계에 있다.
 
-GitHub를 이 프로젝트의 **문서 source of truth**로 사용한다.
-기획/리서치/LLM 활용 문서는 Markdown 기준으로 관리하고, Notion은 필요할 때만 파생본으로 만든다.
+현재 저장소에는 아래 세 층이 구현돼 있다.
+
+- `PoC/source_fetch`: source collection pipeline
+- `backend/app`: FastAPI backend + Redis session runtime
+- `src`: React dashboard frontend
+
+canonical source of truth는 여전히 `PoC/source_fetch/data/runs/<run_id>/` 아래의 JSONL/JSON run output다. Redis는 현재 세션을 빠르게 서빙하기 위한 layer이고, frontend는 backend API/BFF만 사용한다.
 
 ## Docs Map
 
 - [docs/README.md](./docs/README.md)
   canonical 문서 루트
 - [docs/01_overall_flow.md](./docs/01_overall_flow.md)
-  제품 전체 흐름, 화면 구조, 핵심 원칙
+  제품 전체 흐름, 현재 구현 범위, 실제 user flow
 - [docs/02_sections/02_1_sources.md](./docs/02_sections/02_1_sources.md)
   canonical source list
 - [docs/02_sections/02_2_fields.md](./docs/02_sections/02_2_fields.md)
   normalized field contract
 - [docs/03_runtime_flow_draft.md](./docs/03_runtime_flow_draft.md)
-  target runtime / storage / serving 초안
+  backend, Redis session, SSE serving flow
 - [docs/04_llm_usage.md](./docs/04_llm_usage.md)
-  LLM 요약 레이어, drill-down UX, prompt pack, reference 원칙
+  LLM 요약 레이어와 확장 방향
 - [docs/05_data_collection_pipeline.md](./docs/05_data_collection_pipeline.md)
-  현재 구현된 PoC data collection pipeline 설명
-
-## Reality Check
-
-- 지금 코드로 바로 실행되는 것은 `PoC/source_fetch` collection pipeline이다.
-- Redis, LLM enrichment runtime, UI, `docker compose up` 기반 전체 시스템은 아직 목표 구조 문서다.
-- 구현된 동작을 확인할 때는 `README -> docs/05 -> PoC/source_fetch/scripts/data_collection.py` 순서로 보면 가장 덜 헷갈린다.
+  canonical collection pipeline 설명
+- [docs/06_ui_design_guide.md](./docs/06_ui_design_guide.md)
+  current frontend visual/loading guide
 
 ## Current Implementation
 
-- 실제 코드 entrypoint는 [PoC/source_fetch/scripts/data_collection.py](./PoC/source_fetch/scripts/data_collection.py) 하나다.
-- 실행 결과는 `PoC/source_fetch/data/runs/<run_id>/` 아래에 `raw + normalized + sample + logs`로 저장된다.
-- 핵심 구현 파일은 `adapters.py`, `models.py`, `pipeline.py`다.
+- collection entrypoint는 [PoC/source_fetch/scripts/data_collection.py](./PoC/source_fetch/scripts/data_collection.py) 다.
+- backend entrypoint는 [backend/app/main.py](./backend/app/main.py), CLI는 [backend/app/cli.py](./backend/app/cli.py) 다.
+- frontend main app은 [src/App.tsx](./src/App.tsx) 다.
+- homepage 진입 시 active session이 없으면 backend가 실제 collection을 시작하고, frontend는 SSE로 로딩 단계를 실시간 표시한다.
+- `reload session`을 누르면 새 run을 다시 수집하고 Redis active session을 교체한다.
 
 ## Quick Start
 
+### 1. Collection only
+
 ```bash
-git clone https://github.com/sparkorbit/documents-planning.git
-cd documents-planning/PoC/source_fetch
+cd PoC/source_fetch
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.lock.txt
-python scripts/data_collection.py --profile sample --run-label sample
-```
-
-설치 확인이 끝나면 기본 `full` 실행으로 넓게 모아볼 수 있다.
-
-```bash
 python scripts/data_collection.py --run-label full
 ```
 
+### 2. Full local stack with Docker
+
+```bash
+docker compose up --build
+```
+
+주소:
+
+- frontend: [http://127.0.0.1:3000](http://127.0.0.1:3000)
+- backend health: [http://127.0.0.1:8787/api/health](http://127.0.0.1:8787/api/health)
+- redis: `127.0.0.1:6379`
+
+## Runtime Notes
+
+- frontend는 `/api/dashboard/stream`과 `/api/sessions/reload/stream` SSE를 사용한다.
+- 새로고침 중 reload가 진행 중이면 frontend가 `/api/sessions/reload` state를 다시 읽어 fullscreen loader를 복구한다.
+- worker 컨테이너는 queue 기반 enrichment를 위한 sidecar이고, homepage bootstrap/reload는 현재 API background task 안에서 enrichment까지 바로 처리한다.
+
 ## Product Goal
 
-- Open World Agents 메인 화면에서 여러 패널을 동시에 본다.
-- source feed는 섞지 않고, Reddit / HN / Papers / Company / OSS / Benchmark를 각각 따로 보여준다.
-- LLM은 summary / cluster / digest 레이어에서만 여러 source를 주제 기준으로 묶는다.
-- summary를 클릭하면 관련 문서와 실제 원문 URL, 짧은 요약, 세부 요약이 함께 펼쳐진다.
-
-## Target Architecture
-
-- Redis + collector + enricher + UI가 함께 동작하는 구조를 목표로 한다.
-- 이 목표 형태는 [docs/03_runtime_flow_draft.md](./docs/03_runtime_flow_draft.md) 에 정리돼 있다.
-- 현재 repo에서 구현 완료된 부분은 위의 `Current Implementation`에 적은 collection pipeline이다.
+- summary, source feed, benchmark, session runtime 상태를 한 화면에서 본다.
+- source feed는 섞지 않고 source별로 유지한다.
+- 여러 source를 주제 기준으로 묶는 일은 digest/summary 레이어에서만 한다.
+- summary를 클릭하면 관련 문서와 실제 원문 URL, 짧은 요약, 세부 정보가 함께 열린다.
 
 ## PoC
 

@@ -14,20 +14,25 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 
 ## 현재 구현된 코드 범위
 
-- 실제 구현은 `PoC/source_fetch` 아래의 source collection pipeline이다.
-- 공식 entrypoint는 `PoC/source_fetch/scripts/data_collection.py` 하나다.
+- 실제 수집의 canonical pipeline은 `PoC/source_fetch` 아래에 있다.
+- 공식 collection entrypoint는 `PoC/source_fetch/scripts/data_collection.py` 하나다.
+- 현재 저장소에는 이 collection 결과를 Redis session으로 publish하는 FastAPI backend와 React frontend도 구현돼 있다.
 - 핵심 구현 파일:
-  - `PoC/source_fetch/scripts/source_fetch/adapters.py`
-  - `PoC/source_fetch/scripts/source_fetch/models.py`
-  - `PoC/source_fetch/scripts/source_fetch/pipeline.py`
-- 실행 결과는 `PoC/source_fetch/data/runs/<run_id>/` 아래에 `raw + normalized + sample + logs`로 저장된다.
+  - collection: `PoC/source_fetch/scripts/source_fetch/adapters.py`
+  - collection: `PoC/source_fetch/scripts/source_fetch/models.py`
+  - collection: `PoC/source_fetch/scripts/source_fetch/pipeline.py`
+  - backend runtime: `backend/app/services/session_service.py`
+  - backend api: `backend/app/api/routes/dashboard.py`
+  - backend api: `backend/app/api/routes/sessions.py`
+  - frontend app: `src/App.tsx`
+- collection 실행 결과는 `PoC/source_fetch/data/runs/<run_id>/` 아래에 `raw + normalized + sample + logs`로 저장되고, 이 JSONL run output가 source of truth다.
 
 ## 목표 아키텍처와 구현 상태
 
 - `docs/05_data_collection_pipeline.md`
   현재 구현된 PoC pipeline 설명
 - `docs/03_runtime_flow_draft.md`
-  Redis/UI를 포함한 target architecture 초안
+  현재 구현된 backend / Redis session / serving flow 설명
 
 이 둘을 혼동하지 않는 것이 중요하다.
 

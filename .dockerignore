@@ -1,0 +1,15 @@
+.git
+.gitignore
+node_modules
+dist
+dist-ssr
+.vscode
+.idea
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+.venv
+PoC/source_fetch/.venv
+docs/archive
