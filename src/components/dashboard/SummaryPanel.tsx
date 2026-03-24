@@ -35,7 +35,7 @@ export function SummaryPanel({
           <p className="font-mono text-[0.66rem] uppercase tracking-[0.22em] text-orbit-accent">
             도메인 다이제스트
           </p>
-          <p className="mt-2 text-[0.78rem] leading-[1.6] text-orbit-text">
+          <p className="orbit-wrap-anywhere mt-2 text-[0.78rem] leading-[1.65] text-orbit-text">
             {headline}
           </p>
         </div>
@@ -56,18 +56,18 @@ export function SummaryPanel({
               ].join(" ")}
               onClick={() => onSelectDigest?.(digest)}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0 flex-1 font-mono text-[0.66rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent">
                   {digest.domain}
                 </span>
-                <span className="border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.64rem] uppercase tracking-[0.12em] text-orbit-muted">
+                <span className="orbit-token-ellipsis inline-flex max-w-[10rem] border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.64rem] uppercase leading-[1.4] tracking-[0.12em] text-orbit-text">
                   {digest.evidence}
                 </span>
               </div>
-              <h3 className="font-display text-[0.82rem] font-semibold leading-[1.42] tracking-[-0.02em] text-orbit-text">
+              <h3 className="orbit-wrap-anywhere font-display text-[0.82rem] font-semibold leading-[1.42] tracking-[-0.02em] text-orbit-text">
                 {digest.headline}
               </h3>
-              <p className="text-[0.72rem] leading-[1.48] text-orbit-muted">
+              <p className="orbit-wrap-anywhere text-[0.72rem] leading-[1.55] text-orbit-text">
                 {digest.summary}
               </p>
             </button>

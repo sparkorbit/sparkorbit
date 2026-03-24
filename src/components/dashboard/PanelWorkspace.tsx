@@ -1,10 +1,8 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const INFO_ORDER_STORAGE_KEY = "sparkorbit-info-order-v1";
-const INFO_SIZE_STORAGE_KEY = "sparkorbit-info-sizes-v1";
-const UNASSIGNED_ORDER_STORAGE_KEY = "sparkorbit-unassigned-order-v1";
-const UNASSIGNED_SIZE_STORAGE_KEY = "sparkorbit-unassigned-sizes-v1";
+import { PANEL_WORKSPACE_STORAGE } from "./panelWorkspaceStorage";
+
 const COL_STEP_PX = 180;
 const MIN_COLUMN_WIDTH_PX = 360;
 const DEFAULT_MAX_DYNAMIC_COLUMNS = 6;
@@ -15,13 +13,6 @@ const DEFAULT_ROW_SPAN = 1;
 const DEFAULT_COL_SPAN = 1;
 const MAX_ROW_SPAN = 8;
 const WINDOW_BAR_HEIGHT_PX = 28;
-
-export const PANEL_WORKSPACE_STORAGE_KEYS = [
-  INFO_ORDER_STORAGE_KEY,
-  INFO_SIZE_STORAGE_KEY,
-  UNASSIGNED_ORDER_STORAGE_KEY,
-  UNASSIGNED_SIZE_STORAGE_KEY,
-] as const;
 
 type PanelWorkspaceItem = {
   id: string;
@@ -58,16 +49,6 @@ type PanelBoardProps = {
   allowColumnResize?: boolean;
   rowHeightPx?: number;
 };
-
-export function resetPanelWorkspaceStorage() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  PANEL_WORKSPACE_STORAGE_KEYS.forEach((key) => {
-    window.localStorage.removeItem(key);
-  });
-}
 
 type PanelPlacement = {
   id: string;
@@ -797,8 +778,8 @@ export function PanelWorkspace({
       <WorkspaceSection eyebrow="Section 03" title="Unassigned Panel">
         <PanelBoard
           items={unassignedItems}
-          orderStorageKey={UNASSIGNED_ORDER_STORAGE_KEY}
-          sizeStorageKey={UNASSIGNED_SIZE_STORAGE_KEY}
+          orderStorageKey={PANEL_WORKSPACE_STORAGE.unassignedOrder}
+          sizeStorageKey={PANEL_WORKSPACE_STORAGE.unassignedSize}
           emptyTitle="미지정 패널 없음"
           emptyDescription="분류되지 않은 패널이 아직 없습니다."
           rowHeightPx={rowHeightPx}
@@ -821,8 +802,8 @@ export function PanelWorkspace({
             {infoPanelOverride?.node ?? (
               <PanelBoard
                 items={infoItems}
-                orderStorageKey={INFO_ORDER_STORAGE_KEY}
-                sizeStorageKey={INFO_SIZE_STORAGE_KEY}
+                orderStorageKey={PANEL_WORKSPACE_STORAGE.infoOrder}
+                sizeStorageKey={PANEL_WORKSPACE_STORAGE.infoSize}
                 emptyTitle="정보 패널 없음"
                 emptyDescription="사이드로 보낼 정보 패널이 아직 연결되지 않았습니다."
                 maxDynamicColumns={3}

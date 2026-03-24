@@ -7,17 +7,18 @@ import {
 
 import {
   PanelWorkspace,
-  resetPanelWorkspaceStorage,
 } from "./components/dashboard/PanelWorkspace";
 import { SessionPanel } from "./components/dashboard/SessionPanel";
 import { SourcePanel } from "./components/dashboard/SourcePanel";
 import { SummaryPanel } from "./components/dashboard/SummaryPanel";
+import { resetPanelWorkspaceStorage } from "./components/dashboard/panelWorkspaceStorage";
 import { shell } from "./components/dashboard/styles";
 import type { DigestItem } from "./content/dashboardContent";
 import {
   fetchDashboard,
   fetchDigestDetail,
   fetchDocument,
+  fetchLeaderboards,
   fetchReloadState,
   openDashboardStream,
   openReloadStream,
@@ -27,6 +28,7 @@ import type {
   DashboardLoading,
   DashboardResponse,
   DigestDetailResponse,
+  SessionArenaOverview,
   SessionReloadStateResponse,
 } from "./types/dashboard";
 import type { SessionDocument } from "./types/sessionDocument";
@@ -140,6 +142,7 @@ const EMPTY_DASHBOARD: DashboardResponse = {
       "문서 detail은 backend가 반환한 session document payload만 렌더링합니다.",
       "active session이 없으면 홈페이지 진입 시 backend가 자동 수집을 시작합니다.",
     ],
+    arenaOverview: null,
     loading: {
       stage: "error",
       stageLabel: "대기 중",
@@ -249,58 +252,281 @@ function toNumber(value: unknown) {
   return null;
 }
 
+function formatLeaderboardValue(value: unknown) {
+  const numeric = toNumber(value);
+  if (numeric == null) {
+    return "-";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: Number.isInteger(numeric) ? 0 : 2,
+  }).format(numeric);
+}
+
+type DetailField = {
+  label: string;
+  value: string;
+  href?: string | null;
+};
+
+function hasRenderableValue(value: unknown): boolean {
+  if (value == null) {
+    return false;
+  }
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => hasRenderableValue(item));
+  }
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some((item) =>
+      hasRenderableValue(item),
+    );
+  }
+  return true;
+}
+
+function formatDetailValue(value: unknown): string {
+  if (value == null) {
+    return "-";
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  if (typeof value === "string") {
+    return value.trim() || "-";
+  }
+  if (Array.isArray(value)) {
+    const flattened: string[] = value
+      .map((entry) => formatDetailValue(entry))
+      .filter((entry) => entry !== "-");
+    return flattened.length > 0 ? flattened.join(", ") : "-";
+  }
+  return compactText(JSON.stringify(value), 180) || "-";
+}
+
+function createDetailField(
+  label: string,
+  value: unknown,
+  options?: { href?: string | null },
+): DetailField | null {
+  if (!hasRenderableValue(value)) {
+    return null;
+  }
+  return {
+    label,
+    value: formatDetailValue(value),
+    href: options?.href ?? null,
+  };
+}
+
+function filterDetailFields(
+  fields: Array<DetailField | null | undefined>,
+): DetailField[] {
+  return fields.filter((field): field is DetailField => field != null);
+}
+
+function buildRecordFields(
+  record: Record<string, unknown>,
+  options?: {
+    maxItems?: number;
+    labelTransform?: (key: string) => string;
+  },
+) {
+  return filterDetailFields(
+    Object.entries(record)
+      .filter(([, value]) => hasRenderableValue(value))
+      .slice(0, options?.maxItems ?? 8)
+      .map(([key, value]) =>
+        createDetailField(
+          options?.labelTransform ? options.labelTransform(key) : key,
+          value,
+        ),
+      ),
+  );
+}
+
 function buildDocumentSignalWindow(document: SessionDocument) {
   return [
     formatIsoDate(document.published_at ?? document.updated_at ?? document.sort_at),
     document.source_method,
     document.time_semantics,
-  ].join(" · ");
+  ]
+    .filter((value): value is string => Boolean(value) && value !== "-")
+    .join(" · ");
 }
 
-function buildDocumentCoreFields(document: SessionDocument) {
-  return [
-    `source: ${document.source}`,
-    `source_category: ${document.source_category}`,
-    `doc_type: ${document.doc_type}`,
-    `time_semantics: ${document.time_semantics}`,
-    `published_at: ${document.published_at ?? "-"}`,
-    `updated_at: ${document.updated_at ?? "-"}`,
-  ];
+function buildDocumentIdentityFields(document: SessionDocument) {
+  return filterDetailFields([
+    createDetailField("document_id", document.document_id),
+    createDetailField("run_id", document.run_id),
+    createDetailField("source", document.source),
+    createDetailField("source_category", document.source_category),
+    createDetailField("doc_type", document.doc_type),
+    createDetailField("content_type", document.content_type),
+    createDetailField("source_item_id", document.source_item_id),
+    createDetailField("language", document.language),
+    createDetailField("content_format", document.content_format),
+    createDetailField("text_scope", document.text_scope),
+    createDetailField("timestamp_kind", document.timestamp_kind),
+  ]);
+}
+
+function buildDocumentTimeFields(document: SessionDocument) {
+  return filterDetailFields([
+    createDetailField("published_at", document.published_at),
+    createDetailField("updated_at", document.updated_at),
+    createDetailField("sort_at", document.sort_at),
+    createDetailField("fetched_at", document.fetched_at),
+    createDetailField("time_semantics", document.time_semantics),
+    createDetailField("source_method", document.source_method),
+  ]);
+}
+
+function buildDocumentSignalFields(document: SessionDocument) {
+  const engagementPrimary =
+    document.engagement_primary?.name && document.engagement_primary?.value != null
+      ? `${document.engagement_primary.name}: ${document.engagement_primary.value}`
+      : null;
+
+  return filterDetailFields([
+    createDetailField("feed_score", document.ranking.feed_score),
+    createDetailField("spark_score", document.discovery.spark_score),
+    createDetailField("importance_score", document.llm.importance_score),
+    createDetailField("importance_reason", document.llm.importance_reason),
+    createDetailField("priority_reason", document.ranking.priority_reason),
+    createDetailField("discovery_reason", document.discovery.primary_reason),
+    createDetailField("engagement_primary", engagementPrimary),
+  ]);
 }
 
 function buildDocumentReferenceFields(document: SessionDocument) {
-  return [
-    `url: ${document.url || "-"}`,
-    `canonical_url: ${document.canonical_url || "-"}`,
-    `reference_url: ${document.reference_url || "-"}`,
-    `source_endpoint: ${document.source_endpoint || "-"}`,
-  ];
+  return filterDetailFields([
+    createDetailField("reference_url", document.reference_url, {
+      href: document.reference_url,
+    }),
+    createDetailField("canonical_url", document.canonical_url, {
+      href: document.canonical_url,
+    }),
+    createDetailField("url", document.url, {
+      href: document.url,
+    }),
+    createDetailField("display_url", document.reference.display_url, {
+      href: document.reference.display_url,
+    }),
+    createDetailField("source_endpoint", document.source_endpoint, {
+      href: document.source_endpoint,
+    }),
+  ]);
+}
+
+function buildDocumentRelatedLinkFields(document: SessionDocument) {
+  return filterDetailFields(
+    document.related_urls.map((url, index) =>
+      createDetailField(`related_${index + 1}`, url, { href: url }),
+    ),
+  );
+}
+
+function buildDocumentLlmFields(document: SessionDocument) {
+  return filterDetailFields([
+    createDetailField("status", document.llm.status),
+    createDetailField("summary_1l", document.llm.summary_1l),
+    createDetailField("summary_short", document.llm.summary_short),
+    createDetailField("primary_domain", document.llm.primary_domain),
+    createDetailField("importance_score", document.llm.importance_score),
+    createDetailField("importance_reason", document.llm.importance_reason),
+    createDetailField("model_name", document.llm.run_meta.model_name),
+    createDetailField("prompt_version", document.llm.run_meta.prompt_version),
+    createDetailField(
+      "fewshot_pack_version",
+      document.llm.run_meta.fewshot_pack_version,
+    ),
+    createDetailField("generated_at", document.llm.run_meta.generated_at),
+  ]);
+}
+
+function buildDocumentBenchmarkFields(document: SessionDocument) {
+  const benchmark = document.benchmark;
+  return filterDetailFields([
+    createDetailField("board_name", benchmark.board_name),
+    createDetailField("kind", benchmark.kind),
+    createDetailField("rank", benchmark.rank),
+    createDetailField(
+      "score",
+      benchmark.score_value != null
+        ? `${benchmark.score_value}${benchmark.score_unit ?? ""}`
+        : null,
+    ),
+    createDetailField("score_label", benchmark.score_label),
+    createDetailField("votes", benchmark.votes),
+    createDetailField("model_name", benchmark.model_name),
+    createDetailField("organization", benchmark.organization),
+    createDetailField("snapshot_at", benchmark.snapshot_at),
+    createDetailField("total_models", benchmark.total_models),
+    createDetailField("total_votes", benchmark.total_votes),
+  ]);
 }
 
 function buildDocumentMetadataFields(document: SessionDocument) {
-  const entries = Object.entries(document.metadata)
-    .filter(([, value]) => {
-      return (
-        typeof value === "string" ||
-        typeof value === "number" ||
-        typeof value === "boolean" ||
-        Array.isArray(value)
-      );
-    })
-    .slice(0, 6)
-    .map(([key, value]) => {
-      if (Array.isArray(value)) {
-        return `${key}: ${value.slice(0, 4).join(", ") || "-"}`;
-      }
+  return buildRecordFields(document.metadata, { maxItems: 10 });
+}
 
-      return `${key}: ${String(value)}`;
-    });
+function buildDocumentExternalIdFields(document: SessionDocument) {
+  return buildRecordFields(document.external_ids, { maxItems: 10 });
+}
 
-  if (entries.length > 0) {
-    return entries;
-  }
+function buildDocumentRawRefFields(document: SessionDocument) {
+  return buildRecordFields(document.raw_ref, { maxItems: 10 });
+}
 
-  return document.tags.slice(0, 6).map((tag) => `tag: ${tag}`);
+function buildDocumentTagItems(document: SessionDocument) {
+  return Array.from(
+    new Set(
+      document.tags
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0),
+    ),
+  );
+}
+
+function buildDocumentAuthorItems(document: SessionDocument) {
+  return Array.from(
+    new Set(
+      (document.authors.length > 0
+        ? document.authors
+        : document.author
+          ? [document.author]
+          : []
+      )
+        .map((author) => author.trim())
+        .filter((author) => author.length > 0),
+    ),
+  );
+}
+
+function buildDocumentEntityItems(document: SessionDocument) {
+  return Array.from(
+    new Set(
+      [...document.llm.entities, ...document.llm.subdomains]
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0),
+    ),
+  );
+}
+
+function buildDocumentEvidenceChunkItems(document: SessionDocument) {
+  return Array.from(
+    new Set(
+      document.llm.evidence_chunk_ids
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0),
+    ),
+  );
 }
 
 function buildDocumentConfidence(document: SessionDocument) {
@@ -446,7 +672,7 @@ function FullscreenLoading({
     : "32%";
   const processingText = loading.currentSource
     ? `현재 처리 중: ${loading.currentSource}`
-    : loading.detail;
+    : "현재 처리 중인 source를 기다리는 중입니다.";
 
   return (
     <main className="flex flex-1 items-center justify-center px-5 py-8">
@@ -454,10 +680,10 @@ function FullscreenLoading({
         <p className="font-mono text-[0.64rem] uppercase tracking-[0.22em] text-orbit-accent">
           live bootstrap
         </p>
-        <h1 className="mt-4 font-display text-[1.5rem] font-semibold text-orbit-text md:text-[1.9rem]">
+        <h1 className="orbit-wrap-anywhere mt-4 font-display text-[1.5rem] font-semibold text-orbit-text md:text-[1.9rem]">
           {brand.name}
         </h1>
-        <p className="mt-3 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-orbit-accent-dim">
+        <p className="orbit-wrap-anywhere mt-3 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-orbit-accent-dim">
           {loading.stageLabel}
         </p>
 
@@ -485,12 +711,23 @@ function FullscreenLoading({
           </div>
         </div>
 
-        <p className="mt-5 text-center text-[0.82rem] leading-[1.7] text-orbit-text">
+        <p className="orbit-wrap-anywhere mt-5 text-center text-[0.82rem] leading-[1.7] text-orbit-text">
           {processingText}
         </p>
-        <p className="mt-2 text-center text-[0.74rem] leading-[1.6] text-orbit-muted">
-          {loading.currentSource ? loading.detail : "데이터를 받는 동안 전체화면 로딩 상태를 유지합니다."}
-        </p>
+
+        <div className="mt-4 border border-orbit-border bg-orbit-bg px-4 py-3">
+          <p className="font-mono text-[0.6rem] uppercase tracking-[0.16em] text-orbit-accent">
+            sse detail
+          </p>
+          <p className="orbit-wrap-anywhere mt-2 text-[0.76rem] leading-[1.65] text-orbit-text">
+            {loading.detail}
+          </p>
+          {loading.currentSource ? (
+            <p className="orbit-wrap-anywhere mt-2 font-mono text-[0.62rem] uppercase leading-[1.5] tracking-[0.12em] text-orbit-accent-dim">
+              source / {loading.currentSource}
+            </p>
+          ) : null}
+        </div>
       </section>
     </main>
   );
@@ -538,11 +775,11 @@ function ConsoleHeader({
             <p className="font-mono text-[0.56rem] uppercase tracking-[0.22em] text-orbit-accent">
               system header
             </p>
-            <div className="flex min-w-0 items-center gap-2">
-              <h1 className="truncate font-display text-[0.9rem] font-semibold text-orbit-text">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h1 className="orbit-wrap-anywhere min-w-0 font-display text-[0.9rem] font-semibold text-orbit-text">
                 {title}
               </h1>
-              <span className="hidden border border-orbit-border bg-orbit-panel px-1.5 py-0.5 font-mono text-[0.56rem] uppercase tracking-[0.16em] text-orbit-muted sm:inline-flex">
+              <span className="orbit-token-ellipsis hidden max-w-[14rem] border border-orbit-border bg-orbit-panel px-1.5 py-0.5 font-mono text-[0.56rem] uppercase tracking-[0.16em] text-orbit-text sm:inline-flex">
                 {subtitle}
               </span>
             </div>
@@ -823,37 +1060,124 @@ function DetailMetric({
       <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
         {label}
       </p>
-      <p className="mt-2 font-mono text-[0.92rem] uppercase tracking-[0.12em] text-orbit-text">
+      <p className="orbit-wrap-anywhere mt-2 font-mono text-[0.88rem] leading-[1.5] tracking-[0.06em] text-orbit-text">
         {value}
       </p>
-      <p className="mt-2 text-[0.72rem] leading-[1.55] text-orbit-muted">
+      <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
         {note}
       </p>
     </article>
   );
 }
 
-function DetailListBlock({
+function DetailFieldGrid({
+  label,
+  fields,
+  note,
+}: {
+  label: string;
+  fields: readonly DetailField[];
+  note?: string;
+}) {
+  if (fields.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="border border-orbit-border bg-orbit-bg-elevated p-3">
+      <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
+        {label}
+      </p>
+      {note ? (
+        <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
+          {note}
+        </p>
+      ) : null}
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {fields.map((field) => (
+          <article
+            key={`${label}-${field.label}-${field.value}`}
+            className="border border-orbit-border bg-orbit-bg p-3"
+          >
+            <p className="font-mono text-[0.58rem] uppercase tracking-[0.16em] text-orbit-accent-dim">
+              {field.label}
+            </p>
+            {field.href ? (
+              <a
+                href={field.href}
+                target="_blank"
+                rel="noreferrer"
+                className="orbit-wrap-anywhere mt-2 block text-[0.74rem] leading-[1.55] text-orbit-text underline underline-offset-4 transition-colors duration-150 hover:text-orbit-accent"
+              >
+                {field.value}
+              </a>
+            ) : (
+              <p className="orbit-wrap-anywhere mt-2 text-[0.74rem] leading-[1.55] text-orbit-text">
+                {field.value}
+              </p>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DetailChipBlock({
   label,
   items,
+  emptyText = "표시할 항목이 없습니다.",
 }: {
   label: string;
   items: readonly string[];
+  emptyText?: string;
 }) {
   return (
     <section className="border border-orbit-border bg-orbit-bg-elevated p-3">
       <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
         {label}
       </p>
-      <div className="mt-3 space-y-2">
-        {items.map((item) => (
-          <p
-            key={item}
-            className="border border-orbit-border bg-orbit-bg px-3 py-2 text-[0.74rem] leading-[1.6] text-orbit-muted"
+      <div className="mt-3 flex flex-wrap gap-2">
+        {(items.length > 0 ? items : [emptyText]).map((item) => (
+          <span
+            key={`${label}-${item}`}
+            className="orbit-chip-wrap max-w-full border border-orbit-border bg-orbit-bg px-3 py-2 text-[0.72rem] leading-[1.45] text-orbit-text"
           >
             {item}
-          </p>
+          </span>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function DetailTextBlock({
+  label,
+  text,
+  note,
+}: {
+  label: string;
+  text: string | null | undefined;
+  note?: string;
+}) {
+  if (!text) {
+    return null;
+  }
+
+  return (
+    <section className="border border-orbit-border bg-orbit-bg-elevated p-3">
+      <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
+        {label}
+      </p>
+      {note ? (
+        <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
+          {note}
+        </p>
+      ) : null}
+      <div className="mt-3 border border-orbit-border bg-orbit-bg px-3 py-3">
+        <p className="orbit-wrap-anywhere text-[0.76rem] leading-[1.7] text-orbit-text">
+          {text}
+        </p>
       </div>
     </section>
   );
@@ -881,6 +1205,13 @@ function buildDigestDetailPanel(
   onClose: () => void,
   onOpenDocument: (documentId: string, referenceUrl: string) => void,
 ) {
+  const digestFields = filterDetailFields([
+    createDetailField("session_id", payload.sessionId),
+    createDetailField("status", payload.status),
+    createDetailField("domain", payload.digest.domain),
+    createDetailField("documents", payload.digest.documentIds.length),
+    createDetailField("updated_at", payload.digest.updatedAt),
+  ]);
   const focusItems = payload.documents.map(
     (document) =>
       `${document.source} / ${document.doc_type} / ${compactText(buildDocumentSummary(document), 120)}`,
@@ -894,12 +1225,12 @@ function buildDigestDetailPanel(
           <div className="flex min-h-full flex-col gap-2">
             <HackerRevealCard delayMs={0}>
               <section className="border border-orbit-border bg-orbit-bg-elevated p-4">
-                <div className="flex items-start justify-between gap-3 border-b border-orbit-border pb-3">
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orbit-border pb-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
                       {payload.status}
                     </p>
-                    <h3 className="mt-2 font-display text-[0.98rem] font-semibold leading-[1.45] text-orbit-text">
+                    <h3 className="orbit-wrap-anywhere mt-2 font-display text-[0.98rem] font-semibold leading-[1.45] text-orbit-text">
                       {payload.digest.headline}
                     </h3>
                   </div>
@@ -912,7 +1243,7 @@ function buildDigestDetailPanel(
                   </button>
                 </div>
 
-                <p className="mt-3 text-[0.78rem] leading-[1.7] text-orbit-muted">
+                <p className="orbit-wrap-anywhere mt-3 text-[0.78rem] leading-[1.7] text-orbit-text">
                   {payload.digest.summary}
                 </p>
               </section>
@@ -936,10 +1267,26 @@ function buildDigestDetailPanel(
             </div>
 
             <HackerRevealCard delayMs={200}>
-              <DetailListBlock label="Focus Documents" items={focusItems} />
+              <DetailFieldGrid
+                label="Digest Context"
+                fields={digestFields}
+                note="digest payload에 포함된 세션/상태 메타데이터입니다."
+              />
             </HackerRevealCard>
 
             <HackerRevealCard delayMs={260}>
+              <DetailChipBlock
+                label="Document IDs"
+                items={payload.digest.documentIds}
+                emptyText="연결된 document id가 없습니다."
+              />
+            </HackerRevealCard>
+
+            <HackerRevealCard delayMs={320}>
+              <DetailChipBlock label="Focus Documents" items={focusItems} />
+            </HackerRevealCard>
+
+            <HackerRevealCard delayMs={380}>
               <section className="border border-orbit-border bg-orbit-bg-elevated p-3">
                 <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
                   Linked Documents
@@ -960,10 +1307,18 @@ function buildDigestDetailPanel(
                         )
                       }
                     >
-                      <p className="font-display text-[0.8rem] font-semibold text-orbit-text">
-                        {document.title}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.8rem] font-semibold text-orbit-text">
+                          {document.title}
+                        </p>
+                        <span className="orbit-token-ellipsis inline-flex max-w-[10rem] border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-text">
+                          {document.llm.status}
+                        </span>
+                      </div>
+                      <p className="orbit-wrap-anywhere mt-2 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                        {document.source} / {document.doc_type} / feed {formatDetailValue(document.ranking.feed_score)}
                       </p>
-                      <p className="mt-2 text-[0.72rem] leading-[1.55] text-orbit-muted">
+                      <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
                         {compactText(buildDocumentSummary(document), 150)}
                       </p>
                     </button>
@@ -984,6 +1339,24 @@ function buildDocumentDetailPanel(
 ) {
   const referenceUrl =
     document.reference_url || document.canonical_url || document.url;
+  const identityFields = buildDocumentIdentityFields(document);
+  const timeFields = buildDocumentTimeFields(document);
+  const signalFields = buildDocumentSignalFields(document);
+  const referenceFields = buildDocumentReferenceFields(document);
+  const relatedFields = buildDocumentRelatedLinkFields(document);
+  const llmFields = buildDocumentLlmFields(document);
+  const benchmarkFields = buildDocumentBenchmarkFields(document);
+  const metadataFields = buildDocumentMetadataFields(document);
+  const externalIdFields = buildDocumentExternalIdFields(document);
+  const rawRefFields = buildDocumentRawRefFields(document);
+  const authorItems = buildDocumentAuthorItems(document);
+  const tagItems = buildDocumentTagItems(document);
+  const entityItems = buildDocumentEntityItems(document);
+  const evidenceChunkItems = buildDocumentEvidenceChunkItems(document);
+  const referenceSnippet =
+    document.reference.snippet || document.description || null;
+  const summaryInputPreview =
+    document.summary_input_text || document.body_text || null;
 
   return {
     title: `${document.source} Document`,
@@ -993,19 +1366,19 @@ function buildDocumentDetailPanel(
           <div className="flex min-h-full flex-col gap-2">
             <HackerRevealCard delayMs={0}>
               <section className="border border-orbit-border bg-orbit-bg-elevated p-4">
-                <div className="flex items-start justify-between gap-3 border-b border-orbit-border pb-3">
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orbit-border pb-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
                       {document.llm.status}
                     </p>
-                    <h3 className="mt-2 font-display text-[0.98rem] font-semibold leading-[1.45] text-orbit-text">
+                    <h3 className="orbit-wrap-anywhere mt-2 font-display text-[0.98rem] font-semibold leading-[1.45] text-orbit-text">
                       {document.title}
                     </h3>
-                    <p className="mt-2 text-[0.72rem] leading-[1.55] text-orbit-muted">
+                    <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
                       {document.source} / {document.doc_type}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                     <button
                       type="button"
                       className="border border-orbit-border bg-orbit-bg px-3 py-1.5 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-text transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
@@ -1023,13 +1396,13 @@ function buildDocumentDetailPanel(
                   </div>
                 </div>
 
-                <p className="mt-3 text-[0.78rem] leading-[1.7] text-orbit-muted">
+                <p className="orbit-wrap-anywhere mt-3 text-[0.78rem] leading-[1.7] text-orbit-text">
                   {buildDocumentSummary(document)}
                 </p>
               </section>
             </HackerRevealCard>
 
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
               <HackerRevealCard delayMs={90}>
                 <DetailMetric
                   label="Signal Window"
@@ -1044,24 +1417,153 @@ function buildDocumentDetailPanel(
                   note="현재 노출 신호와 reference 가용성 기준의 간단한 confidence입니다."
                 />
               </HackerRevealCard>
+              <HackerRevealCard delayMs={190}>
+                <DetailMetric
+                  label="Feed Score"
+                  value={formatDetailValue(document.ranking.feed_score)}
+                  note="source feed 정렬에 사용되는 ranking score입니다."
+                />
+              </HackerRevealCard>
+              <HackerRevealCard delayMs={240}>
+                <DetailMetric
+                  label="Spark Score"
+                  value={formatDetailValue(document.discovery.spark_score)}
+                  note="discovery layer가 계산한 novelty/importance 점수입니다."
+                />
+              </HackerRevealCard>
             </div>
 
-            <HackerRevealCard delayMs={200}>
-              <DetailListBlock
-                label="Core Fields"
-                items={buildDocumentCoreFields(document)}
+            <HackerRevealCard delayMs={280}>
+              <DetailFieldGrid
+                label="Identity"
+                fields={identityFields}
+                note="문서의 source 계약과 분류 메타데이터입니다."
               />
             </HackerRevealCard>
-            <HackerRevealCard delayMs={260}>
-              <DetailListBlock
-                label="Reference Fields"
-                items={buildDocumentReferenceFields(document)}
+
+            <HackerRevealCard delayMs={340}>
+              <DetailFieldGrid
+                label="Timing"
+                fields={timeFields}
+                note="정렬과 관측 타이밍에 사용되는 timestamp 필드입니다."
               />
             </HackerRevealCard>
-            <HackerRevealCard delayMs={320}>
-              <DetailListBlock
-                label="Metadata / Tags"
-                items={buildDocumentMetadataFields(document)}
+
+            <HackerRevealCard delayMs={400}>
+              <DetailFieldGrid
+                label="Signals"
+                fields={signalFields}
+                note="ranking/discovery/LLM 신호를 한 곳에 모았습니다."
+              />
+            </HackerRevealCard>
+
+            <HackerRevealCard delayMs={460}>
+              <DetailChipBlock
+                label="Authors"
+                items={authorItems}
+                emptyText="작성자 정보가 없습니다."
+              />
+            </HackerRevealCard>
+
+            <HackerRevealCard delayMs={520}>
+              <DetailChipBlock
+                label="Tags"
+                items={tagItems}
+                emptyText="태그 정보가 없습니다."
+              />
+            </HackerRevealCard>
+
+            <HackerRevealCard delayMs={580}>
+              <DetailChipBlock
+                label="Entities / Subdomains"
+                items={entityItems}
+                emptyText="엔티티 추출 결과가 없습니다."
+              />
+            </HackerRevealCard>
+
+            {evidenceChunkItems.length > 0 ? (
+              <HackerRevealCard delayMs={640}>
+                <DetailChipBlock
+                  label="Evidence Chunk IDs"
+                  items={evidenceChunkItems}
+                />
+              </HackerRevealCard>
+            ) : null}
+
+            <HackerRevealCard delayMs={700}>
+              <DetailFieldGrid
+                label="Source Links"
+                fields={referenceFields}
+                note="BFF가 반환한 reference 계열 링크입니다."
+              />
+            </HackerRevealCard>
+
+            {relatedFields.length > 0 ? (
+              <HackerRevealCard delayMs={760}>
+                <DetailFieldGrid
+                  label="Related URLs"
+                  fields={relatedFields}
+                />
+              </HackerRevealCard>
+            ) : null}
+
+            <HackerRevealCard delayMs={820}>
+              <DetailFieldGrid
+                label="LLM / Summary Block"
+                fields={llmFields}
+                note="현재 summary provider가 채운 문서 단위 요약 상태입니다."
+              />
+            </HackerRevealCard>
+
+            {benchmarkFields.length > 0 ? (
+              <HackerRevealCard delayMs={880}>
+                <DetailFieldGrid
+                  label="Benchmark"
+                  fields={benchmarkFields}
+                />
+              </HackerRevealCard>
+            ) : null}
+
+            {metadataFields.length > 0 ? (
+              <HackerRevealCard delayMs={940}>
+                <DetailFieldGrid
+                  label="Metadata"
+                  fields={metadataFields}
+                />
+              </HackerRevealCard>
+            ) : null}
+
+            {externalIdFields.length > 0 ? (
+              <HackerRevealCard delayMs={1000}>
+                <DetailFieldGrid
+                  label="External IDs"
+                  fields={externalIdFields}
+                />
+              </HackerRevealCard>
+            ) : null}
+
+            {rawRefFields.length > 0 ? (
+              <HackerRevealCard delayMs={1060}>
+                <DetailFieldGrid
+                  label="Raw Trace"
+                  fields={rawRefFields}
+                />
+              </HackerRevealCard>
+            ) : null}
+
+            <HackerRevealCard delayMs={1120}>
+              <DetailTextBlock
+                label="Reference Snippet"
+                text={referenceSnippet}
+                note="reference.snippet 또는 description 계열 preview입니다."
+              />
+            </HackerRevealCard>
+
+            <HackerRevealCard delayMs={1180}>
+              <DetailTextBlock
+                label="Summary Input Preview"
+                text={summaryInputPreview}
+                note="summary provider가 읽게 되는 본문/입력 텍스트 preview입니다."
               />
             </HackerRevealCard>
           </div>
@@ -1084,6 +1586,12 @@ function App() {
   const [uiSettings, setUiSettings] = useState<UiSettings>(loadUiSettings);
   const [blockingLoadingState, setBlockingLoadingState] =
     useState<DashboardLoading | null>(null);
+  const [leaderboardOverview, setLeaderboardOverview] =
+    useState<SessionArenaOverview | null>(null);
+  const [isLoadingLeaderboards, setIsLoadingLeaderboards] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
+  const [selectedLeaderboardId, setSelectedLeaderboardId] =
+    useState<string | null>(null);
 
   const rowHeightPx =
     ROW_HEIGHT_MODE_OPTIONS.find(
@@ -1285,6 +1793,53 @@ function App() {
     );
   }, [uiSettings]);
 
+  useEffect(() => {
+    const sessionId = dashboard.session.sessionId;
+    if (
+      sessionId === EMPTY_DASHBOARD.session.sessionId ||
+      dashboard.status === "collecting"
+    ) {
+      setLeaderboardOverview(null);
+      setLeaderboardError(null);
+      setIsLoadingLeaderboards(false);
+      return;
+    }
+
+    let isDisposed = false;
+
+    async function loadLeaderboards() {
+      setIsLoadingLeaderboards(true);
+      setLeaderboardError(null);
+      try {
+        const payload = await fetchLeaderboards(sessionId);
+        if (isDisposed) {
+          return;
+        }
+        setLeaderboardOverview(payload.leaderboard);
+      } catch (error) {
+        if (isDisposed) {
+          return;
+        }
+        setLeaderboardOverview(null);
+        setLeaderboardError(
+          error instanceof Error
+            ? compactText(error.message, 180)
+            : "leaderboard API를 불러오지 못했습니다.",
+        );
+      } finally {
+        if (!isDisposed) {
+          setIsLoadingLeaderboards(false);
+        }
+      }
+    }
+
+    void loadLeaderboards();
+
+    return () => {
+      isDisposed = true;
+    };
+  }, [dashboard.session.sessionId]);
+
   function resetWorkspaceLayout() {
     resetPanelWorkspaceStorage();
     setDetailState(null);
@@ -1386,29 +1941,41 @@ function App() {
     isLoadingDashboard ||
     blockingLoadingState !== null ||
     dashboard.status === "collecting";
-  const topFeedItems = dashboard.feeds
-    .flatMap((feed) =>
-      feed.items.map((item) => ({
-        ...item,
-        panelTitle: feed.title,
-      })),
-    )
-    .slice(0, 4);
+  const resolvedArenaOverview =
+    leaderboardOverview ?? dashboard.session.arenaOverview;
+  const arenaBoards = resolvedArenaOverview?.boards ?? [];
+  const arenaBoardIdsKey = arenaBoards.map((board) => board.id).join("::");
+  const selectedArenaBoard =
+    arenaBoards.find((board) => board.id === selectedLeaderboardId) ??
+    arenaBoards[0] ??
+    null;
+  useEffect(() => {
+    if (arenaBoards.length === 0) {
+      if (selectedLeaderboardId !== null) {
+        setSelectedLeaderboardId(null);
+      }
+      return;
+    }
+
+    if (
+      selectedLeaderboardId &&
+      arenaBoards.some((board) => board.id === selectedLeaderboardId)
+    ) {
+      return;
+    }
+
+    setSelectedLeaderboardId(arenaBoards[0].id);
+  }, [arenaBoardIdsKey, selectedLeaderboardId]);
 
   const infoItems = [
     {
       id: "session",
       node: (
         <SessionPanel
-          title={dashboard.session.title}
-          sessionId={dashboard.session.sessionId}
+          title={resolvedArenaOverview?.title ?? dashboard.session.title}
           sessionDate={dashboard.session.sessionDate}
           window={dashboard.session.window}
-          reloadRule={dashboard.session.reloadRule}
-          metrics={dashboard.session.metrics}
-          runtime={dashboard.session.runtime}
-          rules={dashboard.session.rules}
-          loading={dashboard.session.loading}
+          arenaOverview={resolvedArenaOverview}
         />
       ),
       defaultRowSpan: 1,
@@ -1459,20 +2026,20 @@ function App() {
 
   const mainPanel = (
     <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel p-4 md:p-5">
-      <div className="flex items-start justify-between gap-3 border-b border-orbit-border pb-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orbit-border pb-3">
         <div className="min-w-0 flex-1">
           <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.2em] text-orbit-accent">
             Section 01
           </p>
-          <h1 className="mt-2 font-display text-[1.12rem] font-semibold text-orbit-text md:text-[1.32rem]">
+          <h1 className="orbit-wrap-anywhere mt-2 font-display text-[1.12rem] font-semibold text-orbit-text md:text-[1.32rem]">
             {dashboard.brand.name} Main Panel
           </h1>
-          <p className="mt-2 text-[0.76rem] leading-[1.6] text-orbit-muted">
+          <p className="orbit-wrap-anywhere mt-2 text-[0.76rem] leading-[1.6] text-orbit-text">
             {statusDescription(dashboard.status)}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="border border-orbit-border-strong bg-orbit-bg px-2 py-1 font-mono text-[0.66rem] uppercase tracking-[0.14em] text-orbit-text">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <span className="orbit-token-ellipsis inline-flex max-w-[16rem] border border-orbit-border-strong bg-orbit-bg px-2 py-1 font-mono text-[0.66rem] uppercase tracking-[0.14em] text-orbit-text">
             {sessionLabel}
           </span>
           <button
@@ -1486,121 +2053,269 @@ function App() {
         </div>
       </div>
 
-      <div className="mt-4 grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)]">
-        <div className="flex min-h-0 flex-col border border-orbit-border bg-orbit-bg p-4">
-          <div className="grid gap-2 sm:grid-cols-3">
-            <article className="border border-orbit-border bg-orbit-panel p-3">
-              <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-                stage
-              </p>
-              <p className="mt-2 font-mono text-[0.8rem] uppercase tracking-[0.12em] text-orbit-text">
-                {dashboard.session.loading?.stageLabel ?? "idle"}
-              </p>
-            </article>
-            <article className="border border-orbit-border bg-orbit-panel p-3">
-              <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-                status
-              </p>
-              <p className="mt-2 font-mono text-[0.8rem] uppercase tracking-[0.12em] text-orbit-text">
-                {statusLabel(dashboard.status)}
-              </p>
-            </article>
-            <article className="border border-orbit-border bg-orbit-panel p-3">
-              <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-                detail
-              </p>
-              <p className="mt-2 font-mono text-[0.8rem] uppercase tracking-[0.12em] text-orbit-text">
-                {detailState?.kind ?? "overview"}
-              </p>
-            </article>
-          </div>
-
-          <div className="mt-4 border border-orbit-border bg-orbit-panel p-4">
+      <div className="mt-4 flex min-h-0 flex-1 flex-col border border-orbit-border bg-orbit-bg p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orbit-border pb-3">
+          <div className="min-w-0 flex-1">
             <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-              Top Headline
+              Leaderboard Workspace
             </p>
-            <h2 className="mt-3 font-display text-[1rem] font-semibold text-orbit-text md:text-[1.12rem]">
-              {dashboard.summary.headline}
+            <h2 className="orbit-wrap-anywhere mt-2 font-display text-[1rem] font-semibold text-orbit-text md:text-[1.16rem]">
+              {selectedArenaBoard?.boardName ??
+                resolvedArenaOverview?.title ??
+                "Type Leaderboards"}
             </h2>
-            <p className="mt-3 text-[0.76rem] leading-[1.65] text-orbit-muted">
-              {isLoadingDashboard
-                ? "dashboard를 불러오는 중입니다."
-                : dashboard.session.loading?.detail ||
-                  "Redis materialized dashboard를 BFF 경유로 읽고 있습니다."}
+            <p className="orbit-wrap-anywhere mt-2 text-[0.76rem] leading-[1.6] text-orbit-text">
+              {selectedArenaBoard?.description ??
+                "메인 패널은 leaderboard만 표시하고, 탭으로 타입별 순위를 전환합니다."}
             </p>
-            {dashboardError ? (
-              <p className="mt-3 border border-orbit-border bg-orbit-bg px-3 py-2 text-[0.72rem] leading-[1.55] text-orbit-muted">
-                {dashboardError}
-              </p>
-            ) : null}
           </div>
-
-          <div className="mt-4 grid min-h-0 flex-1 gap-2">
-            {topFeedItems.map((item) => (
-              <button
-                key={item.documentId}
-                type="button"
-                className="border border-orbit-border bg-orbit-panel p-3 text-left transition-colors duration-150 hover:border-orbit-accent"
-                onClick={() =>
-                  void handleSelectDocument(item.documentId, item.referenceUrl)
-                }
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-                    {item.panelTitle}
-                  </span>
-                  <span className="border border-orbit-border bg-orbit-bg px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-muted">
-                    {item.type}
-                  </span>
-                </div>
-                <h3 className="mt-3 font-display text-[0.88rem] font-semibold leading-[1.45] text-orbit-text">
-                  {item.title}
-                </h3>
-                <p className="mt-2 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                  {item.source} / {item.meta}
-                </p>
-                <p className="mt-3 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  {item.note}
-                </p>
-              </button>
-            ))}
+          <div className="grid shrink-0 gap-1 text-right">
+            <span className="font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-muted">
+              status {statusLabel(dashboard.status)}
+            </span>
+            <span className="font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-muted">
+              boards {arenaBoards.length}
+            </span>
+            {selectedArenaBoard?.updatedAt ? (
+              <span className="font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-muted">
+                updated {selectedArenaBoard.updatedAt.slice(0, 10)}
+              </span>
+            ) : null}
           </div>
         </div>
 
-        <div className="grid min-h-0 gap-3">
-          <article className="border border-orbit-border bg-orbit-bg p-4">
-            <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-              Digest Buckets
-            </p>
-            <div className="mt-3 grid gap-2">
-              {dashboard.summary.digests.map((digest) => (
-                <button
-                  key={digest.id}
-                  type="button"
-                  className="flex items-center justify-between border border-orbit-border bg-orbit-panel px-3 py-2 text-left transition-colors duration-150 hover:border-orbit-accent"
-                  onClick={() => void handleSelectDigest(digest)}
-                >
-                  <span className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted">
-                    {digest.domain}
-                  </span>
-                  <span className="font-mono text-[0.72rem] uppercase tracking-[0.12em] text-orbit-text">
-                    {digest.evidence}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </article>
+        <div className="mt-4 flex gap-1 overflow-x-auto border border-orbit-border bg-orbit-panel p-1">
+          {arenaBoards.map((board) => {
+            const isSelected = selectedArenaBoard?.id === board.id;
+            return (
+              <button
+                key={board.id}
+                type="button"
+                className={[
+                  "shrink-0 border px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] transition-colors duration-150",
+                  isSelected
+                    ? "border-orbit-accent bg-orbit-bg text-orbit-accent"
+                    : "border-transparent bg-transparent text-orbit-muted hover:border-orbit-border hover:text-orbit-text",
+                ].join(" ")}
+                onClick={() => setSelectedLeaderboardId(board.id)}
+              >
+                {board.label}
+              </button>
+            );
+          })}
+        </div>
 
-          <article className="border border-orbit-border bg-orbit-bg p-4">
-            <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-              Runtime Notes
-            </p>
-            <div className="mt-3 space-y-2 text-[0.76rem] leading-[1.6] text-orbit-muted">
-              <p>BFF는 `/api/dashboard`, `/api/digests/:id`, `/api/documents/:id`를 제공합니다.</p>
-              <p>dashboard와 reload 진행률은 SSE stream으로 실시간 반영됩니다.</p>
-              <p>feed item은 document fetch와 source URL open을 함께 수행합니다.</p>
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+          {isLoadingLeaderboards ? (
+            <div className="border border-orbit-border bg-orbit-panel px-4 py-4">
+              <p className="orbit-wrap-anywhere text-[0.76rem] leading-[1.6] text-orbit-text">
+                leaderboard API를 불러오는 중입니다.
+              </p>
             </div>
-          </article>
+          ) : leaderboardError ? (
+            <div className="border border-orbit-border bg-orbit-panel px-4 py-4">
+              <p className="orbit-wrap-anywhere text-[0.76rem] leading-[1.6] text-orbit-text">
+                {leaderboardError}
+              </p>
+            </div>
+          ) : dashboardError ? (
+            <div className="border border-orbit-border bg-orbit-panel px-4 py-4">
+              <p className="orbit-wrap-anywhere text-[0.76rem] leading-[1.6] text-orbit-text">
+                {dashboardError}
+              </p>
+            </div>
+          ) : selectedArenaBoard ? (
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.55fr)]">
+              <div className="grid gap-3">
+                <article className="border border-orbit-border-strong bg-orbit-panel p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="border border-orbit-accent bg-orbit-bg px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-accent">
+                          {selectedArenaBoard.label}
+                        </span>
+                        <span className="border border-orbit-border bg-orbit-bg px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-text">
+                          {formatLeaderboardValue(selectedArenaBoard.totalModels)} models
+                        </span>
+                        <span className="border border-orbit-border bg-orbit-bg px-2 py-1 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-text">
+                          {formatLeaderboardValue(selectedArenaBoard.totalVotes)} votes
+                        </span>
+                      </div>
+                      <h3 className="orbit-wrap-anywhere mt-3 font-display text-[1.04rem] font-semibold leading-[1.35] text-orbit-text">
+                        {selectedArenaBoard.boardName}
+                      </h3>
+                      <p className="orbit-wrap-anywhere mt-2 max-w-3xl text-[0.76rem] leading-[1.65] text-orbit-text">
+                        {selectedArenaBoard.description ??
+                          "이 leaderboard는 해당 타입의 상위 모델 순위를 보여줍니다."}
+                      </p>
+                    </div>
+                    {selectedArenaBoard.referenceUrl ? (
+                      <a
+                        href={selectedArenaBoard.referenceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="shrink-0 border border-orbit-border bg-orbit-bg px-3 py-2 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-accent underline underline-offset-4 hover:text-orbit-text"
+                      >
+                        open board
+                      </a>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 grid gap-2 md:grid-cols-3">
+                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
+                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
+                        top item
+                      </p>
+                      <p className="orbit-wrap-anywhere mt-1 text-[0.78rem] leading-[1.5] text-orbit-text">
+                        {selectedArenaBoard.topModel.modelName ?? "top model 없음"}
+                      </p>
+                    </div>
+                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
+                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
+                        score
+                      </p>
+                      <p className="mt-1 font-mono text-[0.82rem] tracking-[-0.03em] text-orbit-text">
+                        {formatLeaderboardValue(selectedArenaBoard.topModel.rating)}
+                      </p>
+                    </div>
+                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
+                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
+                        snapshot
+                      </p>
+                      <p className="mt-1 font-mono text-[0.72rem] uppercase tracking-[0.1em] text-orbit-text">
+                        {formatIsoDate(selectedArenaBoard.updatedAt)}
+                      </p>
+                    </div>
+                  </div>
+                </article>
+
+                {selectedArenaBoard.topEntries.length > 0 ? (
+                  <div className="grid gap-2">
+                    {selectedArenaBoard.topEntries.map((entry) => (
+                      <article
+                        key={`${selectedArenaBoard.id}-${entry.rank}-${entry.modelName}`}
+                        className="orbit-leaderboard-entry grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 p-3"
+                      >
+                        <div className="orbit-leaderboard-entry__rank flex h-10 min-w-10 items-center justify-center px-2 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-orbit-accent">
+                          #{entry.rank ?? "-"}
+                        </div>
+                        <div className="orbit-leaderboard-entry__body min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {entry.url ? (
+                              <a
+                                href={entry.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="orbit-wrap-anywhere font-display text-[0.86rem] font-semibold leading-[1.45] text-orbit-text underline underline-offset-4 hover:text-orbit-accent"
+                              >
+                                {entry.modelName ?? "Unknown model"}
+                              </a>
+                            ) : (
+                              <h3 className="orbit-wrap-anywhere font-display text-[0.86rem] font-semibold leading-[1.45] text-orbit-text">
+                                {entry.modelName ?? "Unknown model"}
+                              </h3>
+                            )}
+                            {entry.license ? (
+                              <span className="inline-flex border border-orbit-border bg-orbit-bg px-2 py-1 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
+                                {entry.license}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="orbit-wrap-anywhere mt-1 text-[0.72rem] leading-[1.55] text-orbit-text">
+                            {entry.organization ?? "Unknown org"} ·{" "}
+                            {selectedArenaBoard.scoreLabel ?? "rating"}{" "}
+                            {formatLeaderboardValue(entry.rating)} · votes{" "}
+                            {formatLeaderboardValue(entry.votes)}
+                          </p>
+                          {(entry.contextLength ||
+                            entry.inputPricePerMillion ||
+                            entry.outputPricePerMillion) ? (
+                            <p className="orbit-wrap-anywhere mt-1 text-[0.64rem] leading-[1.5] text-orbit-muted">
+                              ctx {formatLeaderboardValue(entry.contextLength)} · in{" "}
+                              {formatLeaderboardValue(entry.inputPricePerMillion)} · out{" "}
+                              {formatLeaderboardValue(entry.outputPricePerMillion)}
+                            </p>
+                          ) : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="border border-dashed border-orbit-border bg-orbit-panel px-4 py-4">
+                    <p className="orbit-wrap-anywhere text-[0.74rem] leading-[1.6] text-orbit-muted">
+                      이 보드는 top entry 목록이 없는 snapshot입니다.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <aside className="grid gap-3">
+                <article className="border border-orbit-border bg-orbit-panel p-4">
+                  <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
+                    Featured Item
+                  </p>
+                  {selectedArenaBoard.topModel.modelName ? (
+                    <>
+                      <p className="mt-3 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                        #{selectedArenaBoard.topModel.rank ?? "-"}
+                      </p>
+                      <p className="orbit-wrap-anywhere mt-2 font-display text-[0.98rem] font-semibold leading-[1.4] text-orbit-text">
+                        {selectedArenaBoard.topModel.modelName}
+                      </p>
+                      <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
+                        {selectedArenaBoard.topModel.organization ?? "Unknown org"} ·{" "}
+                        {selectedArenaBoard.scoreLabel ?? "rating"}{" "}
+                        {formatLeaderboardValue(selectedArenaBoard.topModel.rating)} · votes{" "}
+                        {formatLeaderboardValue(selectedArenaBoard.topModel.votes)}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="orbit-wrap-anywhere mt-3 text-[0.72rem] leading-[1.55] text-orbit-muted">
+                      top model 정보가 아직 없습니다.
+                    </p>
+                  )}
+                </article>
+
+                <article className="border border-orbit-border bg-orbit-panel p-4">
+                  <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
+                    Board Stats
+                  </p>
+                  <div className="mt-3 grid gap-2">
+                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
+                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
+                        total models
+                      </p>
+                      <p className="mt-1 font-mono text-[0.9rem] tracking-[-0.03em] text-orbit-text">
+                        {formatLeaderboardValue(selectedArenaBoard.totalModels)}
+                      </p>
+                    </div>
+                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
+                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
+                        total votes
+                      </p>
+                      <p className="mt-1 font-mono text-[0.9rem] tracking-[-0.03em] text-orbit-text">
+                        {formatLeaderboardValue(selectedArenaBoard.totalVotes)}
+                      </p>
+                    </div>
+                    <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
+                      <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
+                        score unit
+                      </p>
+                      <p className="mt-1 font-mono text-[0.72rem] uppercase tracking-[0.1em] text-orbit-text">
+                        {selectedArenaBoard.scoreUnit ?? "-"}
+                      </p>
+                    </div>
+                  </div>
+                </article>
+              </aside>
+            </div>
+          ) : (
+            <div className="border border-dashed border-orbit-border bg-orbit-panel px-4 py-4">
+              <p className="orbit-wrap-anywhere text-[0.74rem] leading-[1.6] text-orbit-muted">
+                메인 패널에 표시할 leaderboard 데이터가 아직 없습니다.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </section>

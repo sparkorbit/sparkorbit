@@ -35,20 +35,3 @@ export type FeedPanel = {
   sourceNote: string;
   items: FeedItem[];
 };
-
-export type AskPrompt = {
-  question: string;
-  grounding: string;
-};
-
-export type ReferenceItem = {
-  title: string;
-  source: string;
-  note: string;
-};
-
-export type EvidenceStep = {
-  step: string;
-  title: string;
-  detail: string;
-};

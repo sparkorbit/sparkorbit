@@ -692,6 +692,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
                 "run output는 PoC/source_fetch/data/runs 아래에 계속 저장됩니다.",
                 "publish가 끝나면 active session이 교체되고 프론트 SSE stream이 실제 dashboard로 전환됩니다.",
             ],
+            "arenaOverview": None,
             "loading": loading,
         },
         "summary": {
@@ -708,6 +709,7 @@ def build_session_block(
     meta: dict[str, Any],
     run_manifest: dict[str, Any],
     source_manifest: list[dict[str, Any]],
+    documents_by_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     session_date = (meta.get("created_at") or run_manifest.get("started_at") or "")[
         :10
@@ -730,6 +732,7 @@ def build_session_block(
             else None
         ),
     )
+    arena_overview = build_lmarena_session_overview(documents_by_id)
     return {
         "title": "SparkOrbit Redis Session",
         "sessionId": session_id,
@@ -770,7 +773,108 @@ def build_session_block(
             "Redis는 source별 feed와 dashboard materialized view를 제공합니다.",
             "교차 source mixing은 category digest에서만 수행합니다.",
         ],
+        "arenaOverview": arena_overview,
         "loading": loading,
+    }
+
+
+def lmarena_board_label(document: dict[str, Any]) -> str:
+    benchmark = document.get("benchmark") or {}
+    board_name = str(benchmark.get("board_name") or "").strip()
+    if board_name.startswith("LMArena "):
+        return board_name.removeprefix("LMArena ").strip() or "Overview"
+    metadata = document.get("metadata") or {}
+    leaderboard_link = str(
+        benchmark.get("board_id")
+        or metadata.get("leaderboard_link")
+        or document.get("source_item_id")
+        or ""
+    ).strip()
+    if leaderboard_link:
+        label = leaderboard_link.rsplit("/", 1)[-1].replace("-", " ").strip()
+        return label.title() or "Overview"
+    title = str(document.get("title") or "").replace("LMArena", "").strip()
+    return title or "Overview"
+
+
+def build_lmarena_session_overview(
+    documents_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    lmarena_documents = [
+        document
+        for document in documents_by_id.values()
+        if document.get("source") == "lmarena_overview"
+    ]
+    if not lmarena_documents:
+        return None
+
+    boards = []
+    for document in sort_documents(lmarena_documents):
+        benchmark = document.get("benchmark") or {}
+        metadata = document.get("metadata") or {}
+        top_entries = metadata.get("top_entries") if isinstance(metadata.get("top_entries"), list) else []
+        normalized_entries = []
+        for entry in top_entries:
+            if not isinstance(entry, dict):
+                continue
+            normalized_entries.append(
+                {
+                    "rank": entry.get("rank"),
+                    "modelName": entry.get("model_name"),
+                    "organization": entry.get("organization"),
+                    "rating": entry.get("rating"),
+                    "votes": entry.get("votes"),
+                    "url": entry.get("url"),
+                    "license": entry.get("license"),
+                    "contextLength": entry.get("context_length"),
+                    "inputPricePerMillion": entry.get("input_price_per_million"),
+                    "outputPricePerMillion": entry.get("output_price_per_million"),
+                }
+            )
+        boards.append(
+            {
+                "id": str(
+                    benchmark.get("board_id")
+                    or metadata.get("leaderboard_link")
+                    or document.get("document_id")
+                ),
+                "label": lmarena_board_label(document),
+                "boardName": str(
+                    benchmark.get("board_name") or document.get("title") or "LMArena"
+                ),
+                "documentId": str(document.get("document_id") or ""),
+                "referenceUrl": document.get("reference_url")
+                or document.get("canonical_url")
+                or document.get("url"),
+                "updatedAt": benchmark.get("snapshot_at")
+                or document.get("published_at")
+                or document.get("sort_at"),
+                "description": document.get("description")
+                or (document.get("reference") or {}).get("snippet"),
+                "totalVotes": benchmark.get("total_votes")
+                or metadata.get("total_votes"),
+                "totalModels": benchmark.get("total_models")
+                or metadata.get("total_models"),
+                "scoreLabel": benchmark.get("score_label") or "Arena rating",
+                "scoreUnit": benchmark.get("score_unit"),
+                "topModel": {
+                    "rank": benchmark.get("rank"),
+                    "modelName": benchmark.get("model_name")
+                    or metadata.get("top_model_name"),
+                    "organization": benchmark.get("organization")
+                    or metadata.get("top_model_org"),
+                    "rating": benchmark.get("score_value")
+                    or metadata.get("top_model_rating"),
+                    "votes": benchmark.get("votes")
+                    or metadata.get("top_model_votes"),
+                },
+                "topEntries": normalized_entries,
+            }
+        )
+
+    return {
+        "title": "LMArena Type Rankings",
+        "boards": boards,
     }
 
 
@@ -901,7 +1005,7 @@ def build_dashboard_payload(
         },
         "status": meta.get("status") or "published",
         "session": build_session_block(
-            session_id, meta, run_manifest, source_manifest
+            session_id, meta, run_manifest, source_manifest, documents_by_id
         ),
         "summary": {
             "title": "Category Digest",
@@ -1951,6 +2055,51 @@ def get_dashboard_response(
 ) -> dict[str, Any]:
     session_id = resolve_session_id(store, session)
     return load_dashboard(store, session_id)
+
+
+def build_leaderboard_response_from_dashboard(
+    dashboard: dict[str, Any],
+) -> dict[str, Any]:
+    session = dashboard.get("session") or {}
+    return {
+        "sessionId": session.get("sessionId"),
+        "status": dashboard.get("status"),
+        "leaderboard": session.get("arenaOverview"),
+    }
+
+
+def get_leaderboard_response(
+    store: RedisLike, session: str | None = None
+) -> dict[str, Any]:
+    session_id = resolve_session_id(store, session)
+    dashboard = get_json(store, session_key(session_id, "dashboard"))
+    if dashboard is not None:
+        leaderboard = ((dashboard.get("session") or {}).get("arenaOverview"))
+        if leaderboard is not None:
+            return build_leaderboard_response_from_dashboard(dashboard)
+
+        # Rebuild stale materialized dashboards created before leaderboard support.
+        dashboard = rebuild_dashboard(store, session_id)
+        leaderboard = ((dashboard.get("session") or {}).get("arenaOverview"))
+        if leaderboard is not None:
+            return build_leaderboard_response_from_dashboard(dashboard)
+
+    meta = get_json(store, session_key(session_id, "meta"))
+    run_manifest = get_json(store, session_key(session_id, "run_manifest"))
+    source_manifest = get_json(store, session_key(session_id, "source_manifest")) or []
+    if meta is None or run_manifest is None:
+        raise KeyError(f"Unknown session: {session_id}")
+
+    source_ids = meta.get("source_ids") or [
+        entry.get("source") for entry in source_manifest if entry.get("source")
+    ]
+    feed_lists = get_feed_lists(store, session_id, source_ids)
+    documents_by_id = get_documents_by_id(store, session_id, feed_lists)
+    return {
+        "sessionId": session_id,
+        "status": meta.get("status") or "published",
+        "leaderboard": build_lmarena_session_overview(documents_by_id),
+    }
 
 
 def get_digest_response(

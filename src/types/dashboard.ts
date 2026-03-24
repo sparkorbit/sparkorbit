@@ -34,6 +34,40 @@ export type DashboardLoading = {
   steps: LoadingStep[];
 };
 
+export type SessionArenaBoardEntry = {
+  rank: number | string | null;
+  modelName: string | null;
+  organization: string | null;
+  rating: number | string | null;
+  votes: number | string | null;
+  url?: string | null;
+  license?: string | null;
+  contextLength?: number | string | null;
+  inputPricePerMillion?: number | string | null;
+  outputPricePerMillion?: number | string | null;
+};
+
+export type SessionArenaBoard = {
+  id: string;
+  label: string;
+  boardName: string;
+  documentId: string;
+  referenceUrl: string | null;
+  updatedAt: string | null;
+  description: string | null;
+  totalVotes: number | string | null;
+  totalModels: number | string | null;
+  scoreLabel: string | null;
+  scoreUnit: string | null;
+  topModel: SessionArenaBoardEntry;
+  topEntries: SessionArenaBoardEntry[];
+};
+
+export type SessionArenaOverview = {
+  title: string;
+  boards: SessionArenaBoard[];
+};
+
 export type DashboardSession = {
   title: string;
   sessionId: string;
@@ -43,6 +77,7 @@ export type DashboardSession = {
   metrics: SessionMetric[];
   runtime: RuntimeItem[];
   rules: string[];
+  arenaOverview: SessionArenaOverview | null;
   loading: DashboardLoading | null;
 };
 
@@ -59,6 +94,12 @@ export type DashboardResponse = {
     digests: DigestItem[];
   };
   feeds: FeedPanel[];
+};
+
+export type LeaderboardsResponse = {
+  sessionId: string | null;
+  status: DashboardStatus;
+  leaderboard: SessionArenaOverview | null;
 };
 
 export type DigestDetail = DigestItem & {

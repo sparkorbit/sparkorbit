@@ -1,6 +1,7 @@
 import type {
   DashboardResponse,
   DigestDetailResponse,
+  LeaderboardsResponse,
   SessionReloadStateResponse,
 } from "../types/dashboard";
 import type { SessionDocument } from "../types/sessionDocument";
@@ -39,6 +40,12 @@ async function fetchJson<T>(path: string, init?: RequestInit) {
 export function fetchDashboard(session = "active") {
   return fetchJson<DashboardResponse>(
     `/api/dashboard?session=${encodeURIComponent(session)}`,
+  );
+}
+
+export function fetchLeaderboards(session = "active") {
+  return fetchJson<LeaderboardsResponse>(
+    `/api/leaderboards?session=${encodeURIComponent(session)}`,
   );
 }
 

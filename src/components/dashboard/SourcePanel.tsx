@@ -27,7 +27,7 @@ export function SourcePanel({
       style={style}
     >
       <div className="flex h-full min-h-0 flex-col gap-2.5">
-        <p className="border-b border-orbit-border pb-2 font-mono text-[0.68rem] uppercase tracking-[0.14em] text-orbit-accent-dim">
+        <p className="orbit-wrap-anywhere border-b border-orbit-border pb-2 font-mono text-[0.68rem] uppercase leading-[1.5] tracking-[0.14em] text-orbit-accent-dim">
           {panelData.sourceNote}
         </p>
 
@@ -37,7 +37,7 @@ export function SourcePanel({
               key={item.documentId}
               type="button"
               className={[
-                `${card} grid grid-cols-[1fr_auto] gap-x-2 gap-y-1.5 text-left transition-colors duration-150`,
+                `${card} min-w-0 space-y-2 text-left transition-colors duration-150`,
                 onSelectItem
                   ? "hover:border-orbit-border-strong hover:bg-orbit-bg-elevated"
                   : "",
@@ -47,19 +47,21 @@ export function SourcePanel({
               ].join(" ")}
               onClick={() => onSelectItem?.(item.documentId, item.referenceUrl)}
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.64rem] uppercase tracking-[0.12em] text-orbit-accent">
-                  {item.source}
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                  <span className="orbit-token-ellipsis inline-flex max-w-[11rem] border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.64rem] uppercase tracking-[0.12em] text-orbit-accent">
+                    {item.source}
+                  </span>
+                  <span className={pill}>{item.type}</span>
+                </div>
+                <span className="orbit-wrap-anywhere min-w-0 font-mono text-left text-[0.64rem] uppercase leading-[1.5] tracking-[0.08em] text-orbit-muted sm:text-right">
+                  {item.meta}
                 </span>
-                <span className={pill}>{item.type}</span>
               </div>
-              <span className="font-mono text-right text-[0.64rem] uppercase tracking-[0.08em] text-orbit-muted">
-                {item.meta}
-              </span>
-              <h3 className="font-display col-span-2 text-[0.8rem] font-semibold leading-[1.42] tracking-[-0.02em] text-orbit-text">
+              <h3 className="orbit-wrap-anywhere font-display text-[0.8rem] font-semibold leading-[1.42] tracking-[-0.02em] text-orbit-text">
                 {item.title}
               </h3>
-              <p className="col-span-2 text-[0.72rem] leading-[1.48] text-orbit-muted">
+              <p className="orbit-wrap-anywhere text-[0.72rem] leading-[1.55] text-orbit-text">
                 {item.note}
               </p>
             </button>

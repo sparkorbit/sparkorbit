@@ -22,6 +22,7 @@ from backend.app.services.session_service import (
     get_dashboard_response,
     get_document_response,
     get_json,
+    get_leaderboard_response,
     get_or_bootstrap_dashboard_response,
     get_session_reload_response,
     loading_percent,
@@ -80,6 +81,9 @@ def make_document(
     reference_url: str | None = None,
     text_scope: str = "full_text",
     summary_input_text: str | None = None,
+    metadata: dict | None = None,
+    benchmark: dict | None = None,
+    doc_type_override: str | None = None,
 ) -> dict:
     doc_type_map = {
         "papers": "paper",
@@ -89,7 +93,7 @@ def make_document(
         "company_kr": "blog",
         "company_cn": "blog",
     }
-    doc_type = doc_type_map.get(source_category, "blog")
+    doc_type = doc_type_override or doc_type_map.get(source_category, "blog")
     resolved_reference = reference_url or f"https://example.com/{document_id}"
     description = f"{title} description"
     return {
@@ -137,6 +141,7 @@ def make_document(
             "rank": 1 if source_category == "benchmark" else None,
             "score_value": 95.5 if source_category == "benchmark" else None,
             "score_unit": "%" if source_category == "benchmark" else None,
+            **(benchmark or {}),
         },
         "reference": {
             "source_label": source,
@@ -145,7 +150,7 @@ def make_document(
             "snippet": description,
         },
         "llm": default_llm_payload(),
-        "metadata": {"test_case": "session_pipeline"},
+        "metadata": {"test_case": "session_pipeline", **(metadata or {})},
         "raw_ref": {"fetch_id": None, "line_index": None, "response_file": None},
         "fetched_at": sort_at,
     }
@@ -421,6 +426,197 @@ class SessionPipelineTests(unittest.TestCase):
                 for item in feed["items"]
             ),
         )
+
+    def test_session_includes_lmarena_type_rankings(self) -> None:
+        run_id = "2026-03-24T111112Z_lmarena"
+        documents = build_base_documents(run_id) + [
+            make_document(
+                run_id=run_id,
+                document_id="lmarena:text",
+                source="lmarena_overview",
+                source_category="benchmark",
+                title="LMArena Text",
+                feed_score=91,
+                sort_at="2026-03-24T12:00:00Z",
+                reference_url="https://arena.ai/leaderboard/text",
+                doc_type_override="benchmark_panel",
+                metadata={
+                    "leaderboard_link": "/leaderboard/text",
+                    "total_votes": 5602397,
+                    "total_models": 330,
+                    "top_entries": [
+                        {
+                            "rank": 1,
+                            "model_name": "Model Alpha",
+                            "organization": "Org A",
+                            "rating": 1402.5,
+                            "votes": 230123,
+                            "url": "https://arena.ai/model-alpha",
+                        },
+                        {
+                            "rank": 2,
+                            "model_name": "Model Beta",
+                            "organization": "Org B",
+                            "rating": 1398.1,
+                            "votes": 210456,
+                            "url": "https://arena.ai/model-beta",
+                        },
+                    ],
+                },
+                benchmark={
+                    "kind": "leaderboard_panel",
+                    "board_id": "/leaderboard/text",
+                    "board_name": "LMArena Text",
+                    "snapshot_at": "2026-03-24T12:00:00Z",
+                    "rank": 1,
+                    "score_label": "Arena rating",
+                    "score_value": 1402.5,
+                    "score_unit": "elo_like_rating",
+                    "votes": 230123,
+                    "model_name": "Model Alpha",
+                    "organization": "Org A",
+                    "total_models": 330,
+                    "total_votes": 5602397,
+                },
+            )
+        ]
+
+        run_dir = self._make_run(run_id, documents=documents)
+        publish_run(self.store, run_dir, queue=False)
+        dashboard = get_dashboard_response(self.store)
+
+        arena_overview = dashboard["session"]["arenaOverview"]
+        self.assertIsNotNone(arena_overview)
+        self.assertEqual(arena_overview["title"], "LMArena Type Rankings")
+        self.assertEqual(arena_overview["boards"][0]["label"], "Text")
+        self.assertEqual(
+            arena_overview["boards"][0]["documentId"],
+            "lmarena:text",
+        )
+        self.assertEqual(
+            arena_overview["boards"][0]["topModel"]["modelName"],
+            "Model Alpha",
+        )
+        self.assertIsNotNone(arena_overview["boards"][0]["description"])
+        self.assertEqual(len(arena_overview["boards"][0]["topEntries"]), 2)
+
+    def test_leaderboard_response_exposes_dedicated_payload(self) -> None:
+        run_id = "2026-03-24T111113Z_leaderboard_api"
+        documents = build_base_documents(run_id) + [
+            make_document(
+                run_id=run_id,
+                document_id="lmarena:vision",
+                source="lmarena_overview",
+                source_category="benchmark",
+                title="LMArena Vision",
+                feed_score=90,
+                sort_at="2026-03-24T12:30:00Z",
+                reference_url="https://arena.ai/leaderboard/vision",
+                doc_type_override="benchmark_panel",
+                metadata={
+                    "leaderboard_link": "/leaderboard/vision",
+                    "total_votes": 810245,
+                    "total_models": 94,
+                    "top_entries": [
+                        {
+                            "rank": 1,
+                            "model_name": "Vision Alpha",
+                            "organization": "Vision Org",
+                            "rating": 1288.1,
+                            "votes": 12003,
+                            "url": "https://arena.ai/vision-alpha",
+                        }
+                    ],
+                },
+                benchmark={
+                    "kind": "leaderboard_panel",
+                    "board_id": "/leaderboard/vision",
+                    "board_name": "LMArena Vision",
+                    "snapshot_at": "2026-03-24T12:30:00Z",
+                    "rank": 1,
+                    "score_value": 1288.1,
+                    "votes": 12003,
+                    "model_name": "Vision Alpha",
+                    "organization": "Vision Org",
+                    "total_models": 94,
+                    "total_votes": 810245,
+                },
+            )
+        ]
+
+        run_dir = self._make_run(run_id, documents=documents)
+        result = publish_run(self.store, run_dir, queue=False)
+
+        payload = get_leaderboard_response(self.store, session=result["session_id"])
+        self.assertEqual(payload["sessionId"], result["session_id"])
+        self.assertEqual(payload["status"], "published")
+        self.assertIsNotNone(payload["leaderboard"])
+        self.assertEqual(payload["leaderboard"]["boards"][0]["label"], "Vision")
+        self.assertEqual(
+            payload["leaderboard"]["boards"][0]["documentId"],
+            "lmarena:vision",
+        )
+        self.assertEqual(
+            payload["leaderboard"]["boards"][0]["topModel"]["modelName"],
+            "Vision Alpha",
+        )
+
+    def test_leaderboard_response_recovers_from_stale_dashboard(self) -> None:
+        run_id = "2026-03-24T111114Z_stale_leaderboard"
+        documents = build_base_documents(run_id) + [
+            make_document(
+                run_id=run_id,
+                document_id="lmarena:search",
+                source="lmarena_overview",
+                source_category="benchmark",
+                title="LMArena Search",
+                feed_score=87,
+                sort_at="2026-03-24T12:45:00Z",
+                reference_url="https://arena.ai/leaderboard/search",
+                doc_type_override="benchmark_panel",
+                metadata={
+                    "leaderboard_link": "/leaderboard/search",
+                    "total_votes": 247944,
+                    "total_models": 22,
+                    "top_entries": [
+                        {
+                            "rank": 1,
+                            "model_name": "Search Alpha",
+                            "organization": "Org Search",
+                            "rating": 1255.41,
+                            "votes": 3607,
+                            "url": "https://arena.ai/search-alpha",
+                        }
+                    ],
+                },
+                benchmark={
+                    "kind": "leaderboard_panel",
+                    "board_id": "/leaderboard/search",
+                    "board_name": "LMArena Search",
+                    "snapshot_at": "2026-03-24T12:45:00Z",
+                    "rank": 1,
+                    "score_value": 1255.41,
+                    "votes": 3607,
+                    "model_name": "Search Alpha",
+                    "organization": "Org Search",
+                    "total_models": 22,
+                    "total_votes": 247944,
+                },
+            )
+        ]
+
+        run_dir = self._make_run(run_id, documents=documents)
+        result = publish_run(self.store, run_dir, queue=False)
+        session_id = result["session_id"]
+        dashboard = get_json(self.store, session_key(session_id, "dashboard"))
+        dashboard["session"]["arenaOverview"] = None
+        self.store.set(session_key(session_id, "dashboard"), json.dumps(dashboard))
+
+        payload = get_leaderboard_response(self.store, session=session_id)
+        self.assertIsNotNone(payload["leaderboard"])
+        self.assertEqual(payload["leaderboard"]["boards"][0]["label"], "Search")
+        rebuilt_dashboard = get_json(self.store, session_key(session_id, "dashboard"))
+        self.assertIsNotNone(rebuilt_dashboard["session"]["arenaOverview"])
 
     def test_enrichment_without_llm_provider_still_creates_digests(self) -> None:
         run_dir = self._make_run("2026-03-24T000103Z_enrich")

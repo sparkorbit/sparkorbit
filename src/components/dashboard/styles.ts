@@ -8,15 +8,15 @@ export const label =
   "font-mono text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-orbit-accent";
 
 export const sessionTag =
-  "inline-flex max-w-[8.5rem] items-center truncate border border-orbit-border-strong " +
-  "bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-text";
+  "orbit-token-ellipsis inline-flex max-w-[12rem] shrink-0 items-center justify-center border border-orbit-border-strong " +
+  "bg-orbit-bg px-1.5 py-0.5 text-center font-mono text-[0.6rem] uppercase leading-[1.35] tracking-[0.12em] text-orbit-text";
 
 export const pill =
-  "inline-flex items-center border border-orbit-border " +
-  "bg-orbit-bg-elevated px-2 py-1 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-orbit-muted";
+  "orbit-token-ellipsis inline-flex max-w-[11rem] items-center justify-center border border-orbit-border " +
+  "bg-orbit-bg-elevated px-2 py-1 text-center font-mono text-[0.66rem] uppercase leading-[1.35] tracking-[0.12em] text-orbit-text";
 
 export const card =
-  "border border-orbit-border " +
+  "min-w-0 border border-orbit-border " +
   "bg-orbit-bg-elevated p-2.5";
 
 export const riseIn =

@@ -1,3 +1,45 @@
+export type SessionDocumentBenchmark = Record<string, unknown> & {
+  kind: string | null;
+  board_id: string | null;
+  board_name: string | null;
+  snapshot_at: string | null;
+  rank: number | string | null;
+  score_label: string | null;
+  score_value: number | string | null;
+  score_unit: string | null;
+  votes: number | string | null;
+  model_name: string | null;
+  organization: string | null;
+  total_models: number | string | null;
+  total_votes: number | string | null;
+};
+
+export type SessionDocumentReference = Record<string, unknown> & {
+  source_label: string | null;
+  display_title: string | null;
+  display_url: string | null;
+  snippet: string | null;
+};
+
+export type SessionDocumentLlm = Record<string, unknown> & {
+  status: string;
+  summary_1l: string | null;
+  summary_short: string | null;
+  key_points: string[];
+  entities: string[];
+  primary_domain: string | null;
+  subdomains: string[];
+  importance_score: number | string | null;
+  importance_reason: string | null;
+  evidence_chunk_ids: string[];
+  run_meta: {
+    model_name: string | null;
+    prompt_version: string | null;
+    fewshot_pack_version: string | null;
+    generated_at: string | null;
+  };
+};
+
 export type SessionDocument = {
   document_id: string;
   run_id: string;
@@ -35,20 +77,15 @@ export type SessionDocument = {
   };
   discovery: Record<string, unknown> & {
     spark_score: number | string | null;
+    primary_reason?: string | null;
   };
   ranking: Record<string, unknown> & {
     feed_score: number | string | null;
+    priority_reason?: string | null;
   };
-  benchmark: Record<string, unknown>;
-  reference: Record<string, unknown> & {
-    display_url: string | null;
-    snippet: string | null;
-  };
-  llm: Record<string, unknown> & {
-    status: string;
-    summary_short: string | null;
-    importance_score: number | string | null;
-  };
+  benchmark: SessionDocumentBenchmark;
+  reference: SessionDocumentReference;
+  llm: SessionDocumentLlm;
   metadata: Record<string, unknown>;
   raw_ref: Record<string, unknown>;
   fetched_at: string | null;

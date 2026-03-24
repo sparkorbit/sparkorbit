@@ -9,12 +9,12 @@
   --color-orbit-bg: #050705;
   --color-orbit-bg-elevated: #0b100b;
   --color-orbit-panel: #0d130d;
-  --color-orbit-border: #233223;
-  --color-orbit-border-strong: #3a5a33;
+  --color-orbit-border: #2c4129;
+  --color-orbit-border-strong: #5a8550;
   --color-orbit-text: #d6f5d0;
-  --color-orbit-muted: #7e957d;
+  --color-orbit-muted: #a5bba2;
   --color-orbit-accent: #8dfc54;
-  --color-orbit-accent-dim: #4f7a43;
+  --color-orbit-accent-dim: #75a568;
 }
 
 html {
@@ -28,6 +28,35 @@ body {
   color: var(--color-orbit-text);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+.orbit-wrap-anywhere {
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.orbit-token-ellipsis {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orbit-chip-wrap {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
+}
+
+.orbit-line-clamp-2 {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .orbit-grid {
@@ -171,6 +200,60 @@ body {
 .orbit-loading-bar__fill--indeterminate {
   width: 28%;
   animation: orbit-loading-sweep 1.4s linear infinite;
+}
+
+.orbit-leaderboard-entry {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid rgb(90 133 80 / 0.88);
+  background:
+    linear-gradient(
+      180deg,
+      rgb(141 252 84 / 0.1) 0%,
+      rgb(141 252 84 / 0.03) 18%,
+      rgb(4 8 4 / 0.82) 48%,
+      rgb(4 8 4 / 0.94) 72%,
+      rgb(141 252 84 / 0.03) 100%
+    ),
+    repeating-linear-gradient(
+      180deg,
+      rgb(214 245 208 / 0.018) 0 1px,
+      transparent 1px 5px
+    ),
+    linear-gradient(180deg, rgb(13 19 13 / 0.98), rgb(7 10 7 / 0.98)),
+    var(--color-orbit-panel);
+  box-shadow:
+    inset 0 1px 0 rgb(214 245 208 / 0.06),
+    inset 0 -1px 0 rgb(0 0 0 / 0.45),
+    inset 0 0 0 1px rgb(141 252 84 / 0.06),
+    0 10px 28px rgb(0 0 0 / 0.22);
+}
+
+.orbit-leaderboard-entry > * {
+  position: relative;
+  z-index: 1;
+}
+
+.orbit-leaderboard-entry__rank {
+  display: inline-flex;
+  min-width: 2.35rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.34rem 0.52rem;
+  align-self: start;
+  border: 1px solid rgb(90 133 80 / 0.92);
+  background:
+    linear-gradient(180deg, rgb(12 18 12 / 0.96), rgb(6 8 6 / 0.96)),
+    var(--color-orbit-bg);
+  box-shadow:
+    inset 0 1px 0 rgb(214 245 208 / 0.05),
+    0 0 0 1px rgb(141 252 84 / 0.04);
+  font-variant-numeric: tabular-nums;
+}
+
+.orbit-leaderboard-entry__body {
+  text-shadow: 0 0 10px rgb(141 252 84 / 0.03);
 }
 
 .orbit-hacker-reveal {

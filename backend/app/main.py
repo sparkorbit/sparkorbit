@@ -11,6 +11,7 @@ def create_app(store: Any | None = None):
     from fastapi.middleware.cors import CORSMiddleware
 
     from .api.routes.dashboard import router as dashboard_router
+    from .api.routes.leaderboards import router as leaderboards_router
     from .api.routes.sessions import router as sessions_router
 
     resolved_store = store or RedisStore()
@@ -25,6 +26,7 @@ def create_app(store: Any | None = None):
     )
     api_router = APIRouter(prefix="/api")
     api_router.include_router(dashboard_router)
+    api_router.include_router(leaderboards_router)
     api_router.include_router(sessions_router)
 
     @api_router.get("/health")
