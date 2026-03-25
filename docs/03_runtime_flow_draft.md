@@ -21,7 +21,7 @@
 
 | Component | Path | Role |
 |----------|------|------|
-| **collector wrapper** | `backend/app/services/collector.py` | `PoC/source_fetch`의 `run_collection(...)` 호출 |
+| **collector wrapper** | `backend/app/services/collector.py` | `pipelines/source_fetch`의 `run_collection(...)` 호출 |
 | **session runtime** | `backend/app/services/session_service.py` | bootstrap, reload, publish, summarize, dashboard rebuild |
 | **summary provider** | `backend/app/services/summary_provider.py` | `noop` / `heuristic` provider abstraction |
 | **FastAPI app** | `backend/app/main.py` | `/api/*` 라우터와 app wiring |
@@ -37,7 +37,7 @@
 
 runtime이 붙어도 canonical artifact는 바뀌지 않는다.
 
-1. `PoC/source_fetch`가 `PoC/source_fetch/data/runs/<run_id>/` 아래 run output를 만든다.
+1. `pipelines/source_fetch`가 `pipelines/source_fetch/data/runs/<run_id>/` 아래 run output를 만든다.
 2. backend는 이 run output를 읽어 Redis session 키를 만든다.
 3. frontend는 JSONL run output를 직접 읽지 않고 backend API/BFF만 사용한다.
 
@@ -55,7 +55,7 @@ sequenceDiagram
     participant UI as Frontend
     participant API as FastAPI backend
     participant REDIS as Redis
-    participant COLLECT as PoC/source_fetch
+    participant COLLECT as pipelines/source_fetch
     participant RUN as run outputs
 
     UI->>API: GET /api/dashboard/stream?session=active
@@ -150,8 +150,6 @@ frontend와 backend는 아래 stage 이름을 공유한다.
 - `raw_responses` body 전체
 - standalone `metrics.ndjson` rows
 - separate cluster/event layer
-
-`source_manifest` 안의 `sample_path`는 collection artifact 메타데이터로 남아 있을 수 있지만, frontend가 sample fixture를 읽는 구조는 아니다.
 
 ## Publish / Enrichment Rules
 
@@ -276,7 +274,6 @@ frontend는 이 값을 재계산하지 않고 가능한 그대로 사용한다.
 - reload와 bootstrap은 한 번에 하나만 돌도록 process-local lock을 둔다.
 - 새로고침 방지는 브라우저 제한이 있어 `beforeunload` 경고 + reload state 복구를 함께 사용한다.
 - summary provider 기본값은 `noop`이라 외부 모델을 붙이지 않으면 digest는 placeholder/heuristic 중심으로 보일 수 있다.
-- sample preview 파일은 collection artifact에 남지만 frontend data source는 아니다.
 
 ## Relationship To Other Docs
 

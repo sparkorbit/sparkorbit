@@ -81,6 +81,15 @@ export type DashboardSession = {
   loading: DashboardLoading | null;
 };
 
+export type DashboardBriefing = {
+  body_en: string;
+  run_meta?: {
+    model_name?: string | null;
+    prompt_version?: string | null;
+    generated_at?: string | null;
+  };
+};
+
 export type DashboardResponse = {
   brand: {
     name: string;
@@ -91,6 +100,7 @@ export type DashboardResponse = {
   summary: {
     title: string;
     headline: string;
+    briefing?: DashboardBriefing | null;
     digests: DigestItem[];
   };
   feeds: FeedPanel[];

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
+from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +14,6 @@ from ..core.constants import (
     ACTIVE_SESSION_KEY,
     BOOTSTRAP_STATE_KEY,
     BOOTSTRAP_STATE_TTL_SECONDS,
-    DEFAULT_COLLECTION_PROFILE,
     DEFAULT_RUN_LABEL,
     HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     ORDERED_SOURCE_CATEGORIES,
@@ -28,7 +29,12 @@ from ..core.constants import (
 )
 from ..core.store import RedisLike
 from .collector import collect_run
-from .summary_provider import SummaryGenerator, build_summary_generator
+from .summary_provider import (
+    BriefingGenerator,
+    SummaryGenerator,
+    build_briefing_generator,
+    build_summary_generator,
+)
 
 
 @dataclass(frozen=True)
@@ -37,7 +43,15 @@ class RunArtifacts:
     run_manifest: dict[str, Any]
     source_manifest: list[dict[str, Any]]
     documents: list[dict[str, Any]]
+    company_decisions: list[dict[str, Any]]
+    paper_domains: list[dict[str, Any]]
 
+
+logger = logging.getLogger(__name__)
+
+SESSION_DOCUMENT_SUMMARIES_FILENAME = "session_document_summaries.ndjson"
+SESSION_CATEGORY_DIGESTS_FILENAME = "session_category_digests.ndjson"
+SESSION_BRIEFINGS_FILENAME = "session_briefings.ndjson"
 
 _HOMEPAGE_BOOTSTRAP_LOCK = threading.Lock()
 _HOMEPAGE_BOOTSTRAP_RUNNING = False
@@ -46,13 +60,17 @@ _SESSION_RELOAD_RUNNING = False
 
 
 def now_utc_iso() -> str:
-    from datetime import UTC, datetime
+    from datetime import datetime, timezone
 
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def session_key(session_id: str, suffix: str) -> str:
     return f"{SESSION_PREFIX}:{session_id}:{suffix}"
+
+
+def artifact_root_key(session_id: str) -> str:
+    return session_key(session_id, "artifact_root")
 
 
 def set_homepage_bootstrap_running(is_running: bool) -> None:
@@ -107,14 +125,24 @@ def read_ndjson(path: Path) -> list[dict[str, Any]]:
     ]
 
 
+def write_ndjson(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
 def load_run_artifacts(run_dir: str | Path) -> RunArtifacts:
     root = Path(run_dir)
     normalized_dir = root / "normalized"
+    labels_dir = root / "labels"
     return RunArtifacts(
         run_dir=root,
         run_manifest=read_json(root / "run_manifest.json"),
         source_manifest=read_ndjson(root / "source_manifest.ndjson"),
         documents=read_ndjson(normalized_dir / "documents.ndjson"),
+        company_decisions=read_ndjson(labels_dir / "company_decisions.ndjson"),
+        paper_domains=read_ndjson(labels_dir / "paper_domains.ndjson"),
     )
 
 
@@ -437,6 +465,18 @@ def digest_key(session_id: str, category: str) -> str:
     return session_key(session_id, f"digest:{category}")
 
 
+def resolve_session_artifact_root(
+    store: RedisLike,
+    session_id: str,
+    run_manifest: dict[str, Any],
+) -> Path:
+    artifact_root = get_json(store, artifact_root_key(session_id))
+    if isinstance(artifact_root, str) and artifact_root.strip():
+        return Path(artifact_root)
+    run_id = str(run_manifest.get("run_id") or session_id).strip()
+    return DEFAULT_RUNS_DIR / run_id
+
+
 def default_llm_state() -> dict[str, Any]:
     return {
         "status": "pending",
@@ -540,6 +580,7 @@ def loading_stage_label(stage: str, status: str) -> str:
         "published": "Relay Armed",
         "summarizing_documents": "Pattern Pass",
         "building_digests": "Sweep Build",
+        "generating_briefing": "Briefing Gen",
         "ready": "Grid Ready",
         "partial_error": "Partial Ready",
         "error": "Fault",
@@ -586,6 +627,11 @@ def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
             "label": "Sweep Build",
             "detail": "sweep를 묶고 마지막 상태를 기록합니다.",
         },
+        {
+            "id": "briefing",
+            "label": "Briefing",
+            "detail": "하루치 흐름을 엮은 daily briefing을 생성합니다.",
+        },
     ]
 
     current_index = {
@@ -598,8 +644,9 @@ def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
         "published": 4,
         "summarizing_documents": 5,
         "building_digests": 6,
-        "ready": 6,
-        "partial_error": 6,
+        "generating_briefing": 7,
+        "ready": 7,
+        "partial_error": 7,
         "error": 0,
     }.get(stage, 0)
 
@@ -614,8 +661,9 @@ def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
         "published": 4,
         "summarizing_documents": 4,
         "building_digests": 5,
-        "ready": 6,
-        "partial_error": 6,
+        "generating_briefing": 6,
+        "ready": 7,
+        "partial_error": 7,
         "error": -1,
     }.get(stage, -1)
 
@@ -644,7 +692,8 @@ def loading_percent(current: int, total: int, *, status: str, stage: str) -> int
         "publishing_views": (73, 84),
         "published": (84, 84),
         "summarizing_documents": (85, 94),
-        "building_digests": (95, 99),
+        "building_digests": (95, 98),
+        "generating_briefing": (99, 99),
         "ready": (100, 100),
         "partial_error": (100, 100),
     }
@@ -796,7 +845,6 @@ def build_bootstrap_digest_items(status: str) -> list[dict[str, str]]:
 def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
     status = str(state.get("status") or "collecting")
     started_at = str(state.get("started_at") or now_utc_iso())
-    profile = str(state.get("profile") or DEFAULT_COLLECTION_PROFILE)
     error_message = compact_text(state.get("error"), 180)
     stage = str(state.get("stage") or "starting")
     detail = str(
@@ -846,7 +894,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "title": "Cold Boot Relay",
             "sessionId": "bootstrapping",
             "sessionDate": started_at[:10] or "unknown",
-            "window": f"{profile} scan",
+            "window": "live scan",
             "reloadRule": "active cache가 없으면 collector가 자동으로 새 scan을 시작합니다.",
             "metrics": metrics,
             "runtime": build_bootstrap_runtime_items(status, stage),
@@ -900,7 +948,7 @@ def build_session_block(
         "title": "Relay Cache",
         "sessionId": session_id,
         "sessionDate": session_date or "unknown",
-        "window": f"{run_manifest.get('profile', 'live')} scan",
+        "window": "live scan",
         "reloadRule": "POST /api/sessions/reload가 새 scan을 돌리고 active cache를 교체합니다.",
         "metrics": [
             {
@@ -1094,6 +1142,404 @@ def build_digest_from_documents(
     return digest
 
 
+def build_session_document_summary_rows(
+    session_id: str,
+    run_id: str,
+    documents_by_id: dict[str, dict[str, Any]],
+    *,
+    provider_name: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for document in sort_documents(list(documents_by_id.values())):
+        llm = document.get("llm") or {}
+        run_meta = llm.get("run_meta") or {}
+        document_id = str(document.get("document_id") or "")
+        rows.append(
+            {
+                "summary_id": f"{session_id}:document:{document_id}",
+                "artifact_type": "document_summary",
+                "session_id": session_id,
+                "run_id": run_id,
+                "document_id": document_id,
+                "source": document.get("source"),
+                "source_category": document.get("source_category"),
+                "status": llm.get("status"),
+                "summary_1l": llm.get("summary_1l"),
+                "summary_short": llm.get("summary_short"),
+                "key_points": llm.get("key_points") or [],
+                "entities": llm.get("entities") or [],
+                "primary_domain": llm.get("primary_domain"),
+                "subdomains": llm.get("subdomains") or [],
+                "importance_score": llm.get("importance_score"),
+                "importance_reason": llm.get("importance_reason"),
+                "evidence_chunk_ids": llm.get("evidence_chunk_ids") or [],
+                "provider_name": provider_name,
+                "model_name": run_meta.get("model_name"),
+                "prompt_version": run_meta.get("prompt_version"),
+                "fewshot_pack_version": run_meta.get("fewshot_pack_version"),
+                "generated_at": run_meta.get("generated_at"),
+            }
+        )
+    return rows
+
+
+def build_session_category_digest_rows(
+    session_id: str,
+    run_id: str,
+    digests_by_category: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for category in ORDERED_SOURCE_CATEGORIES:
+        digest = digests_by_category.get(category)
+        if digest is None:
+            continue
+        rows.append(
+            {
+                "digest_id": f"{session_id}:digest:{category}",
+                "artifact_type": "category_digest",
+                "session_id": session_id,
+                "run_id": run_id,
+                "category": category,
+                "domain": SOURCE_CATEGORY_LABELS.get(category, category),
+                "headline": digest.get("headline"),
+                "summary": digest.get("summary"),
+                "evidence": digest.get("evidence"),
+                "document_ids": digest.get("document_ids") or [],
+                "updated_at": digest.get("updated_at"),
+            }
+        )
+    return rows
+
+
+def build_session_briefing_rows(
+    session_id: str,
+    run_id: str,
+    briefing: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if briefing is None:
+        return []
+    run_meta = briefing.get("run_meta") or {}
+    return [
+        {
+            "briefing_id": f"{session_id}:briefing:daily",
+            "artifact_type": "session_briefing",
+            "session_id": session_id,
+            "run_id": run_id,
+            "body_en": briefing.get("body_en"),
+            "category_summaries": briefing.get("category_summaries") or {},
+            "error": briefing.get("error"),
+            "model_name": run_meta.get("model_name"),
+            "prompt_version": run_meta.get("prompt_version"),
+            "generated_at": run_meta.get("generated_at"),
+        }
+    ]
+
+
+def persist_session_runtime_artifacts(
+    run_dir: Path,
+    *,
+    session_id: str,
+    run_id: str,
+    documents_by_id: dict[str, dict[str, Any]],
+    digests_by_category: dict[str, dict[str, Any]],
+    briefing: dict[str, Any] | None,
+    provider_name: str,
+) -> None:
+    labels_dir = run_dir / "labels"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    write_ndjson(
+        labels_dir / SESSION_DOCUMENT_SUMMARIES_FILENAME,
+        build_session_document_summary_rows(
+            session_id,
+            run_id,
+            documents_by_id,
+            provider_name=provider_name,
+        ),
+    )
+    write_ndjson(
+        labels_dir / SESSION_CATEGORY_DIGESTS_FILENAME,
+        build_session_category_digest_rows(session_id, run_id, digests_by_category),
+    )
+    write_ndjson(
+        labels_dir / SESSION_BRIEFINGS_FILENAME,
+        build_session_briefing_rows(session_id, run_id, briefing),
+    )
+
+
+def _is_recent(doc: dict[str, Any], cutoff_date: str) -> bool:
+    date_str = (doc.get("published_at") or doc.get("sort_at") or "")[:10]
+    return date_str >= cutoff_date
+
+
+def build_briefing_input(
+    documents_by_id: dict[str, dict[str, Any]],
+    feed_lists: dict[str, list[str]],
+) -> dict[str, Any]:
+    from datetime import datetime, timedelta, timezone
+
+    issue_domains = {
+        "model_release",
+        "product_update",
+        "open_source",
+        "benchmark_eval",
+        "partnership_ecosystem",
+        "policy_safety",
+    }
+    max_papers = 16
+    max_company = 8
+    max_models = 6
+    max_community = 8
+    today = datetime.now(timezone.utc)
+    cutoff_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    category_docs: dict[str, list[dict[str, Any]]] = {}
+    source_docs: dict[str, list[dict[str, Any]]] = {}
+    for _source, doc_ids in feed_lists.items():
+        for doc_id in doc_ids:
+            doc = documents_by_id.get(doc_id)
+            if doc is None:
+                continue
+            if not _is_recent(doc, cutoff_date):
+                continue
+            cat = str(doc.get("source_category") or "community")
+            category_docs.setdefault(cat, []).append(doc)
+            source_docs.setdefault(str(doc.get("source") or ""), []).append(doc)
+    for cat in category_docs:
+        category_docs[cat] = sort_documents(category_docs[cat])
+    for source in source_docs:
+        source_docs[source] = sort_documents(source_docs[source])
+
+    def _title(doc: dict[str, Any]) -> str:
+        return compact_text(str(doc.get("title") or ""), 120)
+
+    def _engagement_value(doc: dict[str, Any]) -> int:
+        ep = doc.get("engagement_primary") or {}
+        return int(ep.get("value") or 0)
+
+    def _engagement_metric(doc: dict[str, Any], key: str) -> int:
+        engagement = doc.get("engagement") or {}
+        return int(engagement.get(key) or 0)
+
+    def _top_values(
+        rows: list[dict[str, Any]],
+        key: str,
+        *,
+        limit: int = 3,
+    ) -> list[str]:
+        counter: Counter[str] = Counter()
+        for row in rows:
+            value = str(row.get(key) or "").strip()
+            if value:
+                counter[value] += 1
+        return [value for value, _count in counter.most_common(limit)]
+
+    def _paper_source_group(doc: dict[str, Any]) -> str:
+        source = str(doc.get("source") or "")
+        if source.startswith("arxiv_rss_"):
+            return "arxiv"
+        if source == "hf_daily_papers":
+            return "hf_daily"
+        return "other"
+
+    def _append_community_doc(
+        target: list[dict[str, str]],
+        selected_ids: set[str],
+        doc: dict[str, Any],
+    ) -> None:
+        document_id = str(doc.get("document_id") or "")
+        if not document_id or document_id in selected_ids or len(target) >= max_community:
+            return
+        target.append(
+            {
+                "title": _title(doc),
+                "source": str(doc.get("source") or ""),
+            }
+        )
+        selected_ids.add(document_id)
+
+    def _append_paper_doc(
+        target: list[dict[str, str]],
+        selected_ids: set[str],
+        doc: dict[str, Any],
+    ) -> None:
+        document_id = str(doc.get("document_id") or "")
+        if not document_id or document_id in selected_ids or len(target) >= max_papers:
+            return
+        target.append(
+            {
+                "title": _title(doc),
+                "domain": (doc.get("labels") or {}).get("paper_domain", "others"),
+                "source": str(doc.get("source") or ""),
+                "source_group": _paper_source_group(doc),
+            }
+        )
+        selected_ids.add(document_id)
+
+    papers: list[dict[str, str]] = []
+    paper_ids: set[str] = set()
+    paper_docs = category_docs.get("papers", [])
+    for source_group, per_group_limit in (
+        ("arxiv", 10),
+        ("hf_daily", 3),
+        ("other", 3),
+    ):
+        for doc in paper_docs:
+            if len(papers) >= max_papers:
+                break
+            if _paper_source_group(doc) != source_group:
+                continue
+            group_selected = sum(
+                1 for row in papers if str(row.get("source_group") or "") == source_group
+            )
+            if group_selected >= per_group_limit:
+                continue
+            _append_paper_doc(papers, paper_ids, doc)
+        if len(papers) >= max_papers:
+            break
+    for doc in paper_docs:
+        if len(papers) >= max_papers:
+            break
+        _append_paper_doc(papers, paper_ids, doc)
+
+    company: list[dict[str, str]] = []
+    company_ids: set[str] = set()
+    for cat in ("company", "company_kr", "company_cn"):
+        for doc in category_docs.get(cat, []):
+            cl = (doc.get("labels") or {}).get("company", {})
+            if cl.get("decision") != "keep":
+                continue
+            company.append(
+                {
+                    "title": _title(doc),
+                    "domain": cl.get("company_domain") or "others",
+                    "source": str(doc.get("source") or ""),
+                }
+            )
+            company_ids.add(str(doc.get("document_id") or ""))
+            if len(company) >= max_company:
+                break
+        if len(company) >= max_company:
+            break
+
+    community: list[dict[str, str]] = []
+    community_ids: set[str] = set()
+    for doc in category_docs.get("community", [])[:5]:
+        _append_community_doc(community, community_ids, doc)
+    for source in ("hf_daily_papers", "hf_trending_models", "hf_models_likes"):
+        for doc in source_docs.get(source, [])[:1]:
+            _append_community_doc(community, community_ids, doc)
+            if len(community) >= max_community:
+                break
+        if len(community) >= max_community:
+            break
+    for doc in category_docs.get("community", [])[5:]:
+        _append_community_doc(community, community_ids, doc)
+        if len(community) >= max_community:
+            break
+    for source in ("hf_daily_papers", "hf_trending_models", "hf_models_likes"):
+        for doc in source_docs.get(source, [])[1:]:
+            _append_community_doc(community, community_ids, doc)
+            if len(community) >= max_community:
+                break
+        if len(community) >= max_community:
+            break
+
+    models: list[dict[str, Any]] = []
+    model_ids: set[str] = set()
+    for source, per_source_limit in (
+        ("hf_trending_models", 3),
+        ("hf_models_new", 2),
+        ("hf_models_likes", 1),
+    ):
+        for doc in source_docs.get(source, [])[:per_source_limit]:
+            document_id = str(doc.get("document_id") or "")
+            if not document_id or document_id in model_ids or len(models) >= max_models:
+                continue
+            discovery = doc.get("discovery") or {}
+            ranking = doc.get("ranking") or {}
+            metadata = doc.get("metadata") or {}
+            models.append(
+                {
+                    "title": _title(doc),
+                    "source": str(doc.get("source") or ""),
+                    "likes": _engagement_value(doc),
+                    "downloads": _engagement_metric(doc, "downloads"),
+                    "feed_score": int(ranking.get("feed_score") or 0),
+                    "signal_reason": str(ranking.get("priority_reason") or ""),
+                    "discovery_reason": str(discovery.get("primary_reason") or ""),
+                    "freshness": str(discovery.get("freshness_bucket") or ""),
+                    "trend_rank": metadata.get("trending_position"),
+                }
+            )
+            model_ids.add(document_id)
+        if len(models) >= max_models:
+            break
+    for doc in category_docs.get("models", []):
+        document_id = str(doc.get("document_id") or "")
+        if not document_id or document_id in model_ids or len(models) >= max_models:
+            continue
+        discovery = doc.get("discovery") or {}
+        ranking = doc.get("ranking") or {}
+        metadata = doc.get("metadata") or {}
+        models.append(
+            {
+                "title": _title(doc),
+                "source": str(doc.get("source") or ""),
+                "likes": _engagement_value(doc),
+                "downloads": _engagement_metric(doc, "downloads"),
+                "feed_score": int(ranking.get("feed_score") or 0),
+                "signal_reason": str(ranking.get("priority_reason") or ""),
+                "discovery_reason": str(discovery.get("primary_reason") or ""),
+                "freshness": str(discovery.get("freshness_bucket") or ""),
+                "trend_rank": metadata.get("trending_position"),
+            }
+        )
+        model_ids.add(document_id)
+
+    total_selected_ids = paper_ids | company_ids | model_ids | community_ids
+
+    session = {
+        "window": "today",
+        "total_items": len(total_selected_ids),
+        "category_counts": {
+            "papers": len(papers),
+            "company": len(company),
+            "models": len(models),
+            "community": len(community),
+        },
+        "dominant_paper_domains": _top_values(papers, "domain"),
+        "paper_source_groups": _top_values(papers, "source_group"),
+        "dominant_company_domains": _top_values(company, "domain"),
+        "company_issue_domains": _top_values(
+            [row for row in company if str(row.get("domain") or "") in issue_domains],
+            "domain",
+        ),
+        "top_model_names": [row["title"] for row in models[:2]],
+        "active_model_sources": _top_values(models, "source", limit=3),
+        "hf_model_sources": _top_values(
+            [row for row in models if str(row.get("source") or "").startswith("hf_")],
+            "source",
+            limit=3,
+        ),
+        "model_signal_reasons": _top_values(models, "signal_reason", limit=3),
+        "active_community_sources": _top_values(community, "source", limit=2),
+        "hf_community_sources": _top_values(
+            [row for row in community if str(row.get("source") or "").startswith("hf_")],
+            "source",
+            limit=3,
+        ),
+    }
+
+    return {
+        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "session": session,
+        "papers": papers,
+        "company": company,
+        "community": community,
+        "models": models,
+    }
+
+
 def build_dashboard_payload(
     *,
     session_id: str,
@@ -1103,6 +1549,7 @@ def build_dashboard_payload(
     documents_by_id: dict[str, dict[str, Any]],
     feed_lists: dict[str, list[str]],
     digests_by_category: dict[str, dict[str, Any]] | None = None,
+    briefing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     digests_by_category = digests_by_category or {}
     source_manifest_lookup = {
@@ -1179,6 +1626,7 @@ def build_dashboard_payload(
         "summary": {
             "title": "Signal Sweep",
             "headline": f"{hottest_digest['domain']} / {hottest_digest['headline']}",
+            "briefing": briefing if briefing and not briefing.get("error") else None,
             "digests": digests,
         },
         "feeds": feeds,
@@ -1230,6 +1678,7 @@ def rebuild_dashboard(store: RedisLike, session_id: str) -> dict[str, Any]:
     meta = get_json(store, session_key(session_id, "meta"))
     run_manifest = get_json(store, session_key(session_id, "run_manifest"))
     source_manifest = get_json(store, session_key(session_id, "source_manifest")) or []
+    briefing = get_json(store, session_key(session_id, "briefing"))
     if meta is None or run_manifest is None:
         raise KeyError(f"Unknown session: {session_id}")
     if int(meta.get("schema_version") or 0) != SCHEMA_VERSION:
@@ -1249,6 +1698,7 @@ def rebuild_dashboard(store: RedisLike, session_id: str) -> dict[str, Any]:
         documents_by_id=documents_by_id,
         feed_lists=feed_lists,
         digests_by_category=digests_by_category,
+        briefing=briefing,
     )
     set_json_with_ttl(store, session_key(session_id, "dashboard"), dashboard)
     return dashboard
@@ -1275,7 +1725,6 @@ def resolve_session_id(store: RedisLike, session: str | None) -> str:
 def begin_homepage_bootstrap(
     store: RedisLike,
     *,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
 ) -> dict[str, Any]:
     global _HOMEPAGE_BOOTSTRAP_RUNNING
@@ -1283,14 +1732,12 @@ def begin_homepage_bootstrap(
         if _HOMEPAGE_BOOTSTRAP_RUNNING:
             return get_bootstrap_state(store) or build_homepage_bootstrap_state(
                 status="collecting",
-                profile=profile,
                 run_label=run_label,
             )
         _HOMEPAGE_BOOTSTRAP_RUNNING = True
         state = build_homepage_bootstrap_state(
             status="collecting",
-            profile=profile,
-            run_label=run_label,
+                run_label=run_label,
         )
     set_bootstrap_state(store, state)
     return state
@@ -1299,7 +1746,6 @@ def begin_homepage_bootstrap(
 def build_homepage_bootstrap_state(
     *,
     status: str,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     stage: str = "starting",
     detail: str | None = None,
@@ -1310,7 +1756,6 @@ def build_homepage_bootstrap_state(
 ) -> dict[str, Any]:
     return {
         "status": status,
-        "profile": profile,
         "run_label": run_label,
         "stage": stage,
         "detail": detail
@@ -1331,7 +1776,6 @@ def build_homepage_bootstrap_state(
 def begin_session_reload(
     store: RedisLike,
     *,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = DEFAULT_RUN_LABEL,
 ) -> dict[str, Any]:
     global _SESSION_RELOAD_RUNNING
@@ -1339,14 +1783,12 @@ def begin_session_reload(
         if _SESSION_RELOAD_RUNNING:
             return get_reload_state(store) or build_session_reload_state(
                 status="collecting",
-                profile=profile,
                 run_label=run_label,
             )
         _SESSION_RELOAD_RUNNING = True
         state = build_session_reload_state(
             status="collecting",
-            profile=profile,
-            run_label=run_label,
+                run_label=run_label,
         )
     set_reload_state(store, state)
     return state
@@ -1355,7 +1797,6 @@ def begin_session_reload(
 def build_session_reload_state(
     *,
     status: str,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = DEFAULT_RUN_LABEL,
     stage: str = "starting",
     detail: str | None = None,
@@ -1367,7 +1808,6 @@ def build_session_reload_state(
 ) -> dict[str, Any]:
     return {
         "status": status,
-        "profile": profile,
         "run_label": run_label,
         "stage": stage,
         "detail": detail
@@ -1390,7 +1830,6 @@ def update_session_reload_state(
     store: RedisLike,
     *,
     status: str,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = DEFAULT_RUN_LABEL,
     stage: str,
     detail: str,
@@ -1403,7 +1842,6 @@ def update_session_reload_state(
     existing = get_reload_state(store) or {}
     payload = build_session_reload_state(
         status=status,
-        profile=profile,
         run_label=run_label,
         stage=stage,
         detail=detail,
@@ -1517,6 +1955,32 @@ def publish_run(
 
     artifacts = load_run_artifacts(run_dir)
     session_id = str(artifacts.run_manifest["run_id"])
+
+    company_lookup: dict[str, dict[str, Any]] = {
+        row["document_id"]: row
+        for row in artifacts.company_decisions
+        if row.get("document_id")
+    }
+    paper_lookup: dict[str, str] = {
+        row["document_id"]: row.get("paper_domain", "others")
+        for row in artifacts.paper_domains
+        if row.get("document_id")
+    }
+    for document in artifacts.documents:
+        doc_id = document.get("document_id", "")
+        labels: dict[str, Any] = {}
+        if doc_id in company_lookup:
+            cd = company_lookup[doc_id]
+            labels["company"] = {
+                "decision": cd.get("decision"),
+                "company_domain": cd.get("company_domain"),
+                "reason_code": cd.get("reason_code"),
+            }
+        if doc_id in paper_lookup:
+            labels["paper_domain"] = paper_lookup[doc_id]
+        if labels:
+            document["labels"] = labels
+
     filtered_documents = [
         document for document in artifacts.documents if has_displayable_reference(document)
     ]
@@ -1553,6 +2017,7 @@ def publish_run(
     }
 
     set_json_with_ttl(store, session_key(session_id, "meta"), meta)
+    set_json_with_ttl(store, artifact_root_key(session_id), str(artifacts.run_dir))
     set_json_with_ttl(
         store, session_key(session_id, "run_manifest"), artifacts.run_manifest
     )
@@ -1694,6 +2159,7 @@ def run_session_enrichment(
     session_id: str,
     *,
     generator: SummaryGenerator | None = None,
+    briefing_generator: BriefingGenerator | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     def emit_progress(**payload: Any) -> None:
@@ -1702,6 +2168,9 @@ def run_session_enrichment(
         progress_callback(payload)
 
     generator = generator or build_summary_generator()
+    owns_briefing_generator = briefing_generator is None
+    if briefing_generator is None:
+        briefing_generator = build_briefing_generator()
     meta = get_json(store, session_key(session_id, "meta"))
     run_manifest = get_json(store, session_key(session_id, "run_manifest"))
     source_manifest = get_json(store, session_key(session_id, "source_manifest")) or []
@@ -1721,23 +2190,26 @@ def run_session_enrichment(
     ]
     pending_total = len(pending_document_ids)
     provider_name = getattr(generator, "provider_name", generator.__class__.__name__)
+    summary_generation_enabled = provider_name != "noop"
 
     meta["status"] = "summarizing"
     meta["summary_provider"] = provider_name
     meta["updated_at"] = now_utc_iso()
-    meta["loading_stage"] = "summarizing_documents"
+    meta["loading_stage"] = (
+        "summarizing_documents" if summary_generation_enabled else "building_digests"
+    )
     meta["loading_detail"] = (
         f"선택된 문서 {pending_total}건에서 핵심 라인을 추출하고 있습니다."
         if pending_total
         else "패턴 추출 대상이 없어 바로 sweep build로 넘어갑니다."
     )
     meta["loading_progress_current"] = 0
-    meta["loading_progress_total"] = pending_total
+    meta["loading_progress_total"] = pending_total if summary_generation_enabled else len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_current_source"] = None
     set_json_with_ttl(store, session_key(session_id, "meta"), meta)
     emit_progress(
         status="summarizing",
-        stage="summarizing_documents",
+        stage=str(meta["loading_stage"]),
         detail=meta["loading_detail"],
         progress_current=meta["loading_progress_current"],
         progress_total=meta["loading_progress_total"],
@@ -1759,6 +2231,8 @@ def run_session_enrichment(
                 continue
             category = str(document.get("source_category") or "community")
             category_documents.setdefault(category, []).append(document)
+            if not summary_generation_enabled:
+                continue
             llm = default_llm_state()
             llm.update(document.get("llm") or {})
             if llm.get("status") != "pending":
@@ -1846,14 +2320,59 @@ def run_session_enrichment(
             session_id=session_id,
         )
 
+    briefing: dict[str, Any] | None = None
+    if briefing_generator is not None:
+        meta["loading_stage"] = "generating_briefing"
+        meta["loading_detail"] = "수집 결과를 종합하여 daily briefing을 생성하고 있습니다."
+        meta["loading_progress_current"] = 0
+        meta["loading_progress_total"] = 1
+        meta["loading_current_source"] = None
+        meta["updated_at"] = now_utc_iso()
+        set_json_with_ttl(store, session_key(session_id, "meta"), meta)
+        emit_progress(
+            status="summarizing",
+            stage="generating_briefing",
+            detail=meta["loading_detail"],
+            progress_current=0,
+            progress_total=1,
+            current_source=None,
+            session_id=session_id,
+        )
+        briefing_input = build_briefing_input(documents_by_id, feed_lists)
+        briefing = briefing_generator.generate_briefing(briefing_input)
+        set_json_with_ttl(store, session_key(session_id, "briefing"), briefing)
+        meta["loading_progress_current"] = 1
+        meta["loading_detail"] = (
+            "daily briefing 생성을 마쳤습니다."
+            if not briefing.get("error")
+            else f"briefing 생성 중 오류: {briefing.get('error', '')}"
+        )
+        meta["updated_at"] = now_utc_iso()
+        set_json_with_ttl(store, session_key(session_id, "meta"), meta)
+        emit_progress(
+            status="summarizing",
+            stage="generating_briefing",
+            detail=meta["loading_detail"],
+            progress_current=1,
+            progress_total=1,
+            current_source=None,
+            session_id=session_id,
+        )
+
     meta["digests_ready"] = True
     meta["summaries_ready"] = summaries_ready
     meta["updated_at"] = now_utc_iso()
     meta["status"] = "partial_error" if summary_errors else "ready"
     meta["loading_stage"] = meta["status"]
+    briefing_error = briefing.get("error") if briefing else None
     if summary_errors:
         meta["loading_detail"] = (
             f"pattern pass {summaries_ready}건 완료, fault {summary_errors}건이 남았습니다."
+        )
+    elif briefing_error:
+        meta["loading_detail"] = (
+            "문서 요약과 category digest 생성은 마쳤지만 "
+            "daily briefing은 생성하지 못했습니다."
         )
     elif summaries_ready == 0 and pending_total > 0:
         meta["loading_detail"] = (
@@ -1886,8 +2405,29 @@ def run_session_enrichment(
         documents_by_id=documents_by_id,
         feed_lists=feed_lists,
         digests_by_category=digests_by_category,
+        briefing=briefing,
     )
     set_json_with_ttl(store, session_key(session_id, "dashboard"), dashboard)
+    try:
+        persist_session_runtime_artifacts(
+            resolve_session_artifact_root(store, session_id, run_manifest),
+            session_id=session_id,
+            run_id=str(run_manifest.get("run_id") or session_id),
+            documents_by_id=documents_by_id,
+            digests_by_category=digests_by_category,
+            briefing=briefing,
+            provider_name=provider_name,
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.warning(
+            "Failed to persist runtime summary artifacts for %s: %s",
+            session_id,
+            exc,
+        )
+    if owns_briefing_generator and briefing_generator is not None:
+        close = getattr(briefing_generator, "close", None)
+        if callable(close):
+            close()
     return {
         "session_id": session_id,
         "meta": meta,
@@ -1917,7 +2457,6 @@ def update_bootstrap_state(
     store: RedisLike,
     *,
     status: str,
-    profile: str,
     run_label: str,
     stage: str,
     detail: str,
@@ -1929,7 +2468,6 @@ def update_bootstrap_state(
     existing = get_bootstrap_state(store) or {}
     payload = build_homepage_bootstrap_state(
         status=status,
-        profile=profile,
         run_label=run_label,
         stage=stage,
         detail=detail,
@@ -1945,7 +2483,6 @@ def update_bootstrap_state(
 def run_homepage_bootstrap(
     store: RedisLike,
     *,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     timeout: float = 30.0,
 ) -> None:
@@ -1954,7 +2491,6 @@ def run_homepage_bootstrap(
             update_bootstrap_state(
                 store,
                 status="collecting",
-                profile=profile,
                 run_label=run_label,
                 stage=str(event.get("stage") or "fetching_sources"),
                 detail=str(
@@ -1974,7 +2510,6 @@ def run_homepage_bootstrap(
             update_bootstrap_state(
                 store,
                 status=str(event.get("status") or "collecting"),
-                profile=profile,
                 run_label=run_label,
                 stage=str(event.get("stage") or "publishing_documents"),
                 detail=str(
@@ -1991,7 +2526,6 @@ def run_homepage_bootstrap(
             )
 
         _, run_dir = collect_run(
-            profile=profile,
             run_label=run_label,
             timeout=timeout,
             progress_callback=handle_collect_progress,
@@ -2010,7 +2544,6 @@ def run_homepage_bootstrap(
             store,
             build_homepage_bootstrap_state(
                 status="error",
-                profile=profile,
                 run_label=run_label,
                 stage=str(current_state.get("stage") or "error"),
                 detail="cold boot 중 fault가 발생했습니다.",
@@ -2032,7 +2565,6 @@ def run_session_reload(
     store: RedisLike,
     *,
     sources: list[str] | None = None,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     limit: int | None = None,
     output_dir: str | Path | None = None,
     run_label: str = DEFAULT_RUN_LABEL,
@@ -2043,7 +2575,6 @@ def run_session_reload(
             update_session_reload_state(
                 store,
                 status="collecting",
-                profile=profile,
                 run_label=run_label,
                 stage=str(event.get("stage") or "fetching_sources"),
                 detail=str(
@@ -2068,7 +2599,6 @@ def run_session_reload(
             update_session_reload_state(
                 store,
                 status=str(event.get("status") or "summarizing"),
-                profile=profile,
                 run_label=run_label,
                 stage=str(event.get("stage") or "summarizing_documents"),
                 detail=str(
@@ -2093,7 +2623,6 @@ def run_session_reload(
             update_session_reload_state(
                 store,
                 status=str(event.get("status") or "collecting"),
-                profile=profile,
                 run_label=run_label,
                 stage=str(event.get("stage") or "publishing_documents"),
                 detail=str(
@@ -2116,8 +2645,7 @@ def run_session_reload(
 
         run_manifest, run_dir = collect_run(
             sources=sources,
-            profile=profile,
-            limit=limit,
+                limit=limit,
             output_dir=output_dir,
             run_label=run_label,
             timeout=timeout,
@@ -2138,8 +2666,7 @@ def run_session_reload(
         update_session_reload_state(
             store,
             status=str(meta.get("status") or "ready"),
-            profile=profile,
-            run_label=run_label,
+                run_label=run_label,
             stage=str(meta.get("loading_stage") or meta.get("status") or "ready"),
             detail=str(
                 meta.get("loading_detail")
@@ -2160,7 +2687,6 @@ def run_session_reload(
             store,
             build_session_reload_state(
                 status="error",
-                profile=profile,
                 run_label=run_label,
                 stage=str(current_state.get("stage") or "error"),
                 detail="probe cycle 중 fault가 발생했습니다.",
@@ -2188,7 +2714,6 @@ def start_session_reload(
     *,
     schedule_reload: Callable[[], None],
     sources: list[str] | None = None,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     limit: int | None = None,
     output_dir: str | Path | None = None,
     run_label: str = DEFAULT_RUN_LABEL,
@@ -2200,7 +2725,6 @@ def start_session_reload(
 
     state = begin_session_reload(
         store,
-        profile=profile,
         run_label=run_label,
     )
     try:
@@ -2215,7 +2739,6 @@ def get_or_bootstrap_dashboard_response(
     store: RedisLike,
     *,
     schedule_bootstrap: Callable[[], None],
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
 ) -> dict[str, Any]:
     try:
@@ -2230,8 +2753,7 @@ def get_or_bootstrap_dashboard_response(
 
         bootstrap_state = begin_homepage_bootstrap(
             store,
-            profile=profile,
-            run_label=run_label,
+                run_label=run_label,
         )
         try:
             schedule_bootstrap()
@@ -2351,7 +2873,6 @@ def reload_session(
     store: RedisLike,
     *,
     sources: list[str] | None = None,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     limit: int | None = None,
     output_dir: str | Path | None = None,
     run_label: str = DEFAULT_RUN_LABEL,
@@ -2360,7 +2881,6 @@ def reload_session(
 ) -> dict[str, Any]:
     _, run_dir = collect_run(
         sources=sources,
-        profile=profile,
         limit=limit,
         output_dir=output_dir,
         run_label=run_label,

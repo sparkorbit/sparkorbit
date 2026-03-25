@@ -4,9 +4,8 @@ Reads normalized documents.ndjson, selects paper sources (arXiv + HF daily paper
 and classifies each paper into a research domain using Ollama.
 
 Usage:
-    cd PoC/llm_enrich
+    cd pipelines/llm_enrich
     python scripts/paper_enrich.py
-    python scripts/paper_enrich.py --chunk-size 100 --dry-run
 """
 from __future__ import annotations
 
@@ -26,12 +25,15 @@ DEFAULT_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:4b")
 DEFAULT_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "180"))
 DEFAULT_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.7"))
-DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
+DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "131072"))
 DEFAULT_TOP_P = float(os.environ.get("OLLAMA_TOP_P", "0.8"))
 DEFAULT_TOP_K = int(os.environ.get("OLLAMA_TOP_K", "20"))
 DEFAULT_MIN_P = float(os.environ.get("OLLAMA_MIN_P", "0.0"))
 DEFAULT_REPEAT_PENALTY = float(os.environ.get("OLLAMA_REPEAT_PENALTY", "1.0"))
 DEFAULT_RUNS_ROOT = Path(__file__).resolve().parents[2] / "source_fetch" / "data" / "runs"
+LABELS_DIRNAME = "labels"
+PAPER_DOMAINS_FILENAME = "paper_domains.ndjson"
+LLM_RUNS_FILENAME = "llm_runs.ndjson"
 
 PROMPT_VERSION = "paper_domain_v1"
 SCHEMA_VERSION = "paper_domain_v1"
@@ -232,7 +234,18 @@ class OllamaClient:
         self.user_prompt_template = user_prompt_template
         self.http = httpx.Client(timeout=timeout_seconds)
 
+    def unload_model(self) -> None:
+        try:
+            self.http.post(
+                f"{self.base_url}/api/chat",
+                json={"model": self.model, "keep_alive": 0},
+                timeout=10.0,
+            )
+        except Exception:
+            pass
+
     def close(self) -> None:
+        self.unload_model()
         self.http.close()
 
     def ping(self) -> None:
@@ -351,11 +364,11 @@ def write_outputs(
     chunk_size: int,
     started_at: str,
 ) -> Path:
-    enriched_dir = run_dir / "enriched"
-    enriched_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir = run_dir / LABELS_DIRNAME
+    labels_dir.mkdir(parents=True, exist_ok=True)
 
-    output_path = enriched_dir / "paper_domains.ndjson"
-    llm_runs_path = enriched_dir / "llm_runs.ndjson"
+    output_path = labels_dir / PAPER_DOMAINS_FILENAME
+    llm_runs_path = labels_dir / LLM_RUNS_FILENAME
 
     output_path.write_text("", encoding="utf-8")
     append_ndjson(output_path, rows)
@@ -395,7 +408,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-p", type=float, default=DEFAULT_MIN_P)
     parser.add_argument("--repeat-penalty", type=float, default=DEFAULT_REPEAT_PENALTY)
     parser.add_argument("--keep-alive", default="30m")
-    parser.add_argument("--dry-run", action="store_true")
     return parser
 
 
@@ -415,9 +427,6 @@ def main() -> int:
     src_counts = Counter(d.get("source") for d in candidates)
     for src, cnt in src_counts.most_common():
         print(f"  {src}: {cnt}")
-
-    if args.dry_run:
-        return 0
 
     if not candidates:
         raise SystemExit("No paper candidates found.")
