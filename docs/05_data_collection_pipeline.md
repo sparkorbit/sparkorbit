@@ -1,4 +1,4 @@
-[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow Draft](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · **05. Data Collection Pipeline**
+[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · **05. Data Collection Pipeline** · [06. UI Design Guide](./06_ui_design_guide.md)
 
 ---
 
@@ -124,6 +124,7 @@ python scripts/data_collection.py --profile full --limit 30 --run-label max
 
 - source 선정 자체는 [02.1 Sources](./02_sections/02_1_sources.md)에서 관리한다.
 - normalized field contract는 [02.2 Fields](./02_sections/02_2_fields.md)에서 본다.
-- Redis/UI를 포함한 목표 구조는 [03. Runtime Flow Draft](./03_runtime_flow_draft.md)에서 본다.
+- Redis session publish, dashboard serving, frontend SSE 흐름은 [03. Runtime Flow](./03_runtime_flow_draft.md)에서 본다.
 - LLM enrichment (company filter, paper domain 등)는 [04. LLM Usage](./04_llm_usage.md)에서 본다.
+- 현재 프론트엔드 시각, 로딩, workspace 규칙은 [06. UI Design Guide](./06_ui_design_guide.md)에서 본다.
 - 실제 setup/run/verification 절차는 [06. Operational Playbook](./06_operational_playbook.md)에서 본다.

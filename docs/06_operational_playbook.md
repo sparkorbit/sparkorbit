@@ -1,11 +1,11 @@
-[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [03. Runtime Flow Draft](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · **06. Operational Playbook**
+[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md) · **06. Operational Playbook**
 
 ---
 
 # SparkOrbit - 06. Operational Playbook
 
 > Canonical runbook for setup and execution
-> Last updated: 2026-03-24
+> Last updated: 2026-03-25
 
 ## 0. Rule
 
@@ -24,11 +24,12 @@
 
 ## 1. Current Scope
 
-현재 실제로 usable 하게 맞춘 절차는 아래 세 단계다.
+현재 실제로 usable 하게 맞춘 절차는 아래 네 단계다.
 
 1. `PoC/source_fetch` 데이터 수집
 2. `PoC/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 company filter enrichment
 3. `PoC/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 paper domain classification
+4. `docker compose` 기반 `redis + backend + worker + frontend` 로컬 스택 실행
 
 아직 이 문서에 없는 절차는 공식 운영 절차로 간주하지 않는다.
 
@@ -37,7 +38,7 @@
 Collection 작업 루트:
 
 ```bash
-cd /data/jjunsss/hackerton/documents-planning/PoC/source_fetch
+cd PoC/source_fetch
 ```
 
 Python 환경:
@@ -76,7 +77,7 @@ data/runs/<run_id>/
 LLM enrichment 작업 루트:
 
 ```bash
-cd /data/jjunsss/hackerton/documents-planning/PoC/llm_enrich
+cd PoC/llm_enrich
 ```
 
 Python 환경:
@@ -127,6 +128,28 @@ API 확인:
 ```bash
 curl http://localhost:11434/api/tags
 ```
+
+## 4-b. Full Local Stack
+
+저장소 루트에서 아래 명령으로 frontend, backend, redis, worker를 함께 띄운다.
+
+```bash
+docker compose up --build
+```
+
+기본 주소:
+
+- frontend: `http://127.0.0.1:3000`
+- backend health: `http://127.0.0.1:8787/api/health`
+- redis: `127.0.0.1:6379`
+
+최소 확인:
+
+```bash
+curl http://127.0.0.1:8787/api/health
+```
+
+브라우저에서 frontend를 열면 active session이 없을 경우 homepage bootstrap이 자동 시작된다. 진행 단계와 fullscreen loading 규칙은 [06. UI Design Guide](./06_ui_design_guide.md), backend session flow는 [03. Runtime Flow](./03_runtime_flow_draft.md)를 따른다.
 
 ## 5. Enrichment Run — Company Filter
 

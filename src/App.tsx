@@ -164,6 +164,62 @@ const EMPTY_DASHBOARD: DashboardResponse = {
   feeds: [],
 };
 
+const SOURCE_CATEGORY_LABELS: Record<string, string> = {
+  papers: "Papers",
+  models: "Models",
+  community: "Community",
+  company: "Company",
+  company_kr: "Company KR",
+  company_cn: "Company CN",
+  benchmark: "Benchmark",
+};
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  paper: "Paper",
+  blog: "Blog",
+  news: "News",
+  post: "Post",
+  story: "Story",
+  model: "Model",
+  model_trending: "Trending Model",
+  repo: "Repo",
+  release: "Release",
+  release_note: "Release Note",
+  benchmark: "Leaderboard Row",
+  benchmark_panel: "Leaderboard Panel",
+};
+
+const TEXT_SCOPE_LABELS: Record<string, string> = {
+  full_text: "Full Text",
+  abstract: "Abstract",
+  excerpt: "Excerpt",
+  metadata_only: "Metadata Only",
+  metric_summary: "Metric Summary",
+  generated_panel: "Generated Panel",
+  empty: "Empty",
+};
+
+const TIME_SEMANTICS_LABELS: Record<string, string> = {
+  published: "Published",
+  updated: "Updated",
+  created: "Created",
+  snapshot: "Snapshot",
+  submission: "Submission",
+};
+
+const TIMESTAMP_KIND_LABELS: Record<string, string> = {
+  published: "Published",
+  updated: "Updated",
+  created: "Created",
+  snapshot: "Snapshot",
+  submission: "Submission",
+};
+
+const BENCHMARK_KIND_LABELS: Record<string, string> = {
+  leaderboard_panel: "Leaderboard Panel",
+  leaderboard_model_row: "Leaderboard Row",
+};
+
 function loadUiSettings(): UiSettings {
   if (typeof window === "undefined") {
     return DEFAULT_UI_SETTINGS;
@@ -223,6 +279,62 @@ function compactText(value: string | null | undefined, maxLength = 160) {
   return `${normalized.slice(0, maxLength).trim()}...`;
 }
 
+function humanizeCode(value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return "-";
+  }
+
+  return normalized
+    .split("_")
+    .map((part) => {
+      const lower = part.toLowerCase();
+      if (["ai", "hf", "hn", "kr", "cn", "llm"].includes(lower)) {
+        return lower.toUpperCase();
+      }
+      if (lower === "rss") {
+        return "RSS";
+      }
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ");
+}
+
+function formatMappedValue(
+  value: string | null | undefined,
+  labels: Record<string, string>,
+) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return "-";
+  }
+  return labels[normalized] ?? humanizeCode(normalized);
+}
+
+function formatSourceCategory(value: string | null | undefined) {
+  return formatMappedValue(value, SOURCE_CATEGORY_LABELS);
+}
+
+function formatDocType(value: string | null | undefined) {
+  return formatMappedValue(value, DOC_TYPE_LABELS);
+}
+
+function formatTextScope(value: string | null | undefined) {
+  return formatMappedValue(value, TEXT_SCOPE_LABELS);
+}
+
+function formatTimeSemantics(value: string | null | undefined) {
+  return formatMappedValue(value, TIME_SEMANTICS_LABELS);
+}
+
+function formatTimestampKind(value: string | null | undefined) {
+  return formatMappedValue(value, TIMESTAMP_KIND_LABELS);
+}
+
+function formatBenchmarkKind(value: string | null | undefined) {
+  return formatMappedValue(value, BENCHMARK_KIND_LABELS);
+}
+
 function toNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -245,6 +357,67 @@ function formatLeaderboardValue(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: Number.isInteger(numeric) ? 0 : 2,
   }).format(numeric);
+}
+
+function formatBenchmarkUnit(value: unknown) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return "-";
+  }
+  if (value === "elo_like_rating") {
+    return "Elo-like rating";
+  }
+  if (value === "leaderboard_points") {
+    return "Leaderboard points";
+  }
+  if (value === "%" || value === "percent") {
+    return "%";
+  }
+  return humanizeCode(value);
+}
+
+function formatBenchmarkScore(
+  label: string | null | undefined,
+  value: unknown,
+  unit: unknown,
+) {
+  const formattedValue = formatLeaderboardValue(value);
+  if (formattedValue === "-") {
+    return "-";
+  }
+
+  const suffix =
+    unit === "%" || unit === "percent"
+      ? "%"
+      : "";
+
+  return `${label?.trim() || "Score"} ${formattedValue}${suffix}`;
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function toRecordArray(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => toRecord(entry))
+    .filter((entry): entry is Record<string, unknown> => entry != null);
+}
+
+function toRenderableStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => formatDetailValue(entry))
+    .filter((entry) => entry !== "-");
 }
 
 function buildLeaderboardEntries(
@@ -353,14 +526,20 @@ function buildDocumentIdentityFields(document: SessionDocument) {
     createDetailField("document_id", document.document_id),
     createDetailField("run_id", document.run_id),
     createDetailField("source", document.source),
-    createDetailField("source_category", document.source_category),
-    createDetailField("doc_type", document.doc_type),
-    createDetailField("content_type", document.content_type),
+    createDetailField(
+      "source_category",
+      formatSourceCategory(document.source_category),
+    ),
+    createDetailField("doc_type", formatDocType(document.doc_type)),
+    createDetailField("content_type", formatDocType(document.content_type)),
     createDetailField("source_item_id", document.source_item_id),
     createDetailField("language", document.language),
     createDetailField("content_format", document.content_format),
-    createDetailField("text_scope", document.text_scope),
-    createDetailField("timestamp_kind", document.timestamp_kind),
+    createDetailField("text_scope", formatTextScope(document.text_scope)),
+    createDetailField(
+      "timestamp_kind",
+      formatTimestampKind(document.timestamp_kind),
+    ),
   ]);
 }
 
@@ -370,7 +549,10 @@ function buildDocumentTimeFields(document: SessionDocument) {
     createDetailField("updated_at", document.updated_at),
     createDetailField("sort_at", document.sort_at),
     createDetailField("fetched_at", document.fetched_at),
-    createDetailField("time_semantics", document.time_semantics),
+    createDetailField(
+      "time_semantics",
+      formatTimeSemantics(document.time_semantics),
+    ),
     createDetailField("source_method", document.source_method),
   ]);
 }
@@ -427,7 +609,10 @@ function buildDocumentLlmFields(document: SessionDocument) {
     createDetailField("status", document.llm.status),
     createDetailField("summary_1l", document.llm.summary_1l),
     createDetailField("summary_short", document.llm.summary_short),
-    createDetailField("primary_domain", document.llm.primary_domain),
+    createDetailField(
+      "primary_domain",
+      formatSourceCategory(document.llm.primary_domain),
+    ),
     createDetailField("importance_score", document.llm.importance_score),
     createDetailField("importance_reason", document.llm.importance_reason),
     createDetailField("model_name", document.llm.run_meta.model_name),
@@ -444,17 +629,45 @@ function buildDocumentBenchmarkFields(document: SessionDocument) {
   const benchmark = document.benchmark;
   return filterDetailFields([
     createDetailField("board_name", benchmark.board_name),
-    createDetailField("kind", benchmark.kind),
+    createDetailField("kind", formatBenchmarkKind(benchmark.kind)),
     createDetailField("rank", benchmark.rank),
+    createDetailField(
+      "score",
+      formatBenchmarkScore(
+        benchmark.score_label,
+        benchmark.score_value,
+        benchmark.score_unit,
+      ),
+    ),
     createDetailField("score_label", benchmark.score_label),
     createDetailField("score_value", benchmark.score_value),
-    createDetailField("score_unit", benchmark.score_unit),
+    createDetailField("score_unit", formatBenchmarkUnit(benchmark.score_unit)),
     createDetailField("votes", benchmark.votes),
     createDetailField("model_name", benchmark.model_name),
     createDetailField("organization", benchmark.organization),
     createDetailField("snapshot_at", benchmark.snapshot_at),
     createDetailField("total_models", benchmark.total_models),
     createDetailField("total_votes", benchmark.total_votes),
+  ]);
+}
+
+function buildDocumentModelFields(document: SessionDocument) {
+  if (!["model", "model_trending"].includes(document.doc_type)) {
+    return [];
+  }
+
+  const metadata = document.metadata;
+  return filterDetailFields([
+    createDetailField("pipeline_tag", metadata["pipeline_tag"]),
+    createDetailField("library_name", metadata["library_name"]),
+    createDetailField(
+      "license_tags",
+      toRenderableStringArray(metadata["license_tags"]),
+    ),
+    createDetailField("regions", toRenderableStringArray(metadata["regions"])),
+    createDetailField("arxiv_ids", toRenderableStringArray(metadata["arxiv_ids"])),
+    createDetailField("private", metadata["private"]),
+    createDetailField("eval_results", metadata["eval_results"]),
   ]);
 }
 
@@ -495,6 +708,30 @@ function buildDocumentEvidenceChunkItems(document: SessionDocument) {
   return document.llm.evidence_chunk_ids.filter(
     (item) => item.trim().length > 0,
   );
+}
+
+function buildDocumentBenchmarkEntryItems(document: SessionDocument) {
+  const metadata = document.metadata;
+  const topEntries = toRecordArray(metadata["top_entries"]);
+  const entries =
+    topEntries.length > 0 ? topEntries : toRecordArray(metadata["entries"]);
+
+  return entries.slice(0, 5).map((entry) => {
+    const rank = formatDetailValue(entry["rank"]);
+    const modelName = formatDetailValue(entry["model_name"]);
+    const organization = formatDetailValue(entry["organization"]);
+    const rating = formatLeaderboardValue(entry["rating"]);
+    const votes = formatLeaderboardValue(entry["votes"]);
+    const segments = [
+      rank !== "-" ? `#${rank}` : null,
+      modelName !== "-" ? modelName : null,
+      organization !== "-" ? organization : null,
+      rating !== "-" ? `rating ${rating}` : null,
+      votes !== "-" ? `votes ${votes}` : null,
+    ].filter((segment): segment is string => segment != null);
+
+    return compactText(segments.join(" / "), 160);
+  }).filter((item) => item.length > 0);
 }
 
 function buildPlaceholderSteps(
@@ -1166,7 +1403,7 @@ function buildDigestDetailPanel(
                         </span>
                       </div>
                       <p className="orbit-wrap-anywhere mt-2 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                        {document.source} / {document.doc_type}
+                        {document.source} / {formatDocType(document.doc_type)}
                       </p>
                       {document.llm.summary_short ? (
                         <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
@@ -1198,6 +1435,7 @@ function buildDocumentDetailPanel(
   const relatedFields = buildDocumentRelatedLinkFields(document);
   const llmFields = buildDocumentLlmFields(document);
   const benchmarkFields = buildDocumentBenchmarkFields(document);
+  const modelFields = buildDocumentModelFields(document);
   const metadataFields = buildDocumentMetadataFields(document);
   const externalIdFields = buildDocumentExternalIdFields(document);
   const rawRefFields = buildDocumentRawRefFields(document);
@@ -1205,6 +1443,7 @@ function buildDocumentDetailPanel(
   const tagItems = buildDocumentTagItems(document);
   const entityItems = buildDocumentEntityItems(document);
   const evidenceChunkItems = buildDocumentEvidenceChunkItems(document);
+  const benchmarkEntryItems = buildDocumentBenchmarkEntryItems(document);
 
   return {
     title: `${document.source} Document`,
@@ -1223,7 +1462,7 @@ function buildDocumentDetailPanel(
                       {document.title}
                     </h3>
                     <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.55] text-orbit-text">
-                      {document.source} / {document.doc_type}
+                      {document.source} / {formatDocType(document.doc_type)}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -1306,39 +1545,54 @@ function buildDocumentDetailPanel(
               </HackerRevealCard>
             ) : null}
 
+            {benchmarkEntryItems.length > 0 ? (
+              <HackerRevealCard delayMs={780}>
+                <DetailChipBlock
+                  label="Leaderboard Entries"
+                  items={benchmarkEntryItems}
+                />
+              </HackerRevealCard>
+            ) : null}
+
+            {modelFields.length > 0 ? (
+              <HackerRevealCard delayMs={820}>
+                <DetailFieldGrid label="Model Snapshot" fields={modelFields} />
+              </HackerRevealCard>
+            ) : null}
+
             {metadataFields.length > 0 ? (
-              <HackerRevealCard delayMs={800}>
+              <HackerRevealCard delayMs={860}>
                 <DetailFieldGrid label="Metadata" fields={metadataFields} />
               </HackerRevealCard>
             ) : null}
 
             {externalIdFields.length > 0 ? (
-              <HackerRevealCard delayMs={860}>
+              <HackerRevealCard delayMs={920}>
                 <DetailFieldGrid label="External IDs" fields={externalIdFields} />
               </HackerRevealCard>
             ) : null}
 
             {rawRefFields.length > 0 ? (
-              <HackerRevealCard delayMs={920}>
+              <HackerRevealCard delayMs={980}>
                 <DetailFieldGrid label="Raw Trace" fields={rawRefFields} />
               </HackerRevealCard>
             ) : null}
 
-            <HackerRevealCard delayMs={980}>
+            <HackerRevealCard delayMs={1040}>
               <DetailTextBlock
                 label="reference.snippet"
                 text={document.reference.snippet}
               />
             </HackerRevealCard>
 
-            <HackerRevealCard delayMs={1040}>
+            <HackerRevealCard delayMs={1100}>
               <DetailTextBlock
                 label="summary_input_text"
                 text={document.summary_input_text}
               />
             </HackerRevealCard>
 
-            <HackerRevealCard delayMs={1100}>
+            <HackerRevealCard delayMs={1160}>
               <DetailTextBlock label="body_text" text={document.body_text} />
             </HackerRevealCard>
           </div>

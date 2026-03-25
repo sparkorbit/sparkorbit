@@ -1,4 +1,4 @@
-[Index](../README.md) · [01. Overall Flow](../01_overall_flow.md) · [02. Sections](./README.md) · [02.1 Sources](./02_1_sources.md) · **02.2 Fields** · [03. Runtime Flow Draft](../03_runtime_flow_draft.md) · [04. LLM Usage](../04_llm_usage.md) · [05. Data Collection Pipeline](../05_data_collection_pipeline.md)
+[Index](../README.md) · [01. Overall Flow](../01_overall_flow.md) · [02. Sections](./README.md) · [02.1 Sources](./02_1_sources.md) · **02.2 Fields** · [03. Runtime Flow](../03_runtime_flow_draft.md) · [04. LLM Usage](../04_llm_usage.md) · [05. Data Collection Pipeline](../05_data_collection_pipeline.md) · [06. UI Design Guide](../06_ui_design_guide.md)
 
 ---
 

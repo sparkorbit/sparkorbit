@@ -28,6 +28,7 @@ DEFAULT_SUMMARY_PROVIDER = "noop"
 
 SOURCE_CATEGORY_LABELS = {
     "papers": "Papers",
+    "models": "Models",
     "community": "Community",
     "company": "Company",
     "company_kr": "Company KR",
@@ -37,6 +38,7 @@ SOURCE_CATEGORY_LABELS = {
 
 ORDERED_SOURCE_CATEGORIES = (
     "papers",
+    "models",
     "community",
     "company",
     "company_kr",

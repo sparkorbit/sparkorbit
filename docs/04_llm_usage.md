@@ -1,10 +1,10 @@
-[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow Draft](./03_runtime_flow_draft.md) · **04. LLM Usage** · [05. Data Collection Pipeline](./05_data_collection_pipeline.md)
+[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · **04. LLM Usage** · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md)
 
 ---
 
 # SparkOrbit - LLM Usage
 
-> 2026-03-24 v4
+> 2026-03-25 v5
 >
 > **이 문서의 위치:**
 > 수집 파이프라인(`05`)이 만든 `documents.ndjson` 위에 얹는 LLM enrichment 계층을 설명한다.
@@ -23,10 +23,16 @@
 |------|------|------|-------------|
 | **Company filter + domain 분류** | 구현 완료, 실행 가능 | `PoC/llm_enrich/scripts/llm_enrich.py` | [company_filter_v2](./prompt_packs/company_filter_v2.md) |
 | **Paper domain 분류** | 구현 완료, 실행 가능 | `PoC/llm_enrich/scripts/paper_enrich.py` | [paper_domain_v1](./prompt_packs/paper_domain_v1.md) |
-| Summary digest | 미구현 | — | — |
-| Community panel LLM | 미구현 | — | — |
-| Benchmark panel LLM | 미구현 | — | — |
+| **Session summary / digest** | 구현 완료, 런타임 사용 중 | `backend/app/services/session_service.py`, `backend/app/services/summary_provider.py` | backend runtime rule/provider |
+| Community panel LLM | 별도 모델 경로는 미구현 | — | — |
+| Benchmark panel LLM | 별도 모델 경로는 미구현 | — | — |
 | Ask / QA | 미구현 | — | — |
+
+추가 메모:
+
+- `PoC/llm_enrich`는 run output를 대상으로 한 오프라인 enrichment tooling이다.
+- homepage summary lane은 `backend/app` session runtime이 만든 digest를 사용한다.
+- summary provider 기본값은 `noop`이고, `heuristic` provider를 선택할 수 있다.
 
 ---
 
@@ -61,20 +67,28 @@ flowchart TD
 
     D --> E1
     D --> E2
+    D --> E3
 
-    subgraph Enrichment["LLM Enrichment — PoC/llm_enrich"]
+    subgraph Enrichment["Offline Enrichment — PoC/llm_enrich"]
         E1["Company Filter\n입력: company 계열 문서\n출력: document_filters.ndjson"]
         E2["Paper Domain\n입력: paper 계열 문서\n출력: paper_domains.ndjson"]
-        E3["Summary Digest\n(미구현)"]
+    end
+
+    subgraph Runtime["Backend Session Runtime"]
+        E3["Session Summary / Digest\n입력: published session docs\n출력: Redis digest/dashboard"]
+    end
+
+    subgraph Future["Future"]
         E4["Community / Benchmark / Ask\n(미구현)"]
     end
 
     E1 --> F["enriched/ 디렉토리"]
     E2 --> F
+    E3 --> G["Redis session keys / dashboard"]
 
     style Collection fill:#e8f4fd,stroke:#4a90d9
     style Enrichment fill:#e8f5e9,stroke:#4caf50
-    style E3 fill:#f5f5f5,stroke:#bbb,stroke-dasharray: 5 5
+    style Runtime fill:#fff3e0,stroke:#f5a623
     style E4 fill:#f5f5f5,stroke:#bbb,stroke-dasharray: 5 5
 ```
 
@@ -86,6 +100,7 @@ flowchart TD
 | `enriched/paper_domains.ndjson` | paper panel domain 분류 |
 | `enriched/failed_items.ndjson` | needs_review 항목 모음 |
 | `enriched/llm_runs.ndjson` | 실행 로그 (모델, 시간, 통계) |
+| `sparkorbit:session:{sid}:digest:{category}` | backend session runtime이 만든 category digest |
 
 ---
 

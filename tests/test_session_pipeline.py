@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -87,6 +89,7 @@ def make_document(
 ) -> dict:
     doc_type_map = {
         "papers": "paper",
+        "models": "model",
         "community": "post",
         "benchmark": "benchmark",
         "company": "blog",
@@ -197,6 +200,18 @@ def build_base_documents(run_id: str) -> list[dict]:
             feed_score=92,
             sort_at="2026-03-24T07:15:00Z",
             reference_url="https://arxiv.org/abs/2603.00001",
+        ),
+        make_document(
+            run_id=run_id,
+            document_id="models:top",
+            source="hf_models_new",
+            source_category="models",
+            title="A freshly released multimodal model card",
+            feed_score=90,
+            sort_at="2026-03-24T07:45:00Z",
+            reference_url="https://huggingface.co/example/model",
+            metadata={"pipeline_tag": "image-text-to-text"},
+            doc_type_override="model",
         ),
         make_document(
             run_id=run_id,
@@ -365,6 +380,40 @@ class SessionPipelineTests(unittest.TestCase):
             SESSION_TTL_SECONDS,
         )
 
+    def test_collect_run_keeps_progress_callback_compatibility(self) -> None:
+        calls: list[dict] = []
+        callback = lambda payload: None
+        fake_package = types.ModuleType("source_fetch")
+        fake_package.__path__ = []
+        fake_pipeline = types.ModuleType("source_fetch.pipeline")
+
+        def fake_run_collection(**kwargs):
+            calls.append(kwargs)
+            return {"run_id": "synthetic"}, Path("/tmp/synthetic-run")
+
+        fake_pipeline.run_collection = fake_run_collection
+
+        with patch.dict(
+            sys.modules,
+            {
+                "source_fetch": fake_package,
+                "source_fetch.pipeline": fake_pipeline,
+            },
+        ):
+            from backend.app.services.collector import collect_run
+
+            manifest, run_dir = collect_run(
+                sources=["all"],
+                profile="smoke",
+                run_label="compat",
+                progress_callback=callback,
+            )
+
+        self.assertEqual(manifest["run_id"], "synthetic")
+        self.assertEqual(run_dir, Path("/tmp/synthetic-run"))
+        self.assertEqual(len(calls), 1)
+        self.assertIs(calls[0]["progress_callback"], callback)
+
     def test_feed_lists_are_sorted_by_feed_score_then_sort_at(self) -> None:
         run_dir = self._make_run("2026-03-24T000102Z_sorted")
         result = publish_run(self.store, run_dir, queue=False)
@@ -499,6 +548,38 @@ class SessionPipelineTests(unittest.TestCase):
         )
         self.assertIsNotNone(arena_overview["boards"][0]["description"])
         self.assertEqual(len(arena_overview["boards"][0]["topEntries"]), 2)
+        lmarena_feed = next(
+            feed for feed in dashboard["feeds"] if feed["id"] == "lmarena_overview"
+        )
+        self.assertEqual(lmarena_feed["items"][0]["type"], "Leaderboard Panel")
+        self.assertIn("Arena rating 1,402.5", lmarena_feed["items"][0]["meta"])
+        self.assertNotIn("elo_like_rating", lmarena_feed["items"][0]["meta"])
+
+    def test_models_category_is_included_in_dashboard_digest_and_feed(self) -> None:
+        run_dir = self._make_run("2026-03-24T111112Z_models")
+        result = publish_run(self.store, run_dir, queue=False)
+        session_id = result["session_id"]
+
+        summary_result = run_session_enrichment(self.store, session_id)
+        dashboard = get_dashboard_response(self.store, session_id)
+
+        self.assertEqual(summary_result["meta"]["status"], "ready")
+        self.assertTrue(
+            any(digest["id"] == "models" for digest in dashboard["summary"]["digests"])
+        )
+        self.assertTrue(
+            any(feed["eyebrow"] == "Models" for feed in dashboard["feeds"])
+        )
+        models_digest = next(
+            digest
+            for digest in dashboard["summary"]["digests"]
+            if digest["id"] == "models"
+        )
+        self.assertEqual(models_digest["evidence"], "1 docs · Model")
+        models_feed = next(
+            feed for feed in dashboard["feeds"] if feed["id"] == "hf_models_new"
+        )
+        self.assertEqual(models_feed["items"][0]["type"], "Model")
 
     def test_leaderboard_response_exposes_dedicated_payload(self) -> None:
         run_id = "2026-03-24T111113Z_leaderboard_api"

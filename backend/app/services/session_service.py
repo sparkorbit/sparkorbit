@@ -224,6 +224,85 @@ def prettify_source_name(source: str) -> str:
     return " ".join(parts)
 
 
+DOC_TYPE_LABELS = {
+    "paper": "Paper",
+    "blog": "Blog",
+    "news": "News",
+    "post": "Post",
+    "story": "Story",
+    "model": "Model",
+    "model_trending": "Trending Model",
+    "repo": "Repo",
+    "release": "Release",
+    "release_note": "Release Note",
+    "benchmark": "Leaderboard Row",
+    "benchmark_panel": "Leaderboard Panel",
+}
+
+
+def prettify_doc_type(doc_type: Any) -> str:
+    resolved = str(doc_type or "").strip()
+    if not resolved:
+        return "-"
+    return DOC_TYPE_LABELS.get(resolved, prettify_source_name(resolved))
+
+
+def to_optional_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def format_number(value: Any) -> str:
+    numeric = to_optional_number(value)
+    if numeric is None:
+        return "-"
+    if numeric.is_integer():
+        return f"{int(numeric):,}"
+    return f"{numeric:,.2f}".rstrip("0").rstrip(".")
+
+
+def format_benchmark_score(benchmark: dict[str, Any]) -> str:
+    label = str(benchmark.get("score_label") or "score").strip()
+    score = format_number(benchmark.get("score_value"))
+    score_unit = str(benchmark.get("score_unit") or "").strip()
+    suffix = "%" if score_unit in {"%", "percent"} else ""
+    return f"{label} {score}{suffix}"
+
+
+def build_document_badge(document: dict[str, Any]) -> str:
+    metadata = document.get("metadata") or {}
+    doc_type = str(document.get("doc_type") or "")
+    if doc_type == "repo" and metadata.get("full_name"):
+        return str(metadata.get("full_name"))
+
+    author = document.get("author") or (document.get("authors") or [None])[0]
+    if author:
+        return str(author)
+
+    if doc_type in {"model", "model_trending"}:
+        model_id = str(
+            document.get("source_item_id") or document.get("title") or ""
+        ).strip()
+        if "/" in model_id:
+            owner = model_id.split("/", 1)[0].strip()
+            if owner:
+                return owner
+
+    benchmark = document.get("benchmark") or {}
+    if doc_type in {"benchmark", "benchmark_panel"} and benchmark.get("board_name"):
+        return str(benchmark.get("board_name"))
+
+    return prettify_source_name(str(document.get("source") or ""))
+
+
 def document_timestamp(document: dict[str, Any]) -> str:
     return (
         document.get("sort_at")
@@ -325,8 +404,8 @@ def build_feed_meta(document: dict[str, Any]) -> str:
         return " · ".join(
             [
                 benchmark.get("board_name") or "Leaderboard",
-                f"rank {benchmark.get('rank') or '-'}",
-                f"score {benchmark.get('score_value') or '-'}{benchmark.get('score_unit') or ''}",
+                f"rank #{benchmark.get('rank') or '-'}",
+                format_benchmark_score(benchmark),
             ]
         )
     return " · ".join(
@@ -344,22 +423,14 @@ def build_feed_meta(document: dict[str, Any]) -> str:
 
 
 def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
-    metadata = document.get("metadata") or {}
-    badge = (
-        metadata.get("full_name")
-        if document.get("doc_type") == "repo"
-        else document.get("author")
-        or (document.get("authors") or [None])[0]
-        or prettify_source_name(document.get("source") or "")
-    )
     return {
         "documentId": document["document_id"],
         "referenceUrl": document.get("reference_url")
         or document.get("canonical_url")
         or document.get("url")
         or "",
-        "source": str(badge),
-        "type": str(document.get("doc_type") or "-"),
+        "source": build_document_badge(document),
+        "type": prettify_doc_type(document.get("doc_type")),
         "title": str(document.get("title") or "-"),
         "meta": build_feed_meta(document),
         "note": build_document_note(document),
@@ -892,7 +963,11 @@ def build_placeholder_digest(
             if top_document
             else "아직 category 문서가 없습니다."
         ),
-        "evidence": f"{len(documents)} docs · {top_document.get('doc_type') if top_document else '-'}",
+        "evidence": (
+            f"{len(documents)} docs · {prettify_doc_type(top_document.get('doc_type'))}"
+            if top_document
+            else f"{len(documents)} docs · -"
+        ),
         "document_ids": [document["document_id"] for document in documents[:8]],
         "updated_at": now_utc_iso(),
     }
@@ -919,7 +994,9 @@ def build_digest_from_documents(
         llm.get("summary_1l") or top_document.get("title") or digest["headline"]
     )
     digest["summary"] = " ".join(summary for summary in summaries if summary)
-    digest["evidence"] = f"{len(documents)} docs · {top_document.get('doc_type') or '-'}"
+    digest["evidence"] = (
+        f"{len(documents)} docs · {prettify_doc_type(top_document.get('doc_type'))}"
+    )
     digest["document_ids"] = [document["document_id"] for document in documents[:8]]
     digest["updated_at"] = now_utc_iso()
     return digest
@@ -963,7 +1040,7 @@ def build_dashboard_payload(
                 "title": prettify_source_name(source),
                 "eyebrow": SOURCE_CATEGORY_LABELS.get(category, category),
                 "sourceNote": (manifest_entry.get("notes") or [None])[0]
-                or f"{top_document.get('doc_type')} / {build_document_note(top_document)}",
+                or f"{prettify_doc_type(top_document.get('doc_type'))} / {build_document_note(top_document)}",
                 "items": [build_feed_item(document) for document in documents[:3]],
             }
         )

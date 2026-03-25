@@ -9,8 +9,10 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 1. `docs/01_overall_flow.md`
 2. `docs/02_sections/02_1_sources.md`
 3. `docs/02_sections/02_2_fields.md`
-4. `docs/05_data_collection_pipeline.md`
-5. `docs/04_llm_usage.md`
+4. `docs/03_runtime_flow_draft.md`
+5. `docs/05_data_collection_pipeline.md`
+6. `docs/06_ui_design_guide.md`
+7. `docs/04_llm_usage.md`
 
 ## 현재 구현된 코드 범위
 
@@ -20,22 +22,47 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 - `PoC/source_fetch/scripts/source_fetch/models.py` — dataclass
 - `PoC/source_fetch/scripts/source_fetch/pipeline.py` — orchestration
 
+### 백엔드 런타임
+- `backend/app/main.py` — FastAPI app entrypoint
+- `backend/app/api/routes/dashboard.py` — dashboard, digest, document, SSE
+- `backend/app/api/routes/sessions.py` — reload state, reload stream
+- `backend/app/api/routes/leaderboards.py` — leaderboard overview
+- `backend/app/services/session_service.py` — bootstrap, reload, publish, digest
+- `backend/app/services/collector.py` — `PoC/source_fetch` wrapper
+- `backend/app/services/summary_provider.py` — summary provider abstraction
+
+### 프론트엔드
+- `src/App.tsx` — dashboard, fullscreen loading, reload recovery, settings
+- `src/components/dashboard/PanelWorkspace.tsx` — workspace layout
+- `src/components/dashboard/SourcePanel.tsx` — source feed panel
+- `src/components/dashboard/SummaryPanel.tsx` — category digest panel
+- `src/lib/dashboardApi.ts` — BFF API client + SSE hooks
+- `src/index.css` — visual tokens, loader, reveal motion
+
 ### LLM Enrichment
 - `PoC/llm_enrich/scripts/llm_enrich.py` — Company filter
 - `PoC/llm_enrich/scripts/paper_enrich.py` — Paper domain classifier
 - `docs/prompt_packs/` — prompt pack 문서 (코드와 1:1 대응)
 
+### 런타임 레이어 정리
+
+- canonical artifact는 항상 `PoC/source_fetch/data/runs/<run_id>/` 아래 run output이다.
+- Redis는 장기 저장소가 아니라 현재 세션을 빠르게 서빙하기 위한 materialized layer다.
+- frontend는 JSONL run output를 직접 읽지 않고 backend API/BFF만 사용한다.
+- homepage bootstrap과 manual reload는 현재 backend가 실제 collection부터 publish, digest까지 연결한다.
+- `PoC/llm_enrich`는 별도 오프라인 enrichment tooling이고, homepage summary lane은 backend session runtime이 만든다.
+
 ### 출력 경로
 
-```
+```text
 PoC/source_fetch/data/runs/<run_id>/
   normalized/
-    documents.ndjson       ← 수집 원본 (전체 문서)
+    documents.ndjson         ← 수집 원본 (전체 문서)
   enriched/
-    document_filters.ndjson ← Company filter 결과
-    paper_domains.ndjson    ← Paper domain 결과
-    failed_items.ndjson     ← needs_review 항목
-    llm_runs.ndjson         ← 실행 로그 (append)
+    document_filters.ndjson  ← Company filter 결과
+    paper_domains.ndjson     ← Paper domain 결과
+    failed_items.ndjson      ← needs_review 항목
+    llm_runs.ndjson          ← 실행 로그 (append)
 ```
 
 ## 핵심 원칙
@@ -47,13 +74,14 @@ PoC/source_fetch/data/runs/<run_id>/
 
 ## 패널 구조
 
-| 패널 | LLM | 소스 |
-|------|-----|------|
-| Paper | domain 분류 | arXiv 8개 + HF daily papers |
-| Company | filter + 카테고리 | 기업 블로그 + hf_blog (github_* 제외) |
-| Community | 없음 | HN, Reddit, github_curated_repos |
-| Benchmark | 없음 | LMArena, Open LLM Leaderboard |
-| Summary | digest (미구현) | 위 패널 종합 |
+| 패널 | 현재 주체 | 소스 |
+|------|-----------|------|
+| Papers | runtime digest + source feed | arXiv 8개 + HF daily papers |
+| Models | runtime digest + source feed | HF models likes/new/trending |
+| Company | filter + source feed | 기업 블로그 + hf_blog (github_* 제외) |
+| Community | source feed | HN, Reddit, github_curated_repos |
+| Benchmark | leaderboard + source feed | LMArena, Open LLM Leaderboard |
+| Summary | category digest | 위 패널 종합 |
 
 ## LLM 출력 형식 (코드가 반드시 따를 것)
 
@@ -105,7 +133,7 @@ PoC/source_fetch/data/runs/<run_id>/
 Company: `{"id": "...", "src": "...", "title": "...", "desc": "앞 200자 (있을 때만)"}`
 Paper: `{"id": "...", "title": "..."}`
 
-프론트엔드는 `document_id`로 `documents.ndjson` 원본을 join해서 메타데이터(날짜, URL, engagement 등)를 렌더링한다. LLM이 중복 생성하지 않는다.
+프론트엔드는 `document_id`로 `documents.ndjson` 원본을 join해서 메타데이터를 렌더링한다. LLM이 날짜, URL, engagement, ordering을 다시 만들지 않는다.
 
 ## LLM 파이프라인 기준값
 
@@ -119,21 +147,11 @@ Paper: `{"id": "...", "title": "..."}`
 | chunk_size | 30 | 80 |
 | 소요 시간 | ~46초 | ~185초 |
 
-### 최신 실행 기록 (2026-03-24 full-collect-v2)
-
-- 총 수집: 698건
-- Company: 68건 → 52 keep, 16 drop (16개 소스)
-- Paper: 180건 → 21개 domain 분류 (9개 소스, fallback 0)
-- google_ai_blog RSS URL 수정 반영 (blog.research.google → blog.google/technology/ai/rss/)
-- 90일 cutoff으로 누락: qwen_blog_rss (최신 2025-09), groq_newsroom (최신 2025-12-24)
-
-넘치면 chunk를 나눠 처리한다. 건수를 줄이지 않는다.
-
 ## 작업 시 주의사항
 
 - source별 adapter는 독립적으로 유지한다.
 - HTTP 에러나 파싱 실패는 skip하고 다음 source로 넘어간다.
 - 날짜는 수집 시점에 ISO 8601(UTC)로 변환한다.
 - URL 없는 문서는 기본 서빙 대상에서 제외한다.
-- normalized contract는 shape를 유지한다. 값이 없으면 `null`, `[]`, `{}` 를 쓴다.
-- 문서(docs/)와 코드(PoC/)의 수치/enum/필드명이 어긋나지 않도록 한다. 변경 시 양쪽 동시 업데이트.
+- normalized contract는 shape를 유지한다. 값이 없으면 `null`, `[]`, `{}`를 쓴다.
+- 문서(docs/)와 코드(`PoC/`, `backend/app`, `src`)의 수치, enum, 필드명, loading stage가 어긋나지 않도록 한다. 변경 시 함께 업데이트한다.
