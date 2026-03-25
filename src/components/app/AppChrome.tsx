@@ -1,0 +1,459 @@
+import { useEffect } from "react";
+
+import { shell } from "../dashboard/styles";
+import { loadingStepClasses } from "../../features/dashboard/display";
+import {
+  ROW_HEIGHT_MODE_OPTIONS,
+  type UiSettings,
+} from "../../features/dashboard/uiSettings";
+import type {
+  DashboardLoading,
+  DashboardResponse,
+} from "../../types/dashboard";
+
+function SettingsGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
+    >
+      <circle cx="12" cy="12" r="2.8" />
+      <path d="M12 3.5v3.1M12 17.4v3.1M20.5 12h-3.1M6.6 12H3.5M17.95 6.05l-2.2 2.2M8.25 15.75l-2.2 2.2M17.95 17.95l-2.2-2.2M8.25 8.25l-2.2-2.2" />
+      <path d="M9.2 3.5h5.6M9.2 20.5h5.6M20.5 9.2v5.6M3.5 9.2v5.6" />
+    </svg>
+  );
+}
+
+function SettingsToggle({
+  label,
+  description,
+  enabled,
+  onToggle,
+}: {
+  label: string;
+  description: string;
+  enabled: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="grid gap-3 border border-orbit-border bg-orbit-bg p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+      <div>
+        <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
+          {label}
+        </p>
+        <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+          {description}
+        </p>
+      </div>
+      <button
+        type="button"
+        aria-pressed={enabled}
+        className={[
+          "inline-flex h-9 min-w-[92px] items-center justify-center border px-3 font-mono text-[0.66rem] uppercase tracking-[0.14em] transition-colors duration-150",
+          enabled
+            ? "border-orbit-accent bg-orbit-panel text-orbit-accent"
+            : "border-orbit-border bg-orbit-bg-elevated text-orbit-muted hover:border-orbit-border-strong hover:text-orbit-text",
+        ].join(" ")}
+        onClick={onToggle}
+      >
+        {enabled ? "armed" : "sleep"}
+      </button>
+    </div>
+  );
+}
+
+export function FullscreenLoading({
+  brand,
+  loading,
+}: {
+  brand: DashboardResponse["brand"];
+  loading: DashboardLoading | null;
+}) {
+  const hasServerLoading = loading !== null;
+  const progressWidth = hasServerLoading
+    ? `${Math.max(0, Math.min(100, loading.percent))}%`
+    : undefined;
+  const progressCount =
+    hasServerLoading && loading.progressTotal > 0
+      ? `${loading.progressCurrent}/${loading.progressTotal}`
+      : null;
+  const resolvedStageLabel = hasServerLoading
+    ? loading.stageLabel
+    : "Link Handshake";
+  const resolvedDetail = hasServerLoading
+    ? loading.detail
+    : "relay에서 active cache 상태를 확인하고 있습니다.";
+  const currentSource =
+    hasServerLoading && loading.currentSource ? loading.currentSource : null;
+  const steps = hasServerLoading ? loading.steps : [];
+  const currentStep =
+    steps.find((step) => step.status === "active" || step.status === "error") ??
+    null;
+
+  return (
+    <main className="flex flex-1 items-center justify-center px-5 py-8">
+      <section className="orbit-loader-shell w-full max-w-2xl">
+        <p className="font-mono text-[0.64rem] uppercase tracking-[0.22em] text-orbit-accent">
+          {hasServerLoading ? "cold boot" : "handshake"}
+        </p>
+        <h1 className="orbit-wrap-anywhere mt-4 font-display text-[1.5rem] font-semibold text-orbit-text md:text-[1.9rem]">
+          {brand.name}
+        </h1>
+        <p className="orbit-wrap-anywhere mt-3 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-orbit-accent-dim">
+          {resolvedStageLabel}
+        </p>
+
+        <div className="mt-6 border border-orbit-border bg-orbit-bg p-3">
+          <div className="orbit-loading-bar">
+            <div
+              className={
+                hasServerLoading
+                  ? "orbit-loading-bar__fill"
+                  : "orbit-loading-bar__fill orbit-loading-bar__fill--indeterminate"
+              }
+              style={hasServerLoading ? { width: progressWidth } : undefined}
+            />
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="font-mono text-[0.66rem] uppercase tracking-[0.16em] text-orbit-accent">
+              {hasServerLoading ? `${loading.percent}%` : "handshake"}
+            </p>
+            <p className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted">
+              {progressCount ?? "waiting"}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 border border-orbit-border bg-orbit-bg px-4 py-3">
+          <p className="font-mono text-[0.6rem] uppercase tracking-[0.16em] text-orbit-accent">
+            trace log
+          </p>
+          <p className="orbit-wrap-anywhere mt-2 text-[0.76rem] leading-[1.65] text-orbit-text">
+            {resolvedDetail}
+          </p>
+          {hasServerLoading ? (
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <div className="border border-orbit-border bg-orbit-panel px-3 py-2">
+                <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                  active trace
+                </p>
+                <p className="orbit-wrap-anywhere mt-1 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-orbit-text">
+                  {currentStep?.label ?? loading.stageLabel}
+                </p>
+              </div>
+              <div className="border border-orbit-border bg-orbit-panel px-3 py-2">
+                <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                  percent
+                </p>
+                <p className="mt-1 font-mono text-[0.82rem] text-orbit-text">
+                  {loading.percent}%
+                </p>
+              </div>
+              <div className="border border-orbit-border bg-orbit-panel px-3 py-2">
+                <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                  ops
+                </p>
+                <p className="mt-1 font-mono text-[0.82rem] text-orbit-text">
+                  {progressCount ?? "-"}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          {currentStep ? (
+            <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
+              {currentStep.detail}
+            </p>
+          ) : null}
+          {currentSource ? (
+            <p className="orbit-wrap-anywhere mt-2 font-mono text-[0.62rem] uppercase leading-[1.5] tracking-[0.12em] text-orbit-accent-dim">
+              target / {currentSource}
+            </p>
+          ) : null}
+        </div>
+
+        {steps.length > 0 ? (
+          <div className="mt-4 grid gap-2">
+            {steps.map((step) => (
+              <article
+                key={step.id}
+                className={`border px-4 py-3 ${loadingStepClasses(step.status)}`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-mono text-[0.62rem] uppercase tracking-[0.14em]">
+                    {step.label}
+                  </p>
+                  <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em]">
+                    {step.status}
+                  </p>
+                </div>
+                <p className="orbit-wrap-anywhere mt-2 text-[0.74rem] leading-[1.6]">
+                  {step.detail}
+                </p>
+              </article>
+            ))}
+          </div>
+        ) : null}
+      </section>
+    </main>
+  );
+}
+
+export function ConsoleHeader({
+  title,
+  subtitle,
+  onOpenSettings,
+}: {
+  title: string;
+  subtitle: string;
+  onOpenSettings: () => void;
+}) {
+  return (
+    <header className="relative z-10 border-b border-orbit-border-strong bg-orbit-bg-elevated">
+      <div
+        className={`${shell} flex items-center justify-between gap-3 px-3 py-2.5 md:px-4 md:py-3`}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            aria-hidden="true"
+            className="block h-2 w-2 shrink-0 border border-orbit-accent bg-orbit-accent"
+          />
+          <div className="min-w-0">
+            <p className="font-mono text-[0.56rem] uppercase tracking-[0.22em] text-orbit-accent">
+              relay header
+            </p>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h1 className="orbit-wrap-anywhere min-w-0 font-display text-[0.9rem] font-semibold text-orbit-text">
+                {title}
+              </h1>
+              <span className="orbit-token-ellipsis hidden max-w-[14rem] border border-orbit-border bg-orbit-panel px-1.5 py-0.5 font-mono text-[0.56rem] uppercase tracking-[0.16em] text-orbit-text sm:inline-flex">
+                {subtitle}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          aria-label="console"
+          title="console"
+          className="group inline-flex h-9 w-9 shrink-0 items-center justify-center border border-orbit-border-strong bg-orbit-panel font-mono text-orbit-accent transition-colors duration-150 hover:border-orbit-accent hover:bg-orbit-bg hover:text-orbit-text"
+          onClick={onOpenSettings}
+        >
+          <SettingsGlyph />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+export function SettingsModal({
+  isOpen,
+  settings,
+  onClose,
+  onUpdateSettings,
+  onResetWorkspace,
+  onRestoreDefaults,
+}: {
+  isOpen: boolean;
+  settings: UiSettings;
+  onClose: () => void;
+  onUpdateSettings: (next: UiSettings) => void;
+  onResetWorkspace: () => void;
+  onRestoreDefaults: () => void;
+}) {
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-orbit-bg/80 p-3 md:p-5"
+      onClick={onClose}
+    >
+      <div
+        className="relative flex max-h-[min(760px,92vh)] w-full max-w-3xl flex-col overflow-hidden border border-orbit-border-strong bg-orbit-bg-elevated"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div
+          aria-hidden="true"
+          className="orbit-grid pointer-events-none absolute inset-0 opacity-20"
+        />
+        <div
+          aria-hidden="true"
+          className="orbit-scanlines pointer-events-none absolute inset-0 opacity-20"
+        />
+
+        <div className="relative z-10 border-b border-orbit-border-strong bg-orbit-bg px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-mono text-[0.62rem] uppercase tracking-[0.2em] text-orbit-accent">
+                console flags
+              </p>
+              <h2 className="mt-2 font-display text-[1rem] font-semibold text-orbit-text">
+                Operator Console
+              </h2>
+              <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+                표시 설정은 로컬 cache에 저장되고, 현재 grid에 즉시 반영됩니다.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="shrink-0 border border-orbit-border bg-orbit-panel px-3 py-1.5 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
+              onClick={onClose}
+            >
+              seal
+            </button>
+          </div>
+        </div>
+
+        <div className="relative z-10 min-h-0 flex-1 overflow-auto p-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)]">
+            <section className="space-y-3 border border-orbit-border bg-orbit-bg-elevated p-3">
+              <div className="border-b border-orbit-border pb-3">
+                <p className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-orbit-accent">
+                  Signal Mask
+                </p>
+                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+                  화면 잡음과 밀도를 조절합니다.
+                </p>
+              </div>
+
+              <SettingsToggle
+                label="Motion Layer"
+                description="trace 카드 reveal과 boot motion을 켜거나 끕니다."
+                enabled={settings.motionEnabled}
+                onToggle={() =>
+                  onUpdateSettings({
+                    ...settings,
+                    motionEnabled: !settings.motionEnabled,
+                  })
+                }
+              />
+
+              <SettingsToggle
+                label="Grid Veil"
+                description="배경 grid와 scanline veil을 표시합니다. 밀도는 유지하고 장식만 줄일 때 유용합니다."
+                enabled={settings.overlaysEnabled}
+                onToggle={() =>
+                  onUpdateSettings({
+                    ...settings,
+                    overlaysEnabled: !settings.overlaysEnabled,
+                  })
+                }
+              />
+
+              <div className="border border-orbit-border bg-orbit-bg p-3">
+                <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
+                  Row Span
+                </p>
+                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+                  row span을 바꿔 밀도와 drag response를 조정합니다.
+                </p>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                  {ROW_HEIGHT_MODE_OPTIONS.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={[
+                        "border px-3 py-3 text-left transition-colors duration-150",
+                        settings.rowHeightMode === option.id
+                          ? "border-orbit-accent bg-orbit-panel"
+                          : "border-orbit-border bg-orbit-bg-elevated hover:border-orbit-border-strong",
+                      ].join(" ")}
+                      onClick={() =>
+                        onUpdateSettings({
+                          ...settings,
+                          rowHeightMode: option.id,
+                        })
+                      }
+                    >
+                      <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
+                        {option.label}
+                      </p>
+                      <p className="mt-2 font-display text-[0.82rem] font-semibold text-orbit-text">
+                        {option.note}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-3 border border-orbit-border bg-orbit-bg-elevated p-3">
+              <div className="border-b border-orbit-border pb-3">
+                <p className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-orbit-accent">
+                  Grid Tools
+                </p>
+                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+                  저장된 slot map을 비우거나 기준 loadout으로 되돌립니다.
+                </p>
+              </div>
+
+              <div className="border border-orbit-border bg-orbit-bg p-3">
+                <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
+                  Slot Reset
+                </p>
+                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+                  drag 순서와 가로/세로 span cache를 지우고 추천 배치로 다시 정렬합니다.
+                </p>
+                <button
+                  type="button"
+                  className="mt-3 inline-flex border border-orbit-border-strong bg-orbit-panel px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-orbit-text transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
+                  onClick={onResetWorkspace}
+                >
+                  flush slot map
+                </button>
+              </div>
+
+              <div className="border border-orbit-border bg-orbit-bg p-3">
+                <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
+                  Baseline Loadout
+                </p>
+                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+                  motion on, grid veil on, row span stock 설정으로 되돌리고 저장된 slot map도 비웁니다.
+                </p>
+                <button
+                  type="button"
+                  className="mt-3 inline-flex border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg"
+                  onClick={onRestoreDefaults}
+                >
+                  restore baseline
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -387,6 +387,22 @@ function PanelBoard({
     window.localStorage.setItem(sizeStorageKey, JSON.stringify(syncedSizes));
   }, [sizeStorageKey, syncedSizes]);
 
+  useEffect(() => {
+    if (dragState == null) {
+      return;
+    }
+
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "grabbing";
+
+    return () => {
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+    };
+  }, [dragState]);
+
   const orderedItems = syncedOrder
     .map((id) => items.find((item) => item.id === id))
     .filter((item): item is PanelWorkspaceItem => Boolean(item));
@@ -434,8 +450,6 @@ function PanelBoard({
       const nextTargetId = commitSwap ? swapTargetIdRef.current : null;
 
       cleanupListeners();
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
       setDragState(null);
       updateSwapTarget(null);
 
@@ -477,8 +491,6 @@ function PanelBoard({
     };
 
     dragCleanupRef.current = cleanupListeners;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "grabbing";
     setDragState({
       id: itemId,
       pointerX: event.clientX,
@@ -555,20 +567,20 @@ function PanelBoard({
                         : "border-orbit-border text-orbit-muted hover:border-orbit-border-strong hover:text-orbit-text",
                     ].join(" ")}
                     onPointerDown={(event) => beginPanelDrag(event, item.id)}
-                    title="상단바를 잡고 드래그하면 패널 위치를 교환합니다"
+                    title="grab해서 slot 위치를 reroute합니다"
                   >
                     <span className="flex items-center gap-2">
                       <span className="text-[0.86rem] leading-none text-orbit-accent">
                         ::
                       </span>
-                      패널 이동
+                      slot move
                     </span>
                     <span>
                       {swapTargetId === item.id
-                        ? "교환 대상"
+                        ? "swap lock"
                         : activeDragId === item.id
-                          ? "이동 중"
-                          : "드래그"}
+                          ? "routing"
+                          : "grab"}
                     </span>
                   </button>
 
@@ -579,7 +591,7 @@ function PanelBoard({
               <button
                 type="button"
                 className="absolute inset-x-10 bottom-0 z-20 flex h-4 cursor-row-resize items-center justify-center border-x border-t border-orbit-border bg-orbit-bg transition-colors duration-150 hover:border-orbit-border-strong"
-                title="드래그해서 높이를 조절합니다. 더블클릭하면 기본 크기로 돌아갑니다"
+                title="drag해서 row span을 조절합니다. 더블클릭하면 기본값으로 돌아갑니다"
                 onDoubleClick={() => {
                   setSizes((current) => ({
                     ...current,
@@ -629,7 +641,7 @@ function PanelBoard({
                   type="button"
                   className="absolute bottom-10 right-0 z-20 flex w-4 cursor-col-resize items-center justify-center border-y border-l border-orbit-border bg-orbit-bg transition-colors duration-150 hover:border-orbit-border-strong"
                   style={{ top: "4.8rem" }}
-                  title="드래그해서 너비를 조절합니다. 더블클릭하면 기본 크기로 돌아갑니다"
+                  title="drag해서 col span을 조절합니다. 더블클릭하면 기본값으로 돌아갑니다"
                   onDoubleClick={() => {
                     setSizes((current) => ({
                       ...current,
@@ -698,9 +710,9 @@ function PanelBoard({
               >
                 <span className="flex items-center gap-2">
                   <span className="text-[0.86rem] leading-none">::</span>
-                  패널 이동
+                  slot move
                 </span>
-                <span>{swapTargetId ? "교환 준비" : "이동 중"}</span>
+                <span>{swapTargetId ? "swap lock" : "routing"}</span>
               </div>
               <div className="min-h-0 flex-1 p-px opacity-95">
                 {draggedItem.node}
@@ -742,20 +754,20 @@ function DefaultMainPanel() {
     <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel p-4 md:p-5">
       <div className="border-b border-orbit-border pb-3">
         <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.2em] text-orbit-accent">
-          Main Panel
+          Core Slot
         </p>
         <h1 className="mt-2 font-display text-[1.12rem] font-semibold text-orbit-text md:text-[1.28rem]">
-          Primary Workspace Reserved
+          Command Slot Reserved
         </h1>
       </div>
       <div className="mt-4 flex min-h-0 flex-1 items-center justify-center border border-orbit-border bg-orbit-bg p-5 text-center">
         <div className="max-w-xl">
           <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent-dim">
-            Primary Surface
+            Idle Surface
           </p>
           <p className="mt-3 text-[0.84rem] leading-[1.65] text-orbit-muted">
-            메인 시각화, 대화 결과, drill-down detail, agent workspace 같은 주
-            작업 화면은 이 영역에 들어오도록 예약합니다.
+            메인 시각화, trace 결과, drill-down, operator 작업 화면은 이
+            영역으로 모입니다.
           </p>
         </div>
       </div>
@@ -775,13 +787,13 @@ export function PanelWorkspace({
   const bottomPanel =
     summaryPanel ??
     (hasUnassigned ? (
-      <WorkspaceSection eyebrow="Section 03" title="Unassigned Panel">
+      <WorkspaceSection eyebrow="Overflow Rack" title="Loose Panels">
         <PanelBoard
           items={unassignedItems}
           orderStorageKey={PANEL_WORKSPACE_STORAGE.unassignedOrder}
           sizeStorageKey={PANEL_WORKSPACE_STORAGE.unassignedSize}
-          emptyTitle="미지정 패널 없음"
-          emptyDescription="분류되지 않은 패널이 아직 없습니다."
+          emptyTitle="남은 패널 없음"
+          emptyDescription="분류 대기 중인 패널이 없습니다."
           rowHeightPx={rowHeightPx}
         />
       </WorkspaceSection>
@@ -796,16 +808,16 @@ export function PanelWorkspace({
 
         <div className="min-h-0 overflow-hidden xl:col-start-3 xl:row-start-1 xl:row-span-3">
           <WorkspaceSection
-            eyebrow="Section 02"
-            title={infoPanelOverride?.title ?? "Information Panel"}
+            eyebrow="Side Channel"
+            title={infoPanelOverride?.title ?? "Trace Stack"}
           >
             {infoPanelOverride?.node ?? (
               <PanelBoard
                 items={infoItems}
                 orderStorageKey={PANEL_WORKSPACE_STORAGE.infoOrder}
                 sizeStorageKey={PANEL_WORKSPACE_STORAGE.infoSize}
-                emptyTitle="정보 패널 없음"
-                emptyDescription="사이드로 보낼 정보 패널이 아직 연결되지 않았습니다."
+                emptyTitle="trace 없음"
+                emptyDescription="사이드 채널에 연결된 패널이 아직 없습니다."
                 maxDynamicColumns={3}
                 minColumnWidthPx={320}
                 rowHeightPx={rowHeightPx}

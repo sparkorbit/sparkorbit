@@ -17,9 +17,11 @@ from ..core.constants import (
     HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     ORDERED_SOURCE_CATEGORIES,
     QUEUE_SESSION_ENRICH_KEY,
+    RECENT_SESSIONS_KEY,
     RELOAD_STATE_KEY,
     RELOAD_STATE_TTL_SECONDS,
     SCHEMA_VERSION,
+    SESSION_RETAIN_COUNT,
     SESSION_PREFIX,
     SESSION_TTL_SECONDS,
     SOURCE_CATEGORY_LABELS,
@@ -182,6 +184,96 @@ def get_reload_state(store: RedisLike) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def get_recent_session_ids(store: RedisLike) -> list[str]:
+    payload = get_json(store, RECENT_SESSIONS_KEY)
+    if not isinstance(payload, list):
+        return []
+    session_ids: list[str] = []
+    for item in payload:
+        session_id = str(item or "").strip()
+        if session_id and session_id not in session_ids:
+            session_ids.append(session_id)
+    return session_ids
+
+
+def set_recent_session_ids(store: RedisLike, session_ids: list[str]) -> None:
+    if session_ids:
+        store.set(RECENT_SESSIONS_KEY, json_dumps(session_ids))
+        return
+    store.delete(RECENT_SESSIONS_KEY)
+
+
+def trim_enrichment_queue(store: RedisLike, *, drop_session_ids: set[str]) -> None:
+    if not drop_session_ids:
+        return
+    queued_items = store.lrange(QUEUE_SESSION_ENRICH_KEY, 0, -1)
+    if not queued_items:
+        return
+
+    filtered_items: list[str] = []
+    queue_changed = False
+    for item in queued_items:
+        payload = json_loads(item)
+        session_id = (
+            str(payload.get("session_id") or "").strip()
+            if isinstance(payload, dict)
+            else ""
+        )
+        if session_id and session_id in drop_session_ids:
+            queue_changed = True
+            continue
+        filtered_items.append(item)
+
+    if not queue_changed:
+        return
+
+    store.delete(QUEUE_SESSION_ENRICH_KEY)
+    if filtered_items:
+        store.rpush(QUEUE_SESSION_ENRICH_KEY, *filtered_items)
+
+
+def list_session_storage_keys(store: RedisLike, session_id: str) -> list[str]:
+    keys = {
+        session_key(session_id, "meta"),
+        session_key(session_id, "run_manifest"),
+        session_key(session_id, "source_manifest"),
+        session_key(session_id, "dashboard"),
+    }
+    meta = get_json(store, session_key(session_id, "meta")) or {}
+    source_manifest = get_json(store, session_key(session_id, "source_manifest")) or []
+    source_ids = meta.get("source_ids") or [
+        entry.get("source") for entry in source_manifest if entry.get("source")
+    ]
+    feed_lists = get_feed_lists(store, session_id, source_ids)
+    for source in source_ids:
+        keys.add(feed_key(session_id, str(source)))
+    for document_ids in feed_lists.values():
+        for document_id in document_ids:
+            keys.add(doc_key(session_id, document_id))
+    for category in ORDERED_SOURCE_CATEGORIES:
+        keys.add(digest_key(session_id, category))
+    return sorted(keys)
+
+
+def delete_session_keys(store: RedisLike, session_id: str) -> None:
+    keys = list_session_storage_keys(store, session_id)
+    if keys:
+        store.delete(*keys)
+
+
+def prune_stale_sessions(store: RedisLike, current_session_id: str) -> None:
+    recent_session_ids = [
+        current_session_id,
+        *[session_id for session_id in get_recent_session_ids(store) if session_id != current_session_id],
+    ]
+    retained_session_ids = recent_session_ids[:SESSION_RETAIN_COUNT]
+    pruned_session_ids = set(recent_session_ids[SESSION_RETAIN_COUNT:])
+    trim_enrichment_queue(store, drop_session_ids=pruned_session_ids)
+    for session_id in pruned_session_ids:
+        delete_session_keys(store, session_id)
+    set_recent_session_ids(store, retained_session_ids)
+
+
 def to_number(value: Any) -> float:
     if isinstance(value, (int, float)):
         return float(value)
@@ -235,8 +327,8 @@ DOC_TYPE_LABELS = {
     "repo": "Repo",
     "release": "Release",
     "release_note": "Release Note",
-    "benchmark": "Leaderboard Row",
-    "benchmark_panel": "Leaderboard Panel",
+    "benchmark": "Rank Row",
+    "benchmark_panel": "Rank Board",
 }
 
 
@@ -403,7 +495,7 @@ def build_feed_meta(document: dict[str, Any]) -> str:
         benchmark = document.get("benchmark") or {}
         return " · ".join(
             [
-                benchmark.get("board_name") or "Leaderboard",
+                benchmark.get("board_name") or "Rank Board",
                 f"rank #{benchmark.get('rank') or '-'}",
                 format_benchmark_score(benchmark),
             ]
@@ -439,18 +531,18 @@ def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
 
 def loading_stage_label(stage: str, status: str) -> str:
     labels = {
-        "starting": "요청 준비",
-        "fetching_sources": "Source 수집",
-        "writing_artifacts": "정규화/산출물 저장",
-        "publishing_session": "Redis publish",
-        "publishing_documents": "문서 publish",
-        "publishing_views": "피드/대시보드 publish",
-        "published": "Publish 완료",
-        "summarizing_documents": "문서 요약",
-        "building_digests": "Digest 생성",
-        "ready": "세션 준비 완료",
-        "partial_error": "부분 완료",
-        "error": "실패",
+        "starting": "Link Prep",
+        "fetching_sources": "Signal Sweep",
+        "writing_artifacts": "Trace Write",
+        "publishing_session": "Cache Relay",
+        "publishing_documents": "Cache Write",
+        "publishing_views": "View Relay",
+        "published": "Relay Armed",
+        "summarizing_documents": "Pattern Pass",
+        "building_digests": "Sweep Build",
+        "ready": "Grid Ready",
+        "partial_error": "Partial Ready",
+        "error": "Fault",
     }
     if status == "partial_error":
         return labels["partial_error"]
@@ -461,38 +553,38 @@ def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
     steps = [
         {
             "id": "prepare",
-            "label": "Prepare",
-            "detail": "요청을 받고 source 범위와 실행 파라미터를 확정합니다.",
+            "label": "Handshake",
+            "detail": "요청을 받고 scan 범위와 실행 파라미터를 고정합니다.",
         },
         {
             "id": "collect",
-            "label": "Collect",
-            "detail": "source_fetch가 source별 원문을 실제로 수집합니다.",
+            "label": "Sweep",
+            "detail": "collector가 source별 원문 신호를 훑습니다.",
         },
         {
             "id": "normalize",
-            "label": "Normalize",
-            "detail": "manifest와 normalized 산출물을 run 디렉터리에 기록합니다.",
+            "label": "Trace Write",
+            "detail": "manifest와 normalized 산출물을 trace 디렉터리에 기록합니다.",
         },
         {
             "id": "publish-docs",
-            "label": "Publish Docs",
-            "detail": "displayable document를 Redis doc 키로 올립니다.",
+            "label": "Cache Docs",
+            "detail": "표시 가능한 문서를 cache key로 밀어 넣습니다.",
         },
         {
             "id": "publish-views",
-            "label": "Publish Views",
-            "detail": "feed, dashboard, active session view를 갱신합니다.",
+            "label": "Relay Views",
+            "detail": "feed와 live view를 갱신합니다.",
         },
         {
             "id": "summarize",
-            "label": "Summarize",
-            "detail": "선택된 문서를 요약해 summary field를 채웁니다.",
+            "label": "Pattern Pass",
+            "detail": "선택된 문서에서 핵심 라인을 추출합니다.",
         },
         {
             "id": "digest",
-            "label": "Digests",
-            "detail": "category digest를 생성하고 마무리 상태를 기록합니다.",
+            "label": "Sweep Build",
+            "detail": "sweep를 묶고 마지막 상태를 기록합니다.",
         },
     ]
 
@@ -624,22 +716,22 @@ def build_runtime_items(status: str, *, stage: str | None = None) -> list[dict[s
     return [
         {
             "name": "collector",
-            "role": "PoC/source_fetch run 산출물을 기준 아티팩트로 유지합니다.",
+            "role": "collector가 원문 trace를 기준 아티팩트로 유지합니다.",
             "status": collector_status,
         },
         {
             "name": "enricher",
-            "role": "선택된 문서만 요약하고 category digest를 생성합니다.",
+            "role": "핵심 라인을 뽑고 signal sweep를 생성합니다.",
             "status": enricher_status,
         },
         {
             "name": "redis",
-            "role": "세션용 materialized view를 문서, feed, digest, dashboard 키로 보관합니다.",
+            "role": "relay cache가 문서, feed, sweep, live view를 보관합니다.",
             "status": redis_status,
         },
         {
             "name": "ui",
-            "role": "BFF를 통해 active session과 drill-down detail을 읽습니다.",
+            "role": "화면은 relay 응답과 trace detail만 읽습니다.",
             "status": "live",
         },
     ]
@@ -663,37 +755,37 @@ def build_bootstrap_runtime_items(status: str, stage: str) -> list[dict[str, str
     return [
         {
             "name": "collector",
-            "role": "홈페이지 첫 진입 시 PoC/source_fetch collection을 실행합니다.",
+            "role": "첫 진입 시 collector가 전체 scan을 돌립니다.",
             "status": collector_status,
         },
         {
             "name": "enricher",
-            "role": "publish 이후 category digest와 문서 요약을 채웁니다.",
+            "role": "publish 이후 핵심 라인과 sweep를 채웁니다.",
             "status": enricher_status,
         },
         {
             "name": "redis",
-            "role": "collector 결과가 나오면 active session 키를 채웁니다.",
+            "role": "collector 결과가 나오면 active cache를 교체합니다.",
             "status": redis_status,
         },
         {
             "name": "ui",
-            "role": "dashboard SSE stream으로 collecting 상태를 감시합니다.",
+            "role": "stream으로 cold boot 상태를 감시합니다.",
             "status": ui_status,
         },
     ]
 
 
 def build_bootstrap_digest_items(status: str) -> list[dict[str, str]]:
-    collecting_summary = "source fetch run이 끝나면 category digest가 채워집니다."
-    error_summary = "자동 수집이 실패했습니다. 페이지를 새로고침하거나 reload를 다시 시도해 주세요."
+    collecting_summary = "scan이 끝나면 signal sweep가 채워집니다."
+    error_summary = "cold boot가 실패했습니다. 링크를 다시 열거나 probe를 다시 돌려 주세요."
     summary = collecting_summary if status == "collecting" else error_summary
     evidence = "pending" if status == "collecting" else "error"
     return [
         {
             "id": category,
             "domain": SOURCE_CATEGORY_LABELS.get(category, category),
-            "headline": "수집 대기 중" if status == "collecting" else "수집 실패",
+            "headline": "scan queued" if status == "collecting" else "scan failed",
             "summary": summary,
             "evidence": evidence,
         }
@@ -709,7 +801,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
     stage = str(state.get("stage") or "starting")
     detail = str(
         state.get("detail")
-        or "실제 데이터를 수집해 Redis session을 준비 중입니다."
+        or "실제 데이터를 수집해 relay cache를 준비 중입니다."
     )
     progress_current = int(state.get("progress_current") or 0)
     progress_total = int(state.get("progress_total") or 0)
@@ -730,7 +822,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
                 if progress_total > 0
                 else "all"
             ),
-            "note": "홈페이지 진입 시 전체 source collection을 시작합니다.",
+            "note": "첫 진입 시 전체 scan을 시작합니다.",
         },
         {
             "label": "docs",
@@ -738,36 +830,36 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "note": detail,
         },
         {
-            "label": "digests",
+            "label": "sweeps",
             "value": "pending" if status == "collecting" else "error",
             "note": error_message
-            or "collector가 끝나면 summary worker 단계로 이어집니다.",
+            or "collector가 끝나면 요약 단계로 넘어갑니다.",
         },
     ]
     return {
         "brand": {
-            "name": "SparkOrbit",
-            "tagline": "Homepage Bootstrap",
+            "name": "BLACKSITE",
+            "tagline": "Cold Boot",
         },
         "status": status,
         "session": {
-            "title": "SparkOrbit Live Bootstrap",
+            "title": "Cold Boot Relay",
             "sessionId": "bootstrapping",
             "sessionDate": started_at[:10] or "unknown",
-            "window": f"{profile} snapshot",
-            "reloadRule": "홈페이지에서 active session이 없으면 collector가 자동으로 새 run을 만듭니다.",
+            "window": f"{profile} scan",
+            "reloadRule": "active cache가 없으면 collector가 자동으로 새 scan을 시작합니다.",
             "metrics": metrics,
             "runtime": build_bootstrap_runtime_items(status, stage),
             "rules": [
-                "실제 source fetch가 완료될 때까지 collecting 상태를 유지합니다.",
-                "run output는 PoC/source_fetch/data/runs 아래에 계속 저장됩니다.",
-                "publish가 끝나면 active session이 교체되고 프론트 SSE stream이 실제 dashboard로 전환됩니다.",
+                "실제 scan이 끝날 때까지 collecting 상태를 유지합니다.",
+                "run output는 디스크에 그대로 남습니다.",
+                "publish가 끝나면 active cache가 교체되고 화면 stream이 즉시 전환됩니다.",
             ],
             "arenaOverview": None,
             "loading": loading,
         },
         "summary": {
-            "title": "Category Digest",
+            "title": "Signal Sweep",
             "headline": error_message or detail,
             "digests": build_bootstrap_digest_items(status),
         },
@@ -789,7 +881,7 @@ def build_session_block(
     loading_stage = str(meta.get("loading_stage") or meta.get("status") or "published")
     loading_detail = str(
         meta.get("loading_detail")
-        or f"현재 session 상태는 {meta.get('status') or 'published'} 입니다."
+        or f"현재 relay 상태는 {meta.get('status') or 'published'} 입니다."
     )
     loading = build_loading_block(
         status=str(meta.get("status") or "published"),
@@ -805,11 +897,11 @@ def build_session_block(
     )
     arena_overview = build_lmarena_session_overview(documents_by_id)
     return {
-        "title": "SparkOrbit Redis Session",
+        "title": "Relay Cache",
         "sessionId": session_id,
         "sessionDate": session_date or "unknown",
-        "window": f"{run_manifest.get('profile', 'session')} snapshot",
-        "reloadRule": "POST /api/sessions/reload가 새 run을 수집하고 Redis session을 교체합니다.",
+        "window": f"{run_manifest.get('profile', 'live')} scan",
+        "reloadRule": "POST /api/sessions/reload가 새 scan을 돌리고 active cache를 교체합니다.",
         "metrics": [
             {
                 "label": "sources",
@@ -822,17 +914,17 @@ def build_session_block(
                         ]
                     )
                 ),
-                "note": "현재 session dashboard에 연결된 source 수",
+                "note": "현재 cache에 연결된 source 수",
             },
             {
                 "label": "docs",
                 "value": str(meta.get("docs_total", 0)),
-                "note": "displayable reference를 가진 normalized 문서 수",
+                "note": "reference가 살아 있는 문서 수",
             },
             {
-                "label": "digests",
+                "label": "sweeps",
                 "value": digests_ready,
-                "note": f"summaries {meta.get('summaries_ready', 0)} / status {meta.get('status')}",
+                "note": f"summaries {meta.get('summaries_ready', 0)} / state {meta.get('status')}",
             },
         ],
         "runtime": build_runtime_items(
@@ -840,9 +932,9 @@ def build_session_block(
             stage=loading_stage,
         ),
         "rules": [
-            "JSONL run output를 source of truth로 유지합니다.",
-            "Redis는 source별 feed와 dashboard materialized view를 제공합니다.",
-            "교차 source mixing은 category digest에서만 수행합니다.",
+            "run output가 최종 기준 데이터입니다.",
+            "cache는 source별 feed와 화면 view만 보관합니다.",
+            "교차 source mixing은 sweep에서만 수행합니다.",
         ],
         "arenaOverview": arena_overview,
         "loading": loading,
@@ -944,7 +1036,7 @@ def build_lmarena_session_overview(
         )
 
     return {
-        "title": "LMArena Type Rankings",
+        "title": "Arena Rank Feed",
         "boards": boards,
     }
 
@@ -1077,15 +1169,15 @@ def build_dashboard_payload(
 
     return {
         "brand": {
-            "name": "SparkOrbit",
-            "tagline": "Redis Session Pipeline",
+            "name": "BLACKSITE",
+            "tagline": "Signal Relay",
         },
         "status": meta.get("status") or "published",
         "session": build_session_block(
             session_id, meta, run_manifest, source_manifest, documents_by_id
         ),
         "summary": {
-            "title": "Category Digest",
+            "title": "Signal Sweep",
             "headline": f"{hottest_digest['domain']} / {hottest_digest['headline']}",
             "digests": digests,
         },
@@ -1124,12 +1216,25 @@ def get_digest_map(store: RedisLike, session_id: str) -> dict[str, dict[str, Any
     return digests
 
 
+def needs_dashboard_rebuild(
+    meta: dict[str, Any] | None, dashboard: dict[str, Any] | None
+) -> bool:
+    if dashboard is None:
+        return True
+    if not isinstance(meta, dict):
+        return False
+    return int(meta.get("schema_version") or 0) != SCHEMA_VERSION
+
+
 def rebuild_dashboard(store: RedisLike, session_id: str) -> dict[str, Any]:
     meta = get_json(store, session_key(session_id, "meta"))
     run_manifest = get_json(store, session_key(session_id, "run_manifest"))
     source_manifest = get_json(store, session_key(session_id, "source_manifest")) or []
     if meta is None or run_manifest is None:
         raise KeyError(f"Unknown session: {session_id}")
+    if int(meta.get("schema_version") or 0) != SCHEMA_VERSION:
+        meta = {**meta, "schema_version": SCHEMA_VERSION}
+        set_json_with_ttl(store, session_key(session_id, "meta"), meta)
     source_ids = meta.get("source_ids") or [
         entry.get("source") for entry in source_manifest if entry.get("source")
     ]
@@ -1150,8 +1255,9 @@ def rebuild_dashboard(store: RedisLike, session_id: str) -> dict[str, Any]:
 
 
 def load_dashboard(store: RedisLike, session_id: str) -> dict[str, Any]:
+    meta = get_json(store, session_key(session_id, "meta"))
     dashboard = get_json(store, session_key(session_id, "dashboard"))
-    if dashboard is not None:
+    if not needs_dashboard_rebuild(meta, dashboard):
         return dashboard
     return rebuild_dashboard(store, session_id)
 
@@ -1266,9 +1372,9 @@ def build_session_reload_state(
         "stage": stage,
         "detail": detail
         or (
-            "reload 요청을 받아 실제 데이터를 다시 수집하기 시작합니다."
+            "probe 요청을 받아 실제 scan을 다시 시작합니다."
             if status != "error"
-            else "reload 처리 중 오류가 발생했습니다."
+            else "probe cycle 중 fault가 발생했습니다."
         ),
         "progress_current": progress_current,
         "progress_total": progress_total,
@@ -1325,9 +1431,9 @@ def build_session_reload_response(state: dict[str, Any] | None) -> dict[str, Any
     detail = str(
         state.get("detail")
         or (
-            "새 session을 준비 중입니다."
+            "새 probe cycle을 준비 중입니다."
             if status != "error"
-            else "reload 처리 중 오류가 발생했습니다."
+            else "probe cycle 중 fault가 발생했습니다."
         )
     )
     loading = build_loading_block(
@@ -1352,6 +1458,13 @@ def build_session_reload_response(state: dict[str, Any] | None) -> dict[str, Any
 
 def get_session_reload_response(store: RedisLike) -> dict[str, Any]:
     return build_session_reload_response(get_reload_state(store))
+
+
+def resolve_collect_progress_current(event: dict[str, Any]) -> int:
+    stage = str(event.get("stage") or "")
+    if stage == "fetching_sources" and event.get("source_index") is not None:
+        return int(event.get("source_index") or 0)
+    return int(event.get("completed_sources") or 0)
 
 
 def select_summary_candidate_ids(
@@ -1433,7 +1546,7 @@ def publish_run(
         "summary_candidates": len(candidate_ids),
         "source_ids": source_ids,
         "loading_stage": "publishing_documents",
-        "loading_detail": "displayable document를 Redis doc 키로 publish하고 있습니다.",
+        "loading_detail": "표시 가능한 문서를 cache key로 밀어 넣고 있습니다.",
         "loading_progress_current": 0,
         "loading_progress_total": max(len(documents), 1),
         "loading_current_source": None,
@@ -1462,9 +1575,9 @@ def publish_run(
         if index == len(documents) or index == 1 or index % 10 == 0:
             meta["loading_stage"] = "publishing_documents"
             meta["loading_detail"] = (
-                f"Redis doc publish 진행 중 ({index}/{len(documents)})."
+                f"cache write 진행 중 ({index}/{len(documents)})."
                 if documents
-                else "publish 대상 문서가 없습니다."
+                else "cache에 올릴 문서가 없습니다."
             )
             meta["loading_progress_current"] = index if documents else 1
             meta["loading_progress_total"] = docs_total
@@ -1487,7 +1600,7 @@ def publish_run(
     }
     feed_total = 2
     meta["loading_stage"] = "publishing_views"
-    meta["loading_detail"] = "source feed 리스트를 Redis에 기록하고 있습니다."
+    meta["loading_detail"] = "feed index를 cache에 기록하고 있습니다."
     meta["loading_progress_current"] = 0
     meta["loading_progress_total"] = feed_total
     meta["loading_current_source"] = None
@@ -1506,7 +1619,7 @@ def publish_run(
     for source, document_ids in feed_lists.items():
         set_list_with_ttl(store, feed_key(session_id, source), document_ids)
     meta["loading_stage"] = "publishing_views"
-    meta["loading_detail"] = "feed 리스트 publish를 마치고 dashboard view를 구성하고 있습니다."
+    meta["loading_detail"] = "feed write를 마치고 live view를 조립하고 있습니다."
     meta["loading_progress_current"] = 1
     meta["loading_progress_total"] = feed_total
     meta["loading_current_source"] = None
@@ -1523,7 +1636,7 @@ def publish_run(
     )
 
     meta["loading_stage"] = "published"
-    meta["loading_detail"] = "Redis feed/doc/dashboard keys를 채웠고 요약 단계가 이어질 준비가 됐습니다."
+    meta["loading_detail"] = "cache relay가 arm됐고 pattern pass로 넘어갈 준비가 됐습니다."
     meta["loading_progress_current"] = feed_total
     meta["loading_progress_total"] = feed_total
     meta["loading_current_source"] = None
@@ -1540,6 +1653,7 @@ def publish_run(
     )
     set_json_with_ttl(store, session_key(session_id, "dashboard"), dashboard)
     store.set(ACTIVE_SESSION_KEY, session_id)
+    prune_stale_sessions(store, session_id)
     emit_progress(
         status="published",
         stage="published",
@@ -1613,9 +1727,9 @@ def run_session_enrichment(
     meta["updated_at"] = now_utc_iso()
     meta["loading_stage"] = "summarizing_documents"
     meta["loading_detail"] = (
-        f"선택된 문서 {pending_total}건에 대해 요약을 생성하고 있습니다."
+        f"선택된 문서 {pending_total}건에서 핵심 라인을 추출하고 있습니다."
         if pending_total
-        else "요약 대상 문서가 없어 digest 단계로 바로 넘어갑니다."
+        else "패턴 추출 대상이 없어 바로 sweep build로 넘어갑니다."
     )
     meta["loading_progress_current"] = 0
     meta["loading_progress_total"] = pending_total
@@ -1675,9 +1789,9 @@ def run_session_enrichment(
             set_json_with_ttl(store, doc_key(session_id, document_id), document)
             meta["loading_stage"] = "summarizing_documents"
             meta["loading_detail"] = (
-                f"문서 요약 진행 중 ({processed_summaries}/{pending_total})."
+                f"pattern pass 진행 중 ({processed_summaries}/{pending_total})."
                 if pending_total
-                else "요약 대상 문서가 없습니다."
+                else "pattern pass 대상이 없습니다."
             )
             meta["loading_progress_current"] = processed_summaries
             meta["loading_progress_total"] = pending_total
@@ -1696,7 +1810,7 @@ def run_session_enrichment(
 
     digests_by_category: dict[str, dict[str, Any]] = {}
     meta["loading_stage"] = "building_digests"
-    meta["loading_detail"] = "category digest를 생성하고 있습니다."
+    meta["loading_detail"] = "signal sweep를 묶고 있습니다."
     meta["loading_progress_current"] = 0
     meta["loading_progress_total"] = len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_current_source"] = None
@@ -1718,7 +1832,7 @@ def run_session_enrichment(
         set_json_with_ttl(store, digest_key(session_id, category), digest)
         meta["loading_progress_current"] = len(digests_by_category)
         meta["loading_detail"] = (
-            f"category digest 생성 중 ({len(digests_by_category)}/{len(ORDERED_SOURCE_CATEGORIES)})."
+            f"sweep build 진행 중 ({len(digests_by_category)}/{len(ORDERED_SOURCE_CATEGORIES)})."
         )
         meta["updated_at"] = now_utc_iso()
         set_json_with_ttl(store, session_key(session_id, "meta"), meta)
@@ -1739,16 +1853,16 @@ def run_session_enrichment(
     meta["loading_stage"] = meta["status"]
     if summary_errors:
         meta["loading_detail"] = (
-            f"문서 요약 {summaries_ready}건 완료, 일부 오류 {summary_errors}건이 남았습니다."
+            f"pattern pass {summaries_ready}건 완료, fault {summary_errors}건이 남았습니다."
         )
     elif summaries_ready == 0 and pending_total > 0:
         meta["loading_detail"] = (
-            "LLM provider가 아직 연결되지 않아 문서 요약은 건너뛰고 "
-            f"category digest {len(ORDERED_SOURCE_CATEGORIES)}개만 생성했습니다."
+            "LLM provider가 아직 연결되지 않아 pattern pass는 건너뛰고 "
+            f"signal sweep {len(ORDERED_SOURCE_CATEGORIES)}개만 생성했습니다."
         )
     else:
         meta["loading_detail"] = (
-            f"문서 요약과 category digest {len(ORDERED_SOURCE_CATEGORIES)}개 생성을 마쳤습니다."
+            f"pattern pass와 signal sweep {len(ORDERED_SOURCE_CATEGORIES)}개 생성을 마쳤습니다."
         )
     meta["loading_progress_current"] = len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_progress_total"] = len(ORDERED_SOURCE_CATEGORIES)
@@ -1845,9 +1959,9 @@ def run_homepage_bootstrap(
                 stage=str(event.get("stage") or "fetching_sources"),
                 detail=str(
                     event.get("detail")
-                    or "실제 데이터를 수집하고 있습니다."
+                    or "실제 데이터를 scan 중입니다."
                 ),
-                progress_current=int(event.get("completed_sources") or 0),
+                progress_current=resolve_collect_progress_current(event),
                 progress_total=int(event.get("total_sources") or 0),
                 current_source=(
                     str(event.get("current_source"))
@@ -1865,7 +1979,7 @@ def run_homepage_bootstrap(
                 stage=str(event.get("stage") or "publishing_documents"),
                 detail=str(
                     event.get("detail")
-                    or "Redis session publish를 진행하고 있습니다."
+                    or "cache write를 진행하고 있습니다."
                 ),
                 progress_current=int(event.get("progress_current") or 0),
                 progress_total=int(event.get("progress_total") or 0),
@@ -1899,7 +2013,7 @@ def run_homepage_bootstrap(
                 profile=profile,
                 run_label=run_label,
                 stage=str(current_state.get("stage") or "error"),
-                detail="자동 수집 중 오류가 발생했습니다.",
+                detail="cold boot 중 fault가 발생했습니다.",
                 progress_current=int(current_state.get("progress_current") or 0),
                 progress_total=int(current_state.get("progress_total") or 0),
                 current_source=(
@@ -1934,9 +2048,9 @@ def run_session_reload(
                 stage=str(event.get("stage") or "fetching_sources"),
                 detail=str(
                     event.get("detail")
-                    or "실제 데이터를 다시 수집하고 있습니다."
+                    or "실제 데이터를 다시 sweep 중입니다."
                 ),
-                progress_current=int(event.get("completed_sources") or 0),
+                progress_current=resolve_collect_progress_current(event),
                 progress_total=int(event.get("total_sources") or 0),
                 current_source=(
                     str(event.get("current_source"))
@@ -1959,7 +2073,7 @@ def run_session_reload(
                 stage=str(event.get("stage") or "summarizing_documents"),
                 detail=str(
                     event.get("detail")
-                    or "문서 요약과 digest를 갱신하고 있습니다."
+                    or "pattern pass와 sweep를 갱신하고 있습니다."
                 ),
                 progress_current=int(event.get("progress_current") or 0),
                 progress_total=int(event.get("progress_total") or 0),
@@ -1984,7 +2098,7 @@ def run_session_reload(
                 stage=str(event.get("stage") or "publishing_documents"),
                 detail=str(
                     event.get("detail")
-                    or "Redis session publish를 진행하고 있습니다."
+                    or "cache write를 진행하고 있습니다."
                 ),
                 progress_current=int(event.get("progress_current") or 0),
                 progress_total=int(event.get("progress_total") or 0),
@@ -2029,7 +2143,7 @@ def run_session_reload(
             stage=str(meta.get("loading_stage") or meta.get("status") or "ready"),
             detail=str(
                 meta.get("loading_detail")
-                or "reload session 처리가 완료되었습니다."
+                or "probe cycle이 완료되었습니다."
             ),
             progress_current=int(meta.get("loading_progress_current") or 0),
             progress_total=int(meta.get("loading_progress_total") or 0),
@@ -2049,7 +2163,7 @@ def run_session_reload(
                 profile=profile,
                 run_label=run_label,
                 stage=str(current_state.get("stage") or "error"),
-                detail="reload 처리 중 오류가 발생했습니다.",
+                detail="probe cycle 중 fault가 발생했습니다.",
                 progress_current=int(current_state.get("progress_current") or 0),
                 progress_total=int(current_state.get("progress_total") or 0),
                 current_source=(

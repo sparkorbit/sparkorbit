@@ -23,7 +23,7 @@ export function SummaryPanel({
 }: SummaryPanelProps) {
   return (
     <DashboardPanel
-      eyebrow="요약 레인"
+      eyebrow="Signal Sweep"
       title={title}
       sessionLabel={sessionLabel}
       style={style}

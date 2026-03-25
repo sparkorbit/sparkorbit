@@ -14,8 +14,11 @@ from backend.app.core.constants import (
     BOOTSTRAP_STATE_KEY,
     ORDERED_SOURCE_CATEGORIES,
     QUEUE_SESSION_ENRICH_KEY,
+    RECENT_SESSIONS_KEY,
     RELOAD_STATE_KEY,
     RELOAD_STATE_TTL_SECONDS,
+    SCHEMA_VERSION,
+    SESSION_RETAIN_COUNT,
     SESSION_TTL_SECONDS,
 )
 from backend.app.core.store import MemoryStore
@@ -536,7 +539,7 @@ class SessionPipelineTests(unittest.TestCase):
 
         arena_overview = dashboard["session"]["arenaOverview"]
         self.assertIsNotNone(arena_overview)
-        self.assertEqual(arena_overview["title"], "LMArena Type Rankings")
+        self.assertEqual(arena_overview["title"], "Arena Rank Feed")
         self.assertEqual(arena_overview["boards"][0]["label"], "Text")
         self.assertEqual(
             arena_overview["boards"][0]["documentId"],
@@ -551,7 +554,7 @@ class SessionPipelineTests(unittest.TestCase):
         lmarena_feed = next(
             feed for feed in dashboard["feeds"] if feed["id"] == "lmarena_overview"
         )
-        self.assertEqual(lmarena_feed["items"][0]["type"], "Leaderboard Panel")
+        self.assertEqual(lmarena_feed["items"][0]["type"], "Rank Board")
         self.assertIn("Arena rating 1,402.5", lmarena_feed["items"][0]["meta"])
         self.assertNotIn("elo_like_rating", lmarena_feed["items"][0]["meta"])
 
@@ -774,20 +777,36 @@ class SessionPipelineTests(unittest.TestCase):
         ]
         self.assertGreaterEqual(len(errored_documents), 1)
 
-    def test_session_rollover_updates_active_without_deleting_previous_session(self) -> None:
+    def test_session_rollover_prunes_sessions_beyond_retention_limit(self) -> None:
         first_run_dir = self._make_run("2026-03-24T010101Z_first")
         second_run_dir = self._make_run("2026-03-24T020202Z_second")
+        third_run_dir = self._make_run("2026-03-24T030303Z_third")
 
-        first = publish_run(self.store, first_run_dir, queue=False)
-        second = publish_run(self.store, second_run_dir, queue=False)
+        first = publish_run(self.store, first_run_dir, queue=True)
+        second = publish_run(self.store, second_run_dir, queue=True)
+        third = publish_run(self.store, third_run_dir, queue=True)
 
-        self.assertEqual(self.store.get(ACTIVE_SESSION_KEY), second["session_id"])
-        self.assertIsNotNone(
+        self.assertEqual(self.store.get(ACTIVE_SESSION_KEY), third["session_id"])
+        self.assertEqual(
+            get_json(self.store, RECENT_SESSIONS_KEY),
+            [third["session_id"], second["session_id"]][:SESSION_RETAIN_COUNT],
+        )
+        self.assertIsNone(
             self.store.get(session_key(first["session_id"], "dashboard")),
         )
         self.assertIsNotNone(
             self.store.get(session_key(second["session_id"], "dashboard")),
         )
+        self.assertIsNotNone(
+            self.store.get(session_key(third["session_id"], "dashboard")),
+        )
+        queue_session_ids = [
+            json.loads(item)["session_id"]
+            for item in self.store.lrange(QUEUE_SESSION_ENRICH_KEY, 0, -1)
+        ]
+        self.assertNotIn(first["session_id"], queue_session_ids)
+        self.assertIn(second["session_id"], queue_session_ids)
+        self.assertIn(third["session_id"], queue_session_ids)
 
     def test_dashboard_rebuilds_when_materialized_key_is_missing(self) -> None:
         run_dir = self._make_run("2026-03-24T000105Z_rebuild")
@@ -801,6 +820,31 @@ class SessionPipelineTests(unittest.TestCase):
         self.assertIsNotNone(
             self.store.get(session_key(session_id, "dashboard")),
         )
+
+    def test_dashboard_rebuilds_when_cached_copy_uses_old_schema(self) -> None:
+        run_dir = self._make_run("2026-03-24T000106Z_stale_dashboard")
+        result = publish_run(self.store, run_dir, queue=False)
+        session_id = result["session_id"]
+
+        stale_meta = get_json(self.store, session_key(session_id, "meta"))
+        stale_dashboard = get_json(self.store, session_key(session_id, "dashboard"))
+        stale_meta["schema_version"] = SCHEMA_VERSION - 1
+        stale_dashboard["brand"]["tagline"] = "Redis Session Pipeline"
+        self.store.set(
+            session_key(session_id, "meta"),
+            json.dumps(stale_meta, ensure_ascii=False),
+        )
+        self.store.set(
+            session_key(session_id, "dashboard"),
+            json.dumps(stale_dashboard, ensure_ascii=False),
+        )
+
+        rebuilt = get_dashboard_response(self.store, session_id)
+
+        self.assertEqual(rebuilt["brand"]["name"], "BLACKSITE")
+        self.assertEqual(rebuilt["brand"]["tagline"], "Signal Relay")
+        refreshed_meta = get_json(self.store, session_key(session_id, "meta"))
+        self.assertEqual(refreshed_meta["schema_version"], SCHEMA_VERSION)
 
     def test_homepage_dashboard_bootstraps_collection_when_active_session_is_missing(self) -> None:
         scheduled: list[str] = []

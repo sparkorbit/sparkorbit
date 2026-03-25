@@ -126,13 +126,14 @@ frontend와 backend는 아래 stage 이름을 공유한다.
 | Key | TTL | Role |
 |-----|-----|------|
 | `sparkorbit:session:active` | none | 현재 active session id |
+| `sparkorbit:session:recent` | none | 최근 session id 목록. rollover 시 오래된 session prune 기준 |
 | `sparkorbit:session:bootstrap_state` | 15m | 홈페이지 최초 진입 bootstrap 진행 상태 |
 | `sparkorbit:session:reload_state` | 15m | manual reload 진행 상태 |
 | `sparkorbit:queue:session_enrich` | queue semantics | existing run publish 후 worker가 읽는 큐 |
 
 ### Session Keys
 
-모든 세션 키는 `72h` TTL을 가진다.
+보존된 세션 키는 `72h` TTL을 가진다. 다만 rollover 시 Redis가 계속 커지지 않도록 최근 session만 유지하고, 더 오래된 session key는 기본적으로 prune한다. 현재 기본 보존 개수는 `2` (`active + previous`)이고 `SPARKORBIT_SESSION_RETAIN_COUNT`로 조절할 수 있다.
 
 | Key pattern | Value |
 |-------------|-------|
