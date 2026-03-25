@@ -22,6 +22,10 @@ DEFAULT_TOP_K = int(os.environ.get("OLLAMA_TOP_K", "20"))
 DEFAULT_MIN_P = float(os.environ.get("OLLAMA_MIN_P", "0.0"))
 DEFAULT_REPEAT_PENALTY = float(os.environ.get("OLLAMA_REPEAT_PENALTY", "1.0"))
 DEFAULT_RUNS_ROOT = Path(__file__).resolve().parents[2] / "source_fetch" / "data" / "runs"
+LABELS_DIRNAME = "labels"
+COMPANY_DECISIONS_FILENAME = "company_decisions.ndjson"
+REVIEW_QUEUE_FILENAME = "review_queue.ndjson"
+LLM_RUNS_FILENAME = "llm_runs.ndjson"
 
 PROMPT_VERSION = "company_filter_v2"
 SCHEMA_VERSION = "document_filter_v2"
@@ -479,19 +483,19 @@ def write_outputs(
     chunk_size: int,
     started_at: str,
 ) -> None:
-    enriched_dir = run_dir / "enriched"
-    enriched_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir = run_dir / LABELS_DIRNAME
+    labels_dir.mkdir(parents=True, exist_ok=True)
 
-    filters_path = enriched_dir / "document_filters.ndjson"
-    failed_path = enriched_dir / "failed_items.ndjson"
-    llm_runs_path = enriched_dir / "llm_runs.ndjson"
+    decisions_path = labels_dir / COMPANY_DECISIONS_FILENAME
+    review_queue_path = labels_dir / REVIEW_QUEUE_FILENAME
+    llm_runs_path = labels_dir / LLM_RUNS_FILENAME
 
-    filters_path.write_text("", encoding="utf-8")
-    failed_path.write_text("", encoding="utf-8")
+    decisions_path.write_text("", encoding="utf-8")
+    review_queue_path.write_text("", encoding="utf-8")
 
-    append_ndjson(filters_path, rows)
-    failed_items = [row for row in rows if row.get("decision") == "needs_review"]
-    append_ndjson(failed_path, failed_items)
+    append_ndjson(decisions_path, rows)
+    review_queue_rows = [row for row in rows if row.get("decision") == "needs_review"]
+    append_ndjson(review_queue_path, review_queue_rows)
 
     run_row = {
         "phase": "company_filter",
@@ -507,13 +511,13 @@ def write_outputs(
         "split_retries": stats["split_retries"],
         "fallback_items": stats["fallback_items"],
         "output_count": len(rows),
-        "needs_review_count": len(failed_items),
+        "needs_review_count": len(review_queue_rows),
     }
     append_ndjson(llm_runs_path, [run_row])
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run company-panel LLM enrichment via local Ollama.")
+    parser = argparse.ArgumentParser(description="Run company-panel LLM decisions via local Ollama.")
     parser.add_argument(
         "--run-dir",
         help="Run directory path. If omitted, the latest source_fetch run is used.",
@@ -644,7 +648,7 @@ def main() -> int:
         return 0
 
     if not candidates:
-        raise SystemExit("No company candidates found for enrichment.")
+        raise SystemExit("No company candidates found for LLM decisions.")
 
     started_at = now_utc_iso()
     stats = {"requests": 0, "split_retries": 0, "fallback_items": 0}
@@ -715,7 +719,7 @@ def main() -> int:
     print(f"  requests: {stats['requests']}")
     print(f"  split_retries: {stats['split_retries']}")
     print(f"  fallback_items: {stats['fallback_items']}")
-    print(f"  output: {run_dir / 'enriched' / 'document_filters.ndjson'}")
+    print(f"  output: {run_dir / LABELS_DIRNAME / COMPANY_DECISIONS_FILENAME}")
     return 0
 
 

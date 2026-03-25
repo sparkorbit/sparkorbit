@@ -65,11 +65,11 @@ pipelines/source_fetch/data/runs/<run_id>/
     documents.ndjson               ← 정규화된 전체 문서 (이후 파이프라인의 입력)
     metrics.ndjson                 ← 수집 통계
     contract_report.json           ← 필드 커버리지 리포트
-  enriched/                        ← LLM enrichment 결과 (llm_enrich가 생성)
-    document_filters.ndjson        ← company panel keep/drop + domain
+  labels/                          ← LLM 판정/분류 결과 (llm_enrich가 생성)
+    company_decisions.ndjson       ← company panel keep/drop + domain
     paper_domains.ndjson           ← paper panel domain 분류
-    failed_items.ndjson            ← needs_review 항목 모음
-    llm_runs.ndjson                ← enrichment 실행 로그
+    review_queue.ndjson            ← needs_review 항목 모음
+    llm_runs.ndjson                ← LLM 실행 로그
   samples/                         ← 미리보기용 샘플
   logs/                            ← 수집 로그
     fetch.ndjson                   ← source별 fetch/normalize/filter/persist timing 요약
@@ -125,6 +125,6 @@ python scripts/data_collection.py --profile full --limit 30 --run-label max
 - source 선정 자체는 [02.1 Sources](./02_sections/02_1_sources.md)에서 관리한다.
 - normalized field contract는 [02.2 Fields](./02_sections/02_2_fields.md)에서 본다.
 - Redis session publish, dashboard serving, frontend SSE 흐름은 [03. Runtime Flow](./03_runtime_flow_draft.md)에서 본다.
-- LLM enrichment (company filter, paper domain 등)는 [04. LLM Usage](./04_llm_usage.md)에서 본다.
+- LLM 판정/분류 (company filter, paper domain 등)는 [04. LLM Usage](./04_llm_usage.md)에서 본다.
 - 현재 프론트엔드 시각, 로딩, workspace 규칙은 [06. UI Design Guide](./06_ui_design_guide.md)에서 본다.
 - 실제 setup/run/verification 절차는 [06. Operational Playbook](./06_operational_playbook.md)에서 본다.

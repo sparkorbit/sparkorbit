@@ -32,6 +32,9 @@ DEFAULT_TOP_K = int(os.environ.get("OLLAMA_TOP_K", "20"))
 DEFAULT_MIN_P = float(os.environ.get("OLLAMA_MIN_P", "0.0"))
 DEFAULT_REPEAT_PENALTY = float(os.environ.get("OLLAMA_REPEAT_PENALTY", "1.0"))
 DEFAULT_RUNS_ROOT = Path(__file__).resolve().parents[2] / "source_fetch" / "data" / "runs"
+LABELS_DIRNAME = "labels"
+PAPER_DOMAINS_FILENAME = "paper_domains.ndjson"
+LLM_RUNS_FILENAME = "llm_runs.ndjson"
 
 PROMPT_VERSION = "paper_domain_v1"
 SCHEMA_VERSION = "paper_domain_v1"
@@ -351,11 +354,11 @@ def write_outputs(
     chunk_size: int,
     started_at: str,
 ) -> Path:
-    enriched_dir = run_dir / "enriched"
-    enriched_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir = run_dir / LABELS_DIRNAME
+    labels_dir.mkdir(parents=True, exist_ok=True)
 
-    output_path = enriched_dir / "paper_domains.ndjson"
-    llm_runs_path = enriched_dir / "llm_runs.ndjson"
+    output_path = labels_dir / PAPER_DOMAINS_FILENAME
+    llm_runs_path = labels_dir / LLM_RUNS_FILENAME
 
     output_path.write_text("", encoding="utf-8")
     append_ndjson(output_path, rows)

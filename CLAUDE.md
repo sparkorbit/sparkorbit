@@ -50,7 +50,7 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 - Redis는 장기 저장소가 아니라 현재 세션을 빠르게 서빙하기 위한 materialized layer다.
 - frontend는 JSONL run output를 직접 읽지 않고 backend API/BFF만 사용한다.
 - homepage bootstrap과 manual reload는 현재 backend가 실제 collection부터 publish, digest까지 연결한다.
-- `pipelines/llm_enrich`는 별도 오프라인 enrichment tooling이고, homepage summary lane은 backend session runtime이 만든다.
+- `pipelines/llm_enrich`는 별도 오프라인 LLM labeling tooling이고, homepage summary lane은 backend session runtime이 만든다.
 
 ### 출력 경로
 
@@ -58,10 +58,10 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 pipelines/source_fetch/data/runs/<run_id>/
   normalized/
     documents.ndjson         ← 수집 원본 (전체 문서)
-  enriched/
-    document_filters.ndjson  ← Company filter 결과
+  labels/
+    company_decisions.ndjson ← Company filter 결과
     paper_domains.ndjson     ← Paper domain 결과
-    failed_items.ndjson      ← needs_review 항목
+    review_queue.ndjson      ← needs_review 항목
     llm_runs.ndjson          ← 실행 로그 (append)
 ```
 
@@ -85,7 +85,7 @@ pipelines/source_fetch/data/runs/<run_id>/
 
 ## LLM 출력 형식 (코드가 반드시 따를 것)
 
-### Company Filter → `enriched/document_filters.ndjson`
+### Company Filter → `labels/company_decisions.ndjson`
 
 ```json
 {
@@ -110,7 +110,7 @@ pipelines/source_fetch/data/runs/<run_id>/
 `reason_code` enum:
 `model_signal | product_signal | research_signal | oss_signal | benchmark_signal | partnership_signal | policy_signal | other_signal | event_or_program | recruiting_or_pr | general_promo | unclear_scope | runtime_fallback`
 
-### Paper Domain → `enriched/paper_domains.ndjson`
+### Paper Domain → `labels/paper_domains.ndjson`
 
 ```json
 {
