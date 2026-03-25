@@ -81,7 +81,9 @@ docker compose up --build
 
 - frontend: [http://127.0.0.1:3000](http://127.0.0.1:3000)
 - backend health: [http://127.0.0.1:8787/api/health](http://127.0.0.1:8787/api/health)
-- redis: `127.0.0.1:6379`
+- redis: `127.0.0.1:6380`
+
+필요하면 Redis host port는 `SPARKORBIT_REDIS_HOST_PORT`로 바꿀 수 있다.
 
 ## Runtime Notes
 

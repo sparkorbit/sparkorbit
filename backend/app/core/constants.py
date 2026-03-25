@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
@@ -20,7 +21,7 @@ DEFAULT_COLLECTION_PROFILE = "full"
 DEFAULT_RUN_LABEL = "redis-session"
 HOMEPAGE_BOOTSTRAP_RUN_LABEL = "homepage-entry"
 
-DEFAULT_REDIS_URL = "redis://127.0.0.1:6379/0"
+DEFAULT_REDIS_URL = os.getenv("SPARKORBIT_REDIS_URL", "redis://127.0.0.1:6380/0")
 DEFAULT_API_HOST = "127.0.0.1"
 DEFAULT_API_PORT = 8787
 SUMMARY_PROVIDER_ENV_VAR = "SPARKORBIT_SUMMARY_PROVIDER"

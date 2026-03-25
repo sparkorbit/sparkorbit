@@ -4,7 +4,7 @@ services:
     container_name: sparkorbit-redis
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
-      - "6379:6379"
+      - "${SPARKORBIT_REDIS_HOST_PORT:-6380}:6379"
     volumes:
       - redis-data:/data
     restart: unless-stopped

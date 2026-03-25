@@ -141,7 +141,9 @@ docker compose up --build
 
 - frontend: `http://127.0.0.1:3000`
 - backend health: `http://127.0.0.1:8787/api/health`
-- redis: `127.0.0.1:6379`
+- redis: `127.0.0.1:6380`
+
+Redis host port를 더 바꾸고 싶으면 `SPARKORBIT_REDIS_HOST_PORT` 환경변수로 override할 수 있다.
 
 최소 확인:
 
