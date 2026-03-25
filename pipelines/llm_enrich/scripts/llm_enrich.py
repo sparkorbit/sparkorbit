@@ -193,44 +193,6 @@ def company_candidates(
     return selected
 
 
-def sample_candidates(
-    documents: list[dict[str, Any]],
-    *,
-    limit: int | None,
-    mode: str,
-) -> list[dict[str, Any]]:
-    if limit is None or limit >= len(documents):
-        return documents
-    if mode == "first":
-        return documents[:limit]
-    if mode != "round_robin_source":
-        raise ValueError(f"Unsupported sample mode: {mode}")
-
-    buckets: dict[str, list[dict[str, Any]]] = {}
-    order: list[str] = []
-    for document in documents:
-        source = document.get("source") or "unknown"
-        if source not in buckets:
-            buckets[source] = []
-            order.append(source)
-        buckets[source].append(document)
-
-    sampled: list[dict[str, Any]] = []
-    bucket_index = 0
-    while len(sampled) < limit and order:
-        source = order[bucket_index % len(order)]
-        bucket = buckets[source]
-        if bucket:
-            sampled.append(bucket.pop(0))
-        if not bucket:
-            order.remove(source)
-            if not order:
-                break
-            bucket_index -= 1
-        bucket_index += 1
-    return sampled
-
-
 def excerpt_for_prompt(document: dict[str, Any], max_chars: int = 200) -> str:
     """Excerpt for classification — enough context to resolve ambiguous titles."""
     desc = (document.get("description") or "").strip()
@@ -618,23 +580,6 @@ def build_parser() -> argparse.ArgumentParser:
         default="30m",
         help="Ollama model keep-alive duration. Default: 30m",
     )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Optional limit on selected company documents for smoke tests.",
-    )
-    parser.add_argument(
-        "--sample-mode",
-        choices=["first", "round_robin_source"],
-        default="first",
-        help="How to choose limited smoke-test samples. Default: first",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Only print candidate counts without calling Ollama.",
-    )
     return parser
 
 
@@ -649,14 +594,10 @@ def main() -> int:
         per_source=args.per_source,
         max_age_days=max_age_days,
     )
-    candidates = sample_candidates(candidates, limit=args.limit, mode=args.sample_mode)
 
     print(f"Run dir: {run_dir}")
     print(f"Loaded documents: {len(documents)}")
     print(f"Company candidates: {len(candidates)}")
-
-    if args.dry_run:
-        return 0
 
     if not candidates:
         raise SystemExit("No company candidates found for LLM decisions.")

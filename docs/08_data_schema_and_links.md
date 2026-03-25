@@ -4,7 +4,7 @@
 
 # SparkOrbit - 08. Data Schema & Links
 
-> 2026-03-25 v1
+> 2026-03-25 v2
 >
 > 수집 → LLM 라벨 → 세션 머지 → 브리핑까지 이어지는 데이터 스키마, 조인 키, 링크 관계를 정의한다.
 > 새로운 파이프라인 단계나 프론트엔드 기능을 추가할 때 이 문서의 스키마와 관계를 따른다.
@@ -29,6 +29,7 @@ flowchart TD
         H["publish_run()\nmerge labels → doc.labels"]
         I["build_briefing_input()\nread doc.labels"]
         J["Redis materialized view"]
+        K["labels/session_*.ndjson\nruntime summary snapshots"]
     end
 
     C -- "document_id JOIN" --> D
@@ -38,11 +39,13 @@ flowchart TD
     G -- "document_id JOIN" --> H
     H --> J
     J --> I
+    J --> K
 
     style C fill:#fff3e0,stroke:#f5a623
     style E fill:#e8f5e9,stroke:#4caf50
     style G fill:#e8f5e9,stroke:#4caf50
     style J fill:#e8f4fd,stroke:#4a90d9
+    style K fill:#e8f5e9,stroke:#4caf50
 ```
 
 **모든 링크는 `document_id` 하나로 연결된다.** 별도의 외래 키, 시퀀스, 자동 증가 ID는 없다.
@@ -314,6 +317,87 @@ source ∈ {arxiv_rss_cs_ai, arxiv_rss_cs_lg, arxiv_rss_cs_cl, arxiv_rss_cs_cv,
 | `output_count` | `int` | 출력 건수 |
 | `needs_review_count` | `int` | needs_review 건수 (company만) |
 
+### Runtime Artifact: session_document_summaries.ndjson
+
+> 경로: `<run_dir>/labels/session_document_summaries.ndjson`
+> 생성: `backend/app/services/session_service.py:run_session_enrichment()`
+
+ID 규칙:
+
+```
+summary_id = "{session_id}:document:{document_id}"
+```
+
+핵심 필드:
+
+| 필드 | 설명 |
+|------|------|
+| `summary_id` | runtime summary PK |
+| `artifact_type` | 항상 `"document_summary"` |
+| `session_id` | Redis session ID |
+| `run_id` | source_fetch run ID |
+| `document_id` | **FK → documents.ndjson** |
+| `status` | `pending` \| `not_selected` \| `complete` \| `error` |
+| `summary_1l` | 1줄 요약 |
+| `summary_short` | 짧은 요약 |
+| `key_points` | 핵심 포인트 |
+| `provider_name` | `noop` \| `heuristic` \| 기타 provider |
+| `model_name` | 모델명 |
+| `prompt_version` | prompt version |
+| `generated_at` | 생성 시각 |
+
+### Runtime Artifact: session_category_digests.ndjson
+
+> 경로: `<run_dir>/labels/session_category_digests.ndjson`
+> 생성: `backend/app/services/session_service.py:run_session_enrichment()`
+
+ID 규칙:
+
+```
+digest_id = "{session_id}:digest:{category}"
+```
+
+핵심 필드:
+
+| 필드 | 설명 |
+|------|------|
+| `digest_id` | runtime digest PK |
+| `artifact_type` | 항상 `"category_digest"` |
+| `session_id` | Redis session ID |
+| `run_id` | source_fetch run ID |
+| `category` | `papers`, `models`, `community`, ... |
+| `headline` | digest headline |
+| `summary` | digest summary |
+| `evidence` | evidence line |
+| `document_ids` | 관련 문서 ID 목록 |
+| `updated_at` | digest 생성 시각 |
+
+### Runtime Artifact: session_briefings.ndjson
+
+> 경로: `<run_dir>/labels/session_briefings.ndjson`
+> 생성: `backend/app/services/session_service.py:run_session_enrichment()`
+
+ID 규칙:
+
+```
+briefing_id = "{session_id}:briefing:daily"
+```
+
+핵심 필드:
+
+| 필드 | 설명 |
+|------|------|
+| `briefing_id` | runtime briefing PK |
+| `artifact_type` | 항상 `"session_briefing"` |
+| `session_id` | Redis session ID |
+| `run_id` | source_fetch run ID |
+| `body_en` | 최종 briefing 본문 |
+| `category_summaries` | category별 intermediate summary |
+| `error` | briefing 오류 |
+| `model_name` | 모델명 |
+| `prompt_version` | prompt version |
+| `generated_at` | 생성 시각 |
+
 ---
 
 ## 6. Session Merge: Labels → Document
@@ -452,6 +536,7 @@ session_service가 만드는 Redis key 구조. TTL: 72시간.
 |---------|-----------|------|
 | `sparkorbit:session:active` | `string` | 현재 활성 session_id |
 | `sparkorbit:session:{sid}:meta` | `JSON` | 세션 메타데이터 |
+| `sparkorbit:session:{sid}:artifact_root` | `JSON string` | run artifact root path |
 | `sparkorbit:session:{sid}:run_manifest` | `JSON` | run_manifest 사본 |
 | `sparkorbit:session:{sid}:source_manifest` | `JSON` | source_manifest 사본 |
 | `sparkorbit:session:{sid}:doc:{document_id}` | `JSON` | **머지 완료 document** (labels + llm 포함) |

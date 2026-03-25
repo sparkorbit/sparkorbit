@@ -4,11 +4,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from ..core.constants import DEFAULT_COLLECTION_PROFILE, DEFAULT_RUN_LABEL
+from ..core.constants import DEFAULT_RUN_LABEL
 
 
 class ReloadSessionPayload(BaseModel):
-    profile: str = DEFAULT_COLLECTION_PROFILE
     limit: int | None = None
     run_label: str = DEFAULT_RUN_LABEL
     sources: list[str] | None = None

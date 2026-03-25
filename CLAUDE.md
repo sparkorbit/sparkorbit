@@ -63,6 +63,9 @@ pipelines/source_fetch/data/runs/<run_id>/
     paper_domains.ndjson     ← Paper domain 결과
     review_queue.ndjson      ← needs_review 항목
     llm_runs.ndjson          ← 실행 로그 (append)
+    session_document_summaries.ndjson ← session runtime 문서 summary snapshot
+    session_category_digests.ndjson   ← session runtime category digest snapshot
+    session_briefings.ndjson          ← session runtime briefing snapshot
 ```
 
 ## Artifact Immutability

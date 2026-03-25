@@ -21,11 +21,7 @@ from source_fetch.adapters import (
 )
 
 
-PROFILE_LIMITS = {
-    "smoke": 1,
-    "sample": 3,
-    "full": 20,
-}
+ITEMS_PER_SOURCE = 20
 
 
 def utc_run_id(label: str) -> str:
@@ -39,7 +35,6 @@ def ensure_dirs(run_dir: Path) -> dict[str, Path]:
         "raw_responses": run_dir / "raw_responses",
         "raw_items": run_dir / "raw_items",
         "normalized": run_dir / "normalized",
-        "samples": run_dir / "samples",
         "logs": run_dir / "logs",
     }
     for path in paths.values():
@@ -72,10 +67,10 @@ def git_commit() -> str | None:
         return None
 
 
-def effective_limit(profile: str, limit: int | None) -> int:
+def effective_limit(limit: int | None) -> int:
     if limit is not None:
         return limit
-    return PROFILE_LIMITS[profile]
+    return ITEMS_PER_SOURCE
 
 
 def deep_fill(default: Any, value: Any) -> Any:
@@ -548,8 +543,7 @@ def summarize_request_traces(request_traces: list[dict[str, Any]]) -> dict[str, 
 def run_collection(
     *,
     sources: list[str],
-    profile: str,
-    limit: int | None,
+    limit: int | None = None,
     output_dir: str,
     run_label: str,
     timeout: float,
@@ -564,13 +558,12 @@ def run_collection(
     run_dir = Path(output_dir) / run_id
     paths = ensure_dirs(run_dir)
     selected_sources = resolve_sources(sources)
-    applied_limit = effective_limit(profile, limit)
+    applied_limit = effective_limit(limit)
     started_at = now_utc_iso()
     total_sources = len(selected_sources)
 
     run_manifest: dict[str, Any] = {
         "run_id": run_id,
-        "profile": profile,
         "limit": applied_limit,
         "started_at": started_at,
         "finished_at": None,
@@ -641,18 +634,6 @@ def run_collection(
                 append_ndjson(documents_path, result.documents)
                 append_ndjson(metrics_path, result.metrics)
 
-                sample_path = paths["samples"] / f"{source.name}.sample.json"
-                write_json(
-                    sample_path,
-                    {
-                        "source": source.name,
-                        "endpoint": source.endpoint,
-                        "notes": result.notes,
-                        "raw_items_preview": result.raw_items[:3],
-                        "documents_preview": result.documents[:3],
-                        "metrics_preview": result.metrics[:5],
-                    },
-                )
                 persist_duration_ms = int((perf_counter() - persist_started_at) * 1000)
 
                 duration_ms = int((perf_counter() - source_started_at) * 1000)
@@ -682,7 +663,6 @@ def run_collection(
                     "persist_duration_ms": persist_duration_ms,
                     "raw_response_paths": raw_response_paths,
                     "raw_items_path": str(raw_items_path.relative_to(run_dir)),
-                    "sample_path": str(sample_path.relative_to(run_dir)),
                     **request_summary,
                 }
                 source_manifest_entries.append(manifest_entry)
@@ -750,7 +730,6 @@ def run_collection(
                         "duration_ms": duration_ms,
                         "raw_response_paths": [],
                         "raw_items_path": None,
-                        "sample_path": None,
                         "error_type": type(exc).__name__,
                         "message": str(exc),
                     }

@@ -6,7 +6,6 @@ and classifies each paper into a research domain using Ollama.
 Usage:
     cd pipelines/llm_enrich
     python scripts/paper_enrich.py
-    python scripts/paper_enrich.py --chunk-size 100 --dry-run
 """
 from __future__ import annotations
 
@@ -409,7 +408,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-p", type=float, default=DEFAULT_MIN_P)
     parser.add_argument("--repeat-penalty", type=float, default=DEFAULT_REPEAT_PENALTY)
     parser.add_argument("--keep-alive", default="30m")
-    parser.add_argument("--dry-run", action="store_true")
     return parser
 
 
@@ -429,9 +427,6 @@ def main() -> int:
     src_counts = Counter(d.get("source") for d in candidates)
     for src, cnt in src_counts.most_common():
         print(f"  {src}: {cnt}")
-
-    if args.dry_run:
-        return 0
 
     if not candidates:
         raise SystemExit("No paper candidates found.")

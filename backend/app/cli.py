@@ -6,7 +6,6 @@ import json
 from .core.constants import (
     DEFAULT_API_HOST,
     DEFAULT_API_PORT,
-    DEFAULT_COLLECTION_PROFILE,
     DEFAULT_REDIS_URL,
     DEFAULT_RUN_LABEL,
 )
@@ -39,7 +38,6 @@ def build_parser() -> argparse.ArgumentParser:
     summarize_parser.add_argument("--once", action="store_true")
 
     reload_parser = subparsers.add_parser("reload", help="Collect, publish, and queue a new session.")
-    reload_parser.add_argument("--profile", default=DEFAULT_COLLECTION_PROFILE)
     reload_parser.add_argument("--limit", type=int)
     reload_parser.add_argument("--run-label", default=DEFAULT_RUN_LABEL)
     reload_parser.add_argument("--timeout", type=float, default=30.0)
@@ -76,7 +74,6 @@ def main() -> int:
         result = reload_session(
             store,
             sources=args.sources,
-            profile=args.profile,
             limit=args.limit,
             run_label=args.run_label,
             timeout=args.timeout,

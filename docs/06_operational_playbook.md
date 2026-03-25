@@ -52,10 +52,10 @@ pip install -r requirements.lock.txt
 
 ## 3. Collection Run
 
-샘플 실행:
+간단 실행:
 
 ```bash
-python scripts/data_collection.py --profile sample --run-label sample
+python scripts/data_collection.py --limit 1 --run-label quickstart
 ```
 
 기본 full 실행:
@@ -71,7 +71,6 @@ data/runs/<run_id>/
   raw_responses/
   raw_items/
   normalized/
-  samples/
   logs/
 ```
 
@@ -204,10 +203,10 @@ python scripts/llm_enrich.py
 python scripts/llm_enrich.py --run-dir ../source_fetch/data/runs/<run_id>
 ```
 
-smoke test:
+limited run:
 
 ```bash
-python scripts/llm_enrich.py --limit 12 --chunk-size 6 --sample-mode round_robin_source --max-age-days 90
+python scripts/llm_enrich.py --limit 12 --chunk-size 6 --max-age-days 90
 ```
 
 현재 구현 범위:
@@ -235,12 +234,6 @@ python scripts/paper_enrich.py
 
 ```bash
 python scripts/paper_enrich.py --run-dir ../source_fetch/data/runs/<run_id>
-```
-
-dry run (후보만 확인):
-
-```bash
-python scripts/paper_enrich.py --dry-run
 ```
 
 현재 구현 범위:
@@ -273,10 +266,9 @@ pipelines/source_fetch/data/runs/<run_id>/
 1. `curl http://localhost:11434/api/tags` 에서 `qwen3.5:4b`가 보여야 한다.
 2. `python scripts/llm_enrich.py --limit 12 --chunk-size 6` 이 종료되어야 한다.
 3. `labels/company_decisions.ndjson` 가 생성되어야 한다.
-4. `python scripts/paper_enrich.py --dry-run` 이 후보 수를 출력해야 한다.
-5. `python scripts/paper_enrich.py` 가 종료되어야 한다.
-6. `labels/paper_domains.ndjson` 가 생성되어야 한다.
-7. `labels/llm_runs.ndjson` 에 `company_filter`와 `paper_domain` 두 phase 로그가 남아야 한다.
+4. `python scripts/paper_enrich.py` 가 종료되어야 한다.
+5. `labels/paper_domains.ndjson` 가 생성되어야 한다.
+6. `labels/llm_runs.ndjson` 에 `company_filter`와 `paper_domain` 두 phase 로그가 남아야 한다.
 
 ## 8. Change Discipline
 

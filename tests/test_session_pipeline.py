@@ -55,6 +55,16 @@ def write_ndjson(path: Path, rows: list[dict]) -> None:
     )
 
 
+def read_ndjson_file(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def default_llm_payload() -> dict:
     return {
         "status": "pending",
@@ -254,7 +264,6 @@ def build_base_documents(run_id: str) -> list[dict]:
 def build_run_manifest(run_id: str, sources: list[str]) -> dict:
     return {
         "run_id": run_id,
-        "profile": "full",
         "limit": 20,
         "started_at": "2026-03-24T00:00:00Z",
         "finished_at": "2026-03-24T00:01:00Z",
@@ -281,7 +290,6 @@ def build_source_manifest(sources: list[str]) -> list[dict]:
             "duration_ms": 10,
             "raw_response_paths": [],
             "raw_items_path": None,
-            "sample_path": None,
         }
         for source in sources
     ]
@@ -432,7 +440,6 @@ class SessionPipelineTests(unittest.TestCase):
 
             manifest, run_dir = collect_run(
                 sources=["all"],
-                profile="smoke",
                 run_label="compat",
                 progress_callback=callback,
             )
@@ -807,6 +814,53 @@ class SessionPipelineTests(unittest.TestCase):
             summary_result["dashboard"]["summary"]["briefing"]["body_en"],
         )
         self.assertFalse(briefing_generator.closed)
+
+    def test_runtime_summary_artifacts_are_written_to_labels_with_ids(self) -> None:
+        run_dir = self._make_run("2026-03-24T000103Z_runtime-artifacts")
+        result = publish_run(self.store, run_dir, queue=False)
+        session_id = result["session_id"]
+
+        run_session_enrichment(
+            self.store,
+            session_id,
+            generator=build_summary_generator("heuristic"),
+            briefing_generator=StaticBriefingGenerator(),
+        )
+
+        summary_rows = read_ndjson_file(
+            run_dir / "labels" / "session_document_summaries.ndjson"
+        )
+        digest_rows = read_ndjson_file(
+            run_dir / "labels" / "session_category_digests.ndjson"
+        )
+        briefing_rows = read_ndjson_file(
+            run_dir / "labels" / "session_briefings.ndjson"
+        )
+
+        papers_summary = next(
+            row for row in summary_rows if row["document_id"] == "papers:top"
+        )
+        self.assertEqual(
+            papers_summary["summary_id"],
+            f"{session_id}:document:papers:top",
+        )
+        self.assertEqual(papers_summary["status"], "complete")
+        self.assertEqual(papers_summary["provider_name"], "heuristic")
+        self.assertTrue(papers_summary["summary_short"])
+
+        papers_digest = next(row for row in digest_rows if row["category"] == "papers")
+        self.assertEqual(
+            papers_digest["digest_id"],
+            f"{session_id}:digest:papers",
+        )
+        self.assertIn("papers:top", papers_digest["document_ids"])
+
+        self.assertEqual(len(briefing_rows), 1)
+        self.assertEqual(
+            briefing_rows[0]["briefing_id"],
+            f"{session_id}:briefing:daily",
+        )
+        self.assertIn("[Papers]", briefing_rows[0]["body_en"])
 
     def test_build_briefing_input_caps_items_and_adds_session_overview(self) -> None:
         from datetime import datetime, timedelta, timezone
@@ -1199,7 +1253,6 @@ class SessionPipelineTests(unittest.TestCase):
         start_response = start_session_reload(
             self.store,
             schedule_reload=lambda: None,
-            profile="full",
             run_label="redis-session",
         )
         self.assertEqual(start_response["status"], "collecting")
@@ -1211,7 +1264,6 @@ class SessionPipelineTests(unittest.TestCase):
         ):
             run_session_reload(
                 self.store,
-                profile="full",
                 run_label="redis-session",
             )
 
