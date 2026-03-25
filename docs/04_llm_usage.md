@@ -48,6 +48,16 @@
 3. 프론트엔드는 `document_id`로 원본 document를 다시 조회해 메타데이터를 직접 렌더링한다
 4. 날짜, URL, engagement, count, ordering은 **LLM이 다시 만들지 않는다**
 5. panel별 instruction pack은 Markdown으로 version 관리한다 → `docs/prompt_packs/*.md`
+6. `raw_items/`, `normalized/documents.ndjson`, `labels/*.ndjson`, runtime briefing/digest는 **후속 활용 가능한 산출물**로 보고, 표시 편의를 위한 임의 수정 대상으로 다루지 않는다
+7. summary/briefing의 어조나 길이를 바꾸고 싶으면 prompt pack, selection rule, provider를 수정해 **새 version으로 재생성**한다. 저장된 summary 값을 손으로 rewrite하지 않는다
+
+### 1-1. Artifact Immutability
+
+- data collection 결과와 LLM 결과는 이후 drill-down, audit, export, re-ranking에 다시 쓰일 수 있다.
+- 따라서 UI / demo / export 단계에서 원본 `documents.ndjson`나 `labels/*.ndjson`를 고치지 않는다.
+- runtime briefing, category summary, digest도 "화면용 카피"가 아니라 session의 reusable artifact로 취급한다.
+- line break, section split, truncation 같은 formatting은 가능하지만, 의미를 바꾸는 paraphrase나 manual rewrite는 허용하지 않는다.
+- 다른 표현이 필요하면 `prompt_version`, `run_meta`, 코드 변경을 남기고 재생성한다.
 
 ---
 

@@ -83,7 +83,6 @@ export type DashboardSession = {
 
 export type DashboardBriefing = {
   body_en: string;
-  body_kr: string;
   run_meta?: {
     model_name?: string | null;
     prompt_version?: string | null;

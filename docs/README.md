@@ -14,6 +14,7 @@
 - [06. UI Design Guide](./06_ui_design_guide.md) — 현재 프론트엔드의 시각, 로딩, workspace 규칙
 - [06. Operational Playbook](./06_operational_playbook.md) — setup / run / verification 절차
 - [07. Panel Instruction Packs](./07_panel_instruction_packs.md) — panel별 prompt pack 관리 정책
+- [08. Data Schema & Links](./08_data_schema_and_links.md) — 수집~LLM~세션 전체 데이터 스키마, 조인 키, 링크 관계
 
 ## Reading Guide
 
@@ -24,6 +25,7 @@
 5. offline enrichment와 backend summary provider 범위는 `04`에서 본다.
 6. 실제 setup / run / verification 절차는 항상 `06 Operational Playbook`에서 canonical하게 관리한다.
 7. panel별 prompt/instruction 설계는 `07`과 `docs/prompt_packs/` 아래에서 관리한다.
+8. 데이터 스키마, 조인 키, 머지 규칙, 변경 체크리스트는 `08`에서 관리한다.
 
 ## Reality Check
 

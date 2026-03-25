@@ -65,6 +65,14 @@ pipelines/source_fetch/data/runs/<run_id>/
     llm_runs.ndjson          ← 실행 로그 (append)
 ```
 
+## Artifact Immutability
+
+- `raw_responses/`, `raw_items/`, `normalized/documents.ndjson`, `labels/*.ndjson`는 run별 canonical artifact다.
+- 이 값들은 나중에 재검증, drill-down, 재가공, export에 다시 쓰일 수 있으므로 데모나 UI 표현을 위해 덮어쓰거나 임의 수정하지 않는다.
+- briefing, digest, category summary 같은 LLM/runtime 산출물도 "표시용 임시 문구"가 아니라 재사용 가능한 결과물로 취급한다.
+- 다른 톤, 길이, 우선순위가 필요하면 prompt pack, selection rule, provider 코드를 수정하고 `prompt_version`/run metadata를 올려 다시 생성한다.
+- frontend나 export layer는 line break, section split, truncation 같은 formatting만 할 수 있다. 저장된 summary의 의미를 바꾸는 paraphrase, manual rewrite, silent replacement는 허용하지 않는다.
+
 ## 핵심 원칙
 
 1. 설치 즉시 동작
@@ -155,3 +163,4 @@ Paper: `{"id": "...", "title": "..."}`
 - URL 없는 문서는 기본 서빙 대상에서 제외한다.
 - normalized contract는 shape를 유지한다. 값이 없으면 `null`, `[]`, `{}`를 쓴다.
 - 문서(`docs/`)와 코드(`pipelines/`, `backend/app`, `src`)의 수치, enum, 필드명, loading stage가 어긋나지 않도록 한다. 변경 시 함께 업데이트한다.
+- summary/briefing을 later use 대상으로 간주한다. "보여주기 좋게" summary 본문을 손으로 다듬는 방식은 금지하고, 항상 generation rule을 수정한 뒤 재생성한다.

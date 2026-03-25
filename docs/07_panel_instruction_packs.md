@@ -5,7 +5,7 @@
 # SparkOrbit - 07. Panel Instruction Packs
 
 > Canonical instruction-pack policy
-> Last updated: 2026-03-24
+> Last updated: 2026-03-25
 
 ## 0. 목적
 
@@ -78,6 +78,12 @@ docs/prompt_packs/<pack_name>.md
 2. script가 같은 파일을 읽어 실행
 
 형태로 관리한다.
+
+추가 원칙:
+
+- prompt pack을 바꿨는데 결과 문구만 손으로 patch해서 보여주는 방식은 금지한다.
+- summary, briefing, digest는 prompt/code가 만든 산출물 그대로 저장하고 재사용해야 한다.
+- 다른 표현이 필요하면 pack version, schema, selection rule을 바꾸고 새 `prompt_version`으로 재생성한다.
 
 ## 5. 현재 canonical packs
 

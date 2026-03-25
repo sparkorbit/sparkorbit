@@ -19,6 +19,8 @@ pip install -r requirements.lock.txt
 
 ### Docker
 
+전체 앱 스택을 쓸 때는 저장소 루트 `bash scripts/docker-up.sh` 가 local LLM bundle 포함 여부를 묻고, 포함 시 Ollama와 `qwen3.5:4b` 준비까지 함께 처리한다. 여기 절차는 `llm_enrich` 만 단독으로 돌릴 때의 standalone setup이다.
+
 ```bash
 cd pipelines/llm_enrich
 bash scripts/setup_ollama_docker.sh
