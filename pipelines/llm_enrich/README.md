@@ -1,6 +1,6 @@
-# LLM Enrich
+# LLM Labels
 
-`pipelines/source_fetch` 가 만든 normalized run output을 읽어, local LLM 기반 enrichment를 수행하는 pipeline.
+`pipelines/source_fetch` 가 만든 normalized run output을 읽어, local LLM 기반 판정/분류를 수행하는 pipeline.
 현재 범위는 `Company / Release` panel용 filtering과 `company_domain` 분류다.
 실제 setup / run / verification 절차의 canonical 문서는 [docs/06_operational_playbook.md](../../docs/06_operational_playbook.md) 이고, 이 README는 LLM pipeline quick reference로 유지한다.
 
@@ -59,7 +59,7 @@ python scripts/llm_enrich.py --limit 12 --chunk-size 6 --sample-mode round_robin
 - sampling baseline: `temperature=0.7`, `top_p=0.8`, `top_k=20`, `min_p=0.0`, `repeat_penalty=1.0`
 - canonical prompt pack: `docs/prompt_packs/company_filter_v2.md`
 - source run root: `../source_fetch/data/runs`
-- output target: source run의 `enriched/`
+- output target: source run의 `labels/`
 
 ## Input / Output
 
@@ -76,9 +76,9 @@ pipelines/source_fetch/data/runs/<run_id>/
 
 ```text
 pipelines/source_fetch/data/runs/<run_id>/
-  enriched/
-    document_filters.ndjson
-    failed_items.ndjson
+  labels/
+    company_decisions.ndjson
+    review_queue.ndjson
     llm_runs.ndjson
 ```
 
@@ -86,7 +86,7 @@ pipelines/source_fetch/data/runs/<run_id>/
 
 | File | Role |
 |------|------|
-| `scripts/llm_enrich.py` | local Ollama 기반 company filter enrichment |
+| `scripts/llm_enrich.py` | local Ollama 기반 company filter 판정 |
 | `scripts/setup_ollama_docker.sh` | Ollama Docker + model pull setup |
 | `docker-compose.ollama.yml` | local Ollama runtime for Docker |
 | `requirements.txt` | minimal runtime dependency spec |

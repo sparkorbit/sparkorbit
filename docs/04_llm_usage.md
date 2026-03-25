@@ -7,7 +7,7 @@
 > 2026-03-25 v5
 >
 > **이 문서의 위치:**
-> 수집 파이프라인(`05`)이 만든 `documents.ndjson` 위에 얹는 LLM enrichment 계층을 설명한다.
+> 수집 파이프라인(`05`)이 만든 `documents.ndjson` 위에 얹는 LLM 판정/분류 계층을 설명한다.
 > 실제 setup / run / verification 절차는 [06. Operational Playbook](./06_operational_playbook.md) 을 본다.
 
 ---
@@ -30,7 +30,7 @@
 
 추가 메모:
 
-- `pipelines/llm_enrich`는 run output를 대상으로 한 오프라인 enrichment tooling이다.
+- `pipelines/llm_enrich`는 run output를 대상으로 한 오프라인 LLM labeling tooling이다.
 - homepage summary lane은 `backend/app` session runtime이 만든 digest를 사용한다.
 - summary provider 기본값은 `noop`이고, `heuristic` provider를 선택할 수 있다.
 
@@ -54,7 +54,7 @@
 ## 2. 데이터 흐름 전체 그림
 
 <!-- ────────────────────────────────────────────
-     수집부터 enrichment 출력까지의 전체 파이프라인.
+     수집부터 LLM 판정/분류 출력까지의 전체 파이프라인.
      "어떤 데이터가 들어가서 어떤 데이터가 나오는가"를
      한눈에 보기 위한 그림.
      ──────────────────────────────────────────── -->
@@ -69,8 +69,8 @@ flowchart TD
     D --> E2
     D --> E3
 
-    subgraph Enrichment["Offline Enrichment — pipelines/llm_enrich"]
-        E1["Company Filter\n입력: company 계열 문서\n출력: document_filters.ndjson"]
+    subgraph Enrichment["Offline Labels — pipelines/llm_enrich"]
+        E1["Company Filter\n입력: company 계열 문서\n출력: company_decisions.ndjson"]
         E2["Paper Domain\n입력: paper 계열 문서\n출력: paper_domains.ndjson"]
     end
 
@@ -82,7 +82,7 @@ flowchart TD
         E4["Community / Benchmark / Ask\n(미구현)"]
     end
 
-    E1 --> F["enriched/ 디렉토리"]
+    E1 --> F["labels/ 디렉토리"]
     E2 --> F
     E3 --> G["Redis session keys / dashboard"]
 
@@ -96,10 +96,10 @@ flowchart TD
 
 | 파일 | 내용 |
 |------|------|
-| `enriched/document_filters.ndjson` | company panel keep/drop + domain |
-| `enriched/paper_domains.ndjson` | paper panel domain 분류 |
-| `enriched/failed_items.ndjson` | needs_review 항목 모음 |
-| `enriched/llm_runs.ndjson` | 실행 로그 (모델, 시간, 통계) |
+| `labels/company_decisions.ndjson` | company panel keep/drop + domain |
+| `labels/paper_domains.ndjson` | paper panel domain 분류 |
+| `labels/review_queue.ndjson` | needs_review 항목 모음 |
+| `labels/llm_runs.ndjson` | 실행 로그 (모델, 시간, 통계) |
 | `sparkorbit:session:{sid}:digest:{category}` | backend session runtime이 만든 category digest |
 
 ---
@@ -107,7 +107,7 @@ flowchart TD
 ## 3. Company Filter — 상세
 
 <!-- ────────────────────────────────────────────
-     가장 먼저 구현한 enrichment.
+     가장 먼저 구현한 LLM 판정 단계.
      Company 계열 source는 noise가 많아서
      LLM으로 keep/drop을 판정한다.
      ──────────────────────────────────────────── -->
@@ -138,7 +138,7 @@ Company 계열 source는 noise가 많다.
 flowchart TD
     A["documents.ndjson"] --> B["입력 선별\n(rule-based)"]
     B --> C["LLM 호출\nQwen3.5-4B"]
-    C --> D["enriched/\ndocument_filters.ndjson"]
+    C --> D["labels/\ncompany_decisions.ndjson"]
 
     style A fill:#fff3e0,stroke:#f5a623
     style B fill:#e8f4fd,stroke:#4a90d9
@@ -229,7 +229,7 @@ flowchart TD
 | `unclear_scope` | 범위 불명확 → needs_review |
 | `runtime_fallback` | LLM 실패 시 시스템이 자동 부여 |
 
-### 3-4. 이 enrichment 후 활용 가능한 것
+### 3-4. 이 결과를 쓰면 가능한 것
 
 Company filter가 완료되면 아래가 가능해진다:
 
@@ -243,7 +243,7 @@ Company filter가 완료되면 아래가 가능해진다:
 ## 4. Paper Domain — 상세
 
 <!-- ────────────────────────────────────────────
-     두 번째로 구현한 enrichment.
+     두 번째로 구현한 LLM 분류 단계.
      논문을 연구 분야별로 분류한다.
      ──────────────────────────────────────────── -->
 
@@ -257,7 +257,7 @@ arXiv만 해도 8개 카테고리(cs.AI, cs.LG, cs.CL, cs.CV, cs.RO, cs.IR, cs.C
 flowchart TD
     A["documents.ndjson"] --> B["입력 선별\narXiv + HF papers만"]
     B --> C["LLM 호출\nQwen3.5-4B"]
-    C --> D["enriched/\npaper_domains.ndjson"]
+    C --> D["labels/\npaper_domains.ndjson"]
 
     style A fill:#fff3e0,stroke:#f5a623
     style B fill:#e8f4fd,stroke:#4a90d9
@@ -334,7 +334,7 @@ flowchart TD
 - `VLM + video` → `video` (modality가 우선)
 - `diffusion + 3D` → `3d_spatial` (출력 modality가 우선)
 
-### 4-4. 이 enrichment 후 활용 가능한 것
+### 4-4. 이 결과를 쓰면 가능한 것
 
 Paper domain 분류가 완료되면 아래가 가능해진다:
 
@@ -523,13 +523,13 @@ prompt 변경 = Markdown 파일 수정만으로 반영.
 - "이 논문이 어떤 연구 분야인가?" → arXiv 카테고리만 (너무 넓음)
 - "채용 글과 기술 블로그를 어떻게 구분하나?" → 규칙으로 불가능
 
-### After (enrichment 완료)
+### After (LLM 라벨 완료)
 
 | 추가된 것 | 파일 | 필드 | 용도 |
 |-----------|------|------|------|
-| panel 노출 여부 | `document_filters.ndjson` | `decision` | keep/drop/needs_review |
-| 발표 유형 | `document_filters.ndjson` | `company_domain` | model_release, product_update 등 |
-| 판단 근거 | `document_filters.ndjson` | `reason_code` | model_signal, recruiting_or_pr 등 |
+| panel 노출 여부 | `company_decisions.ndjson` | `decision` | keep/drop/needs_review |
+| 발표 유형 | `company_decisions.ndjson` | `company_domain` | model_release, product_update 등 |
+| 판단 근거 | `company_decisions.ndjson` | `reason_code` | model_signal, recruiting_or_pr 등 |
 | 연구 분야 | `paper_domains.ndjson` | `paper_domain` | agents, llm, safety 등 |
 
 **프론트엔드가 활용 가능한 새로운 축:**
@@ -553,7 +553,7 @@ prompt 변경 = Markdown 파일 수정만으로 반영.
 
 1. 품질이 부족한 단계만 `Qwen3.5-9B`로 승격
 2. Summary digest 소규모 시험
-3. Community panel enrichment 검토
+3. Community panel LLM 라벨 검토
 
 확장 순서는 `all-in`이 아니라 **단계별 승격**이다.
 

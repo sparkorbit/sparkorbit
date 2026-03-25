@@ -16,7 +16,7 @@
 | **데이터 수집** | `pipelines/source_fetch/` | 구현 완료 — 40+ source에서 수집 → normalized documents.ndjson |
 | **세션 런타임** | `backend/app/` | 구현 완료 — FastAPI + Redis session publish + digest + SSE |
 | **대시보드 UI** | `src/` | 구현 완료 — fullscreen loading, reload recovery, drill-down, workspace |
-| **오프라인 enrichment** | `pipelines/llm_enrich/` | 구현 완료 — company filter + paper domain |
+| **오프라인 LLM 판정/분류** | `pipelines/llm_enrich/` | 구현 완료 — company filter + paper domain |
 
 - collection run output는 여전히 `pipelines/source_fetch/data/runs/<run_id>/` 아래 JSONL/JSON 산출물이 canonical artifact다.
 - Redis는 장기 저장소가 아니라 현재 세션을 빠르게 서빙하기 위한 materialized session layer다.

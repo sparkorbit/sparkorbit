@@ -27,7 +27,7 @@
 현재 실제로 usable 하게 맞춘 절차는 아래 네 단계다.
 
 1. `pipelines/source_fetch` 데이터 수집
-2. `pipelines/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 company filter enrichment
+2. `pipelines/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 company filter 판정
 3. `pipelines/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 paper domain classification
 4. `docker compose` 기반 `redis + backend + worker + frontend` 로컬 스택 실행
 
@@ -74,7 +74,7 @@ data/runs/<run_id>/
   logs/
 ```
 
-LLM enrichment 작업 루트:
+LLM 판정/분류 작업 루트:
 
 ```bash
 cd pipelines/llm_enrich
@@ -153,7 +153,7 @@ curl http://127.0.0.1:8787/api/health
 
 브라우저에서 frontend를 열면 active session이 없을 경우 homepage bootstrap이 자동 시작된다. 진행 단계와 fullscreen loading 규칙은 [06. UI Design Guide](./06_ui_design_guide.md), backend session flow는 [03. Runtime Flow](./03_runtime_flow_draft.md)를 따른다.
 
-## 5. Enrichment Run — Company Filter
+## 5. Company Filter Run
 
 현재 canonical prompt pack:
 
@@ -183,10 +183,10 @@ python scripts/llm_enrich.py --limit 12 --chunk-size 6 --sample-mode round_robin
 - recency: `published_at/sort_at` 기준 최근 `90일` 기본
 - source별 최대: `5건` 기본 (`--per-source`로 조절)
 - 553건 → 63건 (15개 소스 × 최대 5건, github_* 제외)으로 줄어든 뒤 LLM에 들어감
-- 출력: `enriched/document_filters.ndjson`
+- 출력: `labels/company_decisions.ndjson`
 - task: `keep / drop / needs_review` + `company_domain`
 
-## 5-b. Enrichment Run — Paper Domain
+## 5-b. Paper Domain Run
 
 canonical prompt pack:
 
@@ -214,7 +214,7 @@ python scripts/paper_enrich.py --dry-run
 
 - 입력: `arxiv_rss_cs_*`, `arxiv_rss_stat_ml`, `hf_daily_papers`
 - recency 필터: 없음 (RSS 피드 자체가 최신)
-- 출력: `enriched/paper_domains.ndjson`
+- 출력: `labels/paper_domains.ndjson`
 - task: 22개 연구 domain 중 하나로 분류
 - default chunk_size: `100` (title-only라 큼)
 
@@ -226,10 +226,10 @@ pipelines/source_fetch/data/runs/<run_id>/
     documents.ndjson          ← 수집 + 정규화된 전체 문서
     metrics.ndjson            ← 수집 통계
     contract_report.json      ← 필드 커버리지 리포트
-  enriched/
-    document_filters.ndjson   ← company panel keep/drop + domain
+  labels/
+    company_decisions.ndjson  ← company panel keep/drop + domain
     paper_domains.ndjson      ← paper panel domain 분류
-    failed_items.ndjson       ← needs_review 항목 모음
+    review_queue.ndjson       ← needs_review 항목 모음
     llm_runs.ndjson           ← 실행 로그 (company_filter, paper_domain 모두 여기에 append)
 ```
 
@@ -239,11 +239,11 @@ pipelines/source_fetch/data/runs/<run_id>/
 
 1. `curl http://localhost:11434/api/tags` 에서 `qwen3.5:4b`가 보여야 한다.
 2. `python scripts/llm_enrich.py --limit 12 --chunk-size 6` 이 종료되어야 한다.
-3. `enriched/document_filters.ndjson` 가 생성되어야 한다.
+3. `labels/company_decisions.ndjson` 가 생성되어야 한다.
 4. `python scripts/paper_enrich.py --dry-run` 이 후보 수를 출력해야 한다.
 5. `python scripts/paper_enrich.py` 가 종료되어야 한다.
-6. `enriched/paper_domains.ndjson` 가 생성되어야 한다.
-7. `enriched/llm_runs.ndjson` 에 `company_filter`와 `paper_domain` 두 phase 로그가 남아야 한다.
+6. `labels/paper_domains.ndjson` 가 생성되어야 한다.
+7. `labels/llm_runs.ndjson` 에 `company_filter`와 `paper_domain` 두 phase 로그가 남아야 한다.
 
 ## 8. Change Discipline
 

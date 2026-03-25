@@ -34,9 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("--run-dir", required=True)
     publish_parser.add_argument("--no-queue", action="store_true")
 
-    enrich_parser = subparsers.add_parser("summarize", help="Run summary enrichment.")
-    enrich_parser.add_argument("--session-id")
-    enrich_parser.add_argument("--once", action="store_true")
+    summarize_parser = subparsers.add_parser("summarize", help="Run document summaries and digests.")
+    summarize_parser.add_argument("--session-id")
+    summarize_parser.add_argument("--once", action="store_true")
 
     reload_parser = subparsers.add_parser("reload", help="Collect, publish, and queue a new session.")
     reload_parser.add_argument("--profile", default=DEFAULT_COLLECTION_PROFILE)
