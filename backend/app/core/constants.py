@@ -37,7 +37,12 @@ OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.7"))
 OLLAMA_TOP_P = float(os.getenv("OLLAMA_TOP_P", "0.8"))
 OLLAMA_TOP_K = int(os.getenv("OLLAMA_TOP_K", "20"))
 OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
-BRIEFING_PROMPT_PACK_PATH = ROOT_DIR / "docs" / "prompt_packs" / "daily_briefing_v1.md"
+BRIEFING_PROMPT_PACKS = {
+    "papers": ROOT_DIR / "docs" / "prompt_packs" / "briefing_papers_v1.md",
+    "company": ROOT_DIR / "docs" / "prompt_packs" / "briefing_company_v1.md",
+    "models": ROOT_DIR / "docs" / "prompt_packs" / "briefing_models_v1.md",
+    "community": ROOT_DIR / "docs" / "prompt_packs" / "briefing_community_v1.md",
+}
 
 SOURCE_CATEGORY_LABELS = {
     "papers": "Papers",

@@ -52,11 +52,6 @@ export function SummaryPanel({
             <p className="orbit-wrap-anywhere whitespace-pre-line text-[0.74rem] leading-[1.6] text-orbit-text">
               {briefing.body_en}
             </p>
-            {briefing.body_kr ? (
-              <p className="orbit-wrap-anywhere whitespace-pre-line text-[0.74rem] leading-[1.6] text-orbit-muted">
-                {briefing.body_kr}
-              </p>
-            ) : null}
           </section>
         ) : null}
         <div className="grid min-h-0 flex-1 gap-2">

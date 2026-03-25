@@ -30,6 +30,7 @@
 2. `pipelines/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 company filter 판정
 3. `pipelines/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 paper domain classification
 4. `docker compose` 기반 `redis + backend + worker + frontend` 로컬 스택 실행
+5. 필요하면 `Ollama + qwen3.5:4b` bundle을 같은 Docker 실행에 추가
 
 아직 이 문서에 없는 절차는 공식 운영 절차로 간주하지 않는다.
 
@@ -90,6 +91,10 @@ pip install -r requirements.lock.txt
 
 ## 4. Local LLM Setup
 
+전체 앱 스택을 띄울 목적이면 이 단계를 먼저 따로 할 필요는 없다. 루트 `bash scripts/docker-up.sh` 가 local LLM bundle 포함 여부를 한 번 묻고, 포함 시 Ollama 컨테이너와 기본 모델 pull까지 함께 처리한다.
+
+아래 절차는 `pipelines/llm_enrich` 만 단독으로 돌리거나, Ollama만 별도로 올리고 싶을 때의 standalone setup이다.
+
 현재 기본 런타임:
 
 - runtime: `Ollama`
@@ -131,24 +136,52 @@ curl http://localhost:11434/api/tags
 
 ## 4-b. Full Local Stack
 
-저장소 루트에서 아래 명령으로 frontend, backend, redis, worker를 함께 띄운다.
+저장소 루트에서 아래 명령으로 frontend, backend, redis, worker를 띄운다. 스크립트가 local LLM bundle 포함 여부를 한 번 묻는다.
 
 ```bash
-docker compose up --build
+bash scripts/docker-up.sh
 ```
+
+LLM bundle을 포함하면 첫 실행은 `qwen3.5:4b` model pull까지 같이 진행하므로 몇 분 걸릴 수 있다.
+
+TTY가 없는 환경에서는 기본값이 `without-llm` 이다. 질문 없이 고정하고 싶으면 아래처럼 직접 지정한다.
+
+```bash
+bash scripts/docker-up.sh --with-llm
+bash scripts/docker-up.sh --without-llm
+```
+
+직접 실행하고 싶다면:
+
+```bash
+# 앱만
+docker compose up --build
+
+# 앱 + Ollama + qwen3.5:4b
+docker compose -f docker-compose.yml -f docker-compose.llm.yml up --build
+```
+
+LLM bundle을 포함해도 model pull이 늦거나 실패하면 앱 스택은 그대로 올라오고, LLM 관련 단계만 pass된다.
 
 기본 주소:
 
 - frontend: `http://127.0.0.1:3000`
 - backend health: `http://127.0.0.1:8787/api/health`
 - redis: `127.0.0.1:6380`
+- ollama tags: `http://127.0.0.1:11434/api/tags` (LLM bundle 포함 시)
 
-Redis host port를 더 바꾸고 싶으면 `SPARKORBIT_REDIS_HOST_PORT` 환경변수로 override할 수 있다.
+Redis host port를 더 바꾸고 싶으면 `SPARKORBIT_REDIS_HOST_PORT`, Ollama host port를 바꾸고 싶으면 `SPARKORBIT_OLLAMA_HOST_PORT` 환경변수로 override할 수 있다.
 
 최소 확인:
 
 ```bash
 curl http://127.0.0.1:8787/api/health
+```
+
+LLM bundle을 포함했다면:
+
+```bash
+curl http://127.0.0.1:11434/api/tags
 ```
 
 브라우저에서 frontend를 열면 active session이 없을 경우 homepage bootstrap이 자동 시작된다. 진행 단계와 fullscreen loading 규칙은 [06. UI Design Guide](./06_ui_design_guide.md), backend session flow는 [03. Runtime Flow](./03_runtime_flow_draft.md)를 따른다.

@@ -84,6 +84,8 @@ pipelines/source_fetch/data/runs/<run_id>/
 - `reference_url`, `canonical_url`, `url`이 모두 비어 있는 문서는 기본 서빙 대상에서 제외한다.
 - `source_manifest.ndjson` 각 row에는 `duration_ms`, `fetch_duration_ms`, `request_count`, `slowest_request_name` 같은 timing summary가 들어간다.
 - `lmarena_overview`는 overview page에서 board link를 찾은 뒤, board별 dedicated page도 추가로 읽어서 전체 leaderboard row를 구조화한다.
+- `raw_responses/`, `raw_items/`, `normalized/`, `labels/`는 run별 canonical artifact다. 이후 demo, export, UI 표시를 위해 내용을 덮어쓰거나 손으로 고치지 않는다.
+- 잘못된 결과를 고치고 싶으면 기존 run artifact를 patch하지 말고, source/parser/rule/prompt를 수정한 뒤 새 run 또는 새 label output을 생성한다.
 
 ## Run Examples
 

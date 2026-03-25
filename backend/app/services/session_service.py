@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -1032,10 +1033,23 @@ def build_briefing_input(
 ) -> dict[str, Any]:
     from datetime import datetime, timedelta, timezone
 
+    issue_domains = {
+        "model_release",
+        "product_update",
+        "open_source",
+        "benchmark_eval",
+        "partnership_ecosystem",
+        "policy_safety",
+    }
+    max_papers = 16
+    max_company = 8
+    max_models = 6
+    max_community = 8
     today = datetime.now(timezone.utc)
     cutoff_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
     category_docs: dict[str, list[dict[str, Any]]] = {}
+    source_docs: dict[str, list[dict[str, Any]]] = {}
     for _source, doc_ids in feed_lists.items():
         for doc_id in doc_ids:
             doc = documents_by_id.get(doc_id)
@@ -1045,8 +1059,11 @@ def build_briefing_input(
                 continue
             cat = str(doc.get("source_category") or "community")
             category_docs.setdefault(cat, []).append(doc)
+            source_docs.setdefault(str(doc.get("source") or ""), []).append(doc)
     for cat in category_docs:
         category_docs[cat] = sort_documents(category_docs[cat])
+    for source in source_docs:
+        source_docs[source] = sort_documents(source_docs[source])
 
     def _title(doc: dict[str, Any]) -> str:
         return compact_text(str(doc.get("title") or ""), 120)
@@ -1055,49 +1072,223 @@ def build_briefing_input(
         ep = doc.get("engagement_primary") or {}
         return int(ep.get("value") or 0)
 
+    def _engagement_metric(doc: dict[str, Any], key: str) -> int:
+        engagement = doc.get("engagement") or {}
+        return int(engagement.get(key) or 0)
+
+    def _top_values(
+        rows: list[dict[str, Any]],
+        key: str,
+        *,
+        limit: int = 3,
+    ) -> list[str]:
+        counter: Counter[str] = Counter()
+        for row in rows:
+            value = str(row.get(key) or "").strip()
+            if value:
+                counter[value] += 1
+        return [value for value, _count in counter.most_common(limit)]
+
+    def _paper_source_group(doc: dict[str, Any]) -> str:
+        source = str(doc.get("source") or "")
+        if source.startswith("arxiv_rss_"):
+            return "arxiv"
+        if source == "hf_daily_papers":
+            return "hf_daily"
+        return "other"
+
+    def _append_community_doc(
+        target: list[dict[str, str]],
+        selected_ids: set[str],
+        doc: dict[str, Any],
+    ) -> None:
+        document_id = str(doc.get("document_id") or "")
+        if not document_id or document_id in selected_ids or len(target) >= max_community:
+            return
+        target.append(
+            {
+                "title": _title(doc),
+                "source": str(doc.get("source") or ""),
+            }
+        )
+        selected_ids.add(document_id)
+
+    def _append_paper_doc(
+        target: list[dict[str, str]],
+        selected_ids: set[str],
+        doc: dict[str, Any],
+    ) -> None:
+        document_id = str(doc.get("document_id") or "")
+        if not document_id or document_id in selected_ids or len(target) >= max_papers:
+            return
+        target.append(
+            {
+                "title": _title(doc),
+                "domain": (doc.get("labels") or {}).get("paper_domain", "others"),
+                "source": str(doc.get("source") or ""),
+                "source_group": _paper_source_group(doc),
+            }
+        )
+        selected_ids.add(document_id)
+
     papers: list[dict[str, str]] = []
-    seen_domains: dict[str, int] = {}
-    for doc in category_docs.get("papers", []):
-        domain = (doc.get("labels") or {}).get("paper_domain", "others")
-        seen_domains.setdefault(domain, 0)
-        if seen_domains[domain] < 2:
-            papers.append({"title": _title(doc), "domain": domain})
-            seen_domains[domain] += 1
-        if len(papers) >= 30:
+    paper_ids: set[str] = set()
+    paper_docs = category_docs.get("papers", [])
+    for source_group, per_group_limit in (
+        ("arxiv", 10),
+        ("hf_daily", 3),
+        ("other", 3),
+    ):
+        for doc in paper_docs:
+            if len(papers) >= max_papers:
+                break
+            if _paper_source_group(doc) != source_group:
+                continue
+            group_selected = sum(
+                1 for row in papers if str(row.get("source_group") or "") == source_group
+            )
+            if group_selected >= per_group_limit:
+                continue
+            _append_paper_doc(papers, paper_ids, doc)
+        if len(papers) >= max_papers:
             break
+    for doc in paper_docs:
+        if len(papers) >= max_papers:
+            break
+        _append_paper_doc(papers, paper_ids, doc)
 
     company: list[dict[str, str]] = []
+    company_ids: set[str] = set()
     for cat in ("company", "company_kr", "company_cn"):
         for doc in category_docs.get(cat, []):
             cl = (doc.get("labels") or {}).get("company", {})
             if cl.get("decision") != "keep":
                 continue
-            company.append({
-                "title": _title(doc),
-                "domain": cl.get("company_domain") or "others",
-                "source": str(doc.get("source") or ""),
-            })
-            if len(company) >= 20:
+            company.append(
+                {
+                    "title": _title(doc),
+                    "domain": cl.get("company_domain") or "others",
+                    "source": str(doc.get("source") or ""),
+                }
+            )
+            company_ids.add(str(doc.get("document_id") or ""))
+            if len(company) >= max_company:
                 break
-        if len(company) >= 20:
+        if len(company) >= max_company:
             break
 
     community: list[dict[str, str]] = []
+    community_ids: set[str] = set()
     for doc in category_docs.get("community", [])[:5]:
-        community.append({
-            "title": _title(doc),
-            "source": str(doc.get("source") or ""),
-        })
+        _append_community_doc(community, community_ids, doc)
+    for source in ("hf_daily_papers", "hf_trending_models", "hf_models_likes"):
+        for doc in source_docs.get(source, [])[:1]:
+            _append_community_doc(community, community_ids, doc)
+            if len(community) >= max_community:
+                break
+        if len(community) >= max_community:
+            break
+    for doc in category_docs.get("community", [])[5:]:
+        _append_community_doc(community, community_ids, doc)
+        if len(community) >= max_community:
+            break
+    for source in ("hf_daily_papers", "hf_trending_models", "hf_models_likes"):
+        for doc in source_docs.get(source, [])[1:]:
+            _append_community_doc(community, community_ids, doc)
+            if len(community) >= max_community:
+                break
+        if len(community) >= max_community:
+            break
 
     models: list[dict[str, Any]] = []
-    for doc in category_docs.get("models", [])[:5]:
-        models.append({
-            "title": _title(doc),
-            "likes": _engagement_value(doc),
-        })
+    model_ids: set[str] = set()
+    for source, per_source_limit in (
+        ("hf_trending_models", 3),
+        ("hf_models_new", 2),
+        ("hf_models_likes", 1),
+    ):
+        for doc in source_docs.get(source, [])[:per_source_limit]:
+            document_id = str(doc.get("document_id") or "")
+            if not document_id or document_id in model_ids or len(models) >= max_models:
+                continue
+            discovery = doc.get("discovery") or {}
+            ranking = doc.get("ranking") or {}
+            metadata = doc.get("metadata") or {}
+            models.append(
+                {
+                    "title": _title(doc),
+                    "source": str(doc.get("source") or ""),
+                    "likes": _engagement_value(doc),
+                    "downloads": _engagement_metric(doc, "downloads"),
+                    "feed_score": int(ranking.get("feed_score") or 0),
+                    "signal_reason": str(ranking.get("priority_reason") or ""),
+                    "discovery_reason": str(discovery.get("primary_reason") or ""),
+                    "freshness": str(discovery.get("freshness_bucket") or ""),
+                    "trend_rank": metadata.get("trending_position"),
+                }
+            )
+            model_ids.add(document_id)
+        if len(models) >= max_models:
+            break
+    for doc in category_docs.get("models", []):
+        document_id = str(doc.get("document_id") or "")
+        if not document_id or document_id in model_ids or len(models) >= max_models:
+            continue
+        discovery = doc.get("discovery") or {}
+        ranking = doc.get("ranking") or {}
+        metadata = doc.get("metadata") or {}
+        models.append(
+            {
+                "title": _title(doc),
+                "source": str(doc.get("source") or ""),
+                "likes": _engagement_value(doc),
+                "downloads": _engagement_metric(doc, "downloads"),
+                "feed_score": int(ranking.get("feed_score") or 0),
+                "signal_reason": str(ranking.get("priority_reason") or ""),
+                "discovery_reason": str(discovery.get("primary_reason") or ""),
+                "freshness": str(discovery.get("freshness_bucket") or ""),
+                "trend_rank": metadata.get("trending_position"),
+            }
+        )
+        model_ids.add(document_id)
+
+    total_selected_ids = paper_ids | company_ids | model_ids | community_ids
+
+    session = {
+        "window": "today",
+        "total_items": len(total_selected_ids),
+        "category_counts": {
+            "papers": len(papers),
+            "company": len(company),
+            "models": len(models),
+            "community": len(community),
+        },
+        "dominant_paper_domains": _top_values(papers, "domain"),
+        "paper_source_groups": _top_values(papers, "source_group"),
+        "dominant_company_domains": _top_values(company, "domain"),
+        "company_issue_domains": _top_values(
+            [row for row in company if str(row.get("domain") or "") in issue_domains],
+            "domain",
+        ),
+        "top_model_names": [row["title"] for row in models[:2]],
+        "active_model_sources": _top_values(models, "source", limit=3),
+        "hf_model_sources": _top_values(
+            [row for row in models if str(row.get("source") or "").startswith("hf_")],
+            "source",
+            limit=3,
+        ),
+        "model_signal_reasons": _top_values(models, "signal_reason", limit=3),
+        "active_community_sources": _top_values(community, "source", limit=2),
+        "hf_community_sources": _top_values(
+            [row for row in community if str(row.get("source") or "").startswith("hf_")],
+            "source",
+            limit=3,
+        ),
+    }
 
     return {
         "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "session": session,
         "papers": papers,
         "company": company,
         "community": community,
@@ -1744,23 +1935,26 @@ def run_session_enrichment(
     ]
     pending_total = len(pending_document_ids)
     provider_name = getattr(generator, "provider_name", generator.__class__.__name__)
+    summary_generation_enabled = provider_name != "noop"
 
     meta["status"] = "summarizing"
     meta["summary_provider"] = provider_name
     meta["updated_at"] = now_utc_iso()
-    meta["loading_stage"] = "summarizing_documents"
+    meta["loading_stage"] = (
+        "summarizing_documents" if summary_generation_enabled else "building_digests"
+    )
     meta["loading_detail"] = (
         f"선택된 문서 {pending_total}건에 대해 요약을 생성하고 있습니다."
-        if pending_total
-        else "요약 대상 문서가 없어 digest 단계로 바로 넘어갑니다."
+        if summary_generation_enabled and pending_total
+        else "category digest를 준비하고 있습니다."
     )
     meta["loading_progress_current"] = 0
-    meta["loading_progress_total"] = pending_total
+    meta["loading_progress_total"] = pending_total if summary_generation_enabled else len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_current_source"] = None
     set_json_with_ttl(store, session_key(session_id, "meta"), meta)
     emit_progress(
         status="summarizing",
-        stage="summarizing_documents",
+        stage=str(meta["loading_stage"]),
         detail=meta["loading_detail"],
         progress_current=meta["loading_progress_current"],
         progress_total=meta["loading_progress_total"],
@@ -1782,6 +1976,8 @@ def run_session_enrichment(
                 continue
             category = str(document.get("source_category") or "community")
             category_documents.setdefault(category, []).append(document)
+            if not summary_generation_enabled:
+                continue
             llm = default_llm_state()
             llm.update(document.get("llm") or {})
             if llm.get("status") != "pending":
@@ -1925,8 +2121,7 @@ def run_session_enrichment(
         )
     elif summaries_ready == 0 and pending_total > 0:
         meta["loading_detail"] = (
-            "LLM provider가 아직 연결되지 않아 문서 요약은 건너뛰고 "
-            f"category digest {len(ORDERED_SOURCE_CATEGORIES)}개만 생성했습니다."
+            f"category digest {len(ORDERED_SOURCE_CATEGORIES)}개 생성을 마쳤습니다."
         )
     else:
         meta["loading_detail"] = (
