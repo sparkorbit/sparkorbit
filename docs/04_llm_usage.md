@@ -21,8 +21,8 @@
 
 | 단계 | 상태 | 코드 | prompt pack |
 |------|------|------|-------------|
-| **Company filter + domain 분류** | 구현 완료, 실행 가능 | `PoC/llm_enrich/scripts/llm_enrich.py` | [company_filter_v2](./prompt_packs/company_filter_v2.md) |
-| **Paper domain 분류** | 구현 완료, 실행 가능 | `PoC/llm_enrich/scripts/paper_enrich.py` | [paper_domain_v1](./prompt_packs/paper_domain_v1.md) |
+| **Company filter + domain 분류** | 구현 완료, 실행 가능 | `pipelines/llm_enrich/scripts/llm_enrich.py` | [company_filter_v2](./prompt_packs/company_filter_v2.md) |
+| **Paper domain 분류** | 구현 완료, 실행 가능 | `pipelines/llm_enrich/scripts/paper_enrich.py` | [paper_domain_v1](./prompt_packs/paper_domain_v1.md) |
 | **Session summary / digest** | 구현 완료, 런타임 사용 중 | `backend/app/services/session_service.py`, `backend/app/services/summary_provider.py` | backend runtime rule/provider |
 | Community panel LLM | 별도 모델 경로는 미구현 | — | — |
 | Benchmark panel LLM | 별도 모델 경로는 미구현 | — | — |
@@ -30,7 +30,7 @@
 
 추가 메모:
 
-- `PoC/llm_enrich`는 run output를 대상으로 한 오프라인 enrichment tooling이다.
+- `pipelines/llm_enrich`는 run output를 대상으로 한 오프라인 enrichment tooling이다.
 - homepage summary lane은 `backend/app` session runtime이 만든 digest를 사용한다.
 - summary provider 기본값은 `noop`이고, `heuristic` provider를 선택할 수 있다.
 
@@ -61,7 +61,7 @@
 
 ```mermaid
 flowchart TD
-    subgraph Collection["수집 파이프라인 — PoC/source_fetch"]
+    subgraph Collection["수집 파이프라인 — pipelines/source_fetch"]
         A["source adapters"] --> B["raw_responses/"] --> C["raw_items/"] --> D["normalized/documents.ndjson"]
     end
 
@@ -69,7 +69,7 @@ flowchart TD
     D --> E2
     D --> E3
 
-    subgraph Enrichment["Offline Enrichment — PoC/llm_enrich"]
+    subgraph Enrichment["Offline Enrichment — pipelines/llm_enrich"]
         E1["Company Filter\n입력: company 계열 문서\n출력: document_filters.ndjson"]
         E2["Paper Domain\n입력: paper 계열 문서\n출력: paper_domains.ndjson"]
     end

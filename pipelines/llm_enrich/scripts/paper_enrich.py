@@ -4,7 +4,7 @@ Reads normalized documents.ndjson, selects paper sources (arXiv + HF daily paper
 and classifies each paper into a research domain using Ollama.
 
 Usage:
-    cd PoC/llm_enrich
+    cd pipelines/llm_enrich
     python scripts/paper_enrich.py
     python scripts/paper_enrich.py --chunk-size 100 --dry-run
 """

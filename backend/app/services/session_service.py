@@ -624,7 +624,7 @@ def build_runtime_items(status: str, *, stage: str | None = None) -> list[dict[s
     return [
         {
             "name": "collector",
-            "role": "PoC/source_fetch run 산출물을 기준 아티팩트로 유지합니다.",
+            "role": "pipelines/source_fetch run 산출물을 기준 아티팩트로 유지합니다.",
             "status": collector_status,
         },
         {
@@ -663,7 +663,7 @@ def build_bootstrap_runtime_items(status: str, stage: str) -> list[dict[str, str
     return [
         {
             "name": "collector",
-            "role": "홈페이지 첫 진입 시 PoC/source_fetch collection을 실행합니다.",
+            "role": "홈페이지 첫 진입 시 pipelines/source_fetch collection을 실행합니다.",
             "status": collector_status,
         },
         {
@@ -760,7 +760,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "runtime": build_bootstrap_runtime_items(status, stage),
             "rules": [
                 "실제 source fetch가 완료될 때까지 collecting 상태를 유지합니다.",
-                "run output는 PoC/source_fetch/data/runs 아래에 계속 저장됩니다.",
+                "run output는 pipelines/source_fetch/data/runs 아래에 계속 저장됩니다.",
                 "publish가 끝나면 active session이 교체되고 프론트 SSE stream이 실제 dashboard로 전환됩니다.",
             ],
             "arenaOverview": None,

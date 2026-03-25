@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         default=str(BASE_DIR / "data" / "runs"),
-        help="Run output root. Default: PoC/source_fetch/data/runs",
+        help="Run output root. Default: pipelines/source_fetch/data/runs",
     )
     parser.add_argument(
         "--run-label",

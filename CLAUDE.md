@@ -17,10 +17,10 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 ## 현재 구현된 코드 범위
 
 ### 데이터 수집
-- `PoC/source_fetch/scripts/data_collection.py` — 단일 CLI entrypoint
-- `PoC/source_fetch/scripts/source_fetch/adapters.py` — source별 fetch/parse
-- `PoC/source_fetch/scripts/source_fetch/models.py` — dataclass
-- `PoC/source_fetch/scripts/source_fetch/pipeline.py` — orchestration
+- `pipelines/source_fetch/scripts/data_collection.py` — 단일 CLI entrypoint
+- `pipelines/source_fetch/scripts/source_fetch/adapters.py` — source별 fetch/parse
+- `pipelines/source_fetch/scripts/source_fetch/models.py` — dataclass
+- `pipelines/source_fetch/scripts/source_fetch/pipeline.py` — orchestration
 
 ### 백엔드 런타임
 - `backend/app/main.py` — FastAPI app entrypoint
@@ -28,7 +28,7 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 - `backend/app/api/routes/sessions.py` — reload state, reload stream
 - `backend/app/api/routes/leaderboards.py` — leaderboard overview
 - `backend/app/services/session_service.py` — bootstrap, reload, publish, digest
-- `backend/app/services/collector.py` — `PoC/source_fetch` wrapper
+- `backend/app/services/collector.py` — `pipelines/source_fetch` wrapper
 - `backend/app/services/summary_provider.py` — summary provider abstraction
 
 ### 프론트엔드
@@ -40,22 +40,22 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 - `src/index.css` — visual tokens, loader, reveal motion
 
 ### LLM Enrichment
-- `PoC/llm_enrich/scripts/llm_enrich.py` — Company filter
-- `PoC/llm_enrich/scripts/paper_enrich.py` — Paper domain classifier
+- `pipelines/llm_enrich/scripts/llm_enrich.py` — Company filter
+- `pipelines/llm_enrich/scripts/paper_enrich.py` — Paper domain classifier
 - `docs/prompt_packs/` — prompt pack 문서 (코드와 1:1 대응)
 
 ### 런타임 레이어 정리
 
-- canonical artifact는 항상 `PoC/source_fetch/data/runs/<run_id>/` 아래 run output이다.
+- canonical artifact는 항상 `pipelines/source_fetch/data/runs/<run_id>/` 아래 run output이다.
 - Redis는 장기 저장소가 아니라 현재 세션을 빠르게 서빙하기 위한 materialized layer다.
 - frontend는 JSONL run output를 직접 읽지 않고 backend API/BFF만 사용한다.
 - homepage bootstrap과 manual reload는 현재 backend가 실제 collection부터 publish, digest까지 연결한다.
-- `PoC/llm_enrich`는 별도 오프라인 enrichment tooling이고, homepage summary lane은 backend session runtime이 만든다.
+- `pipelines/llm_enrich`는 별도 오프라인 enrichment tooling이고, homepage summary lane은 backend session runtime이 만든다.
 
 ### 출력 경로
 
 ```text
-PoC/source_fetch/data/runs/<run_id>/
+pipelines/source_fetch/data/runs/<run_id>/
   normalized/
     documents.ndjson         ← 수집 원본 (전체 문서)
   enriched/
@@ -154,4 +154,4 @@ Paper: `{"id": "...", "title": "..."}`
 - 날짜는 수집 시점에 ISO 8601(UTC)로 변환한다.
 - URL 없는 문서는 기본 서빙 대상에서 제외한다.
 - normalized contract는 shape를 유지한다. 값이 없으면 `null`, `[]`, `{}`를 쓴다.
-- 문서(docs/)와 코드(`PoC/`, `backend/app`, `src`)의 수치, enum, 필드명, loading stage가 어긋나지 않도록 한다. 변경 시 함께 업데이트한다.
+- 문서(`docs/`)와 코드(`pipelines/`, `backend/app`, `src`)의 수치, enum, 필드명, loading stage가 어긋나지 않도록 한다. 변경 시 함께 업데이트한다.

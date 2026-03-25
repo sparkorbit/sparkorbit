@@ -1,13 +1,13 @@
 # LLM Enrich
 
-`PoC/source_fetch` 가 만든 normalized run output을 읽어, local LLM 기반 enrichment를 수행하는 PoC.
+`pipelines/source_fetch` 가 만든 normalized run output을 읽어, local LLM 기반 enrichment를 수행하는 pipeline.
 현재 범위는 `Company / Release` panel용 filtering과 `company_domain` 분류다.
-실제 setup / run / verification 절차의 canonical 문서는 [docs/06_operational_playbook.md](../../docs/06_operational_playbook.md) 이고, 이 README는 LLM PoC quick reference로 유지한다.
+실제 setup / run / verification 절차의 canonical 문서는 [docs/06_operational_playbook.md](../../docs/06_operational_playbook.md) 이고, 이 README는 LLM pipeline quick reference로 유지한다.
 
 ## Setup
 
 ```bash
-cd PoC/llm_enrich
+cd pipelines/llm_enrich
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.lock.txt
@@ -20,7 +20,7 @@ pip install -r requirements.lock.txt
 ### Docker
 
 ```bash
-cd PoC/llm_enrich
+cd pipelines/llm_enrich
 bash scripts/setup_ollama_docker.sh
 ```
 
@@ -66,7 +66,7 @@ python scripts/llm_enrich.py --limit 12 --chunk-size 6 --sample-mode round_robin
 입력:
 
 ```text
-PoC/source_fetch/data/runs/<run_id>/
+pipelines/source_fetch/data/runs/<run_id>/
   normalized/
     documents.ndjson
     metrics.ndjson
@@ -75,7 +75,7 @@ PoC/source_fetch/data/runs/<run_id>/
 출력:
 
 ```text
-PoC/source_fetch/data/runs/<run_id>/
+pipelines/source_fetch/data/runs/<run_id>/
   enriched/
     document_filters.ndjson
     failed_items.ndjson
