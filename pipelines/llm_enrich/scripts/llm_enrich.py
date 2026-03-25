@@ -16,7 +16,7 @@ DEFAULT_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:4b")
 DEFAULT_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "180"))
 DEFAULT_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.7"))
-DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
+DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "131072"))
 DEFAULT_TOP_P = float(os.environ.get("OLLAMA_TOP_P", "0.8"))
 DEFAULT_TOP_K = int(os.environ.get("OLLAMA_TOP_K", "20"))
 DEFAULT_MIN_P = float(os.environ.get("OLLAMA_MIN_P", "0.0"))
@@ -339,7 +339,18 @@ class OllamaClient:
         self.user_prompt_template = user_prompt_template
         self.http = httpx.Client(timeout=timeout_seconds)
 
+    def unload_model(self) -> None:
+        try:
+            self.http.post(
+                f"{self.base_url}/api/chat",
+                json={"model": self.model, "keep_alive": 0},
+                timeout=10.0,
+            )
+        except Exception:
+            pass
+
     def close(self) -> None:
+        self.unload_model()
         self.http.close()
 
     def ping(self) -> None:
@@ -576,7 +587,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--num-ctx",
         type=int,
         default=DEFAULT_NUM_CTX,
-        help="Requested Ollama context length. Default: 8192",
+        help="Requested Ollama context length. Default: 131072",
     )
     parser.add_argument(
         "--top-p",

@@ -159,6 +159,7 @@ const EMPTY_DASHBOARD: DashboardResponse = {
   summary: {
     title: "Category Digest",
     headline: "Backend API를 기다리는 중입니다.",
+    briefing: null,
     digests: [],
   },
   feeds: [],
@@ -2013,6 +2014,7 @@ function App() {
   const summaryPanel = (
     <SummaryPanel
       title={dashboard.summary.title}
+      briefing={dashboard.summary.briefing ?? null}
       digests={dashboard.summary.digests}
       sessionLabel={panelSessionLabel}
       selectedDigestId={selectedDigestId}

@@ -328,6 +328,26 @@ class FailingSummaryGenerator:
         }
 
 
+class StaticBriefingGenerator:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def generate_briefing(self, briefing_input: dict) -> dict:
+        return {
+            "body_en": f"[Papers] Dominant domains on {briefing_input['date']}. [Company News] Signals aligned.",
+            "body_kr": f"[Papers] {briefing_input['date']} 주요 도메인. [Company News] 시그널 정렬됨.",
+            "error": None,
+            "run_meta": {
+                "model_name": "briefing-test",
+                "prompt_version": "daily_briefing_v1",
+                "generated_at": "2026-03-24T00:00:00Z",
+            },
+        }
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class SessionPipelineTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store = MemoryStore()
@@ -723,6 +743,7 @@ class SessionPipelineTests(unittest.TestCase):
         self.assertEqual(dashboard["status"], "ready")
         self.assertEqual(dashboard["session"]["loading"]["stage"], "ready")
         self.assertEqual(dashboard["session"]["loading"]["percent"], 100)
+        self.assertIsNone(dashboard["summary"].get("briefing"))
 
         stored_document = get_document_response(
             self.store,
@@ -750,6 +771,37 @@ class SessionPipelineTests(unittest.TestCase):
         )
         self.assertEqual(document["llm"]["status"], "complete")
         self.assertIsNotNone(document["llm"]["summary_short"])
+
+    def test_briefing_is_persisted_and_survives_dashboard_rebuild(self) -> None:
+        run_dir = self._make_run("2026-03-24T000103Z_briefing")
+        result = publish_run(self.store, run_dir, queue=False)
+        session_id = result["session_id"]
+        briefing_generator = StaticBriefingGenerator()
+
+        summary_result = run_session_enrichment(
+            self.store,
+            session_id,
+            briefing_generator=briefing_generator,
+        )
+
+        self.assertIsNotNone(summary_result["dashboard"]["summary"]["briefing"])
+        self.assertIn(
+            "[Papers]",
+            summary_result["dashboard"]["summary"]["briefing"]["body_en"],
+        )
+        self.assertIsNotNone(
+            summary_result["dashboard"]["summary"]["briefing"]["body_kr"],
+        )
+        self.assertIsNotNone(get_json(self.store, session_key(session_id, "briefing")))
+        self.store.delete(session_key(session_id, "dashboard"))
+
+        rebuilt = get_dashboard_response(self.store, session_id)
+        self.assertIsNotNone(rebuilt["summary"]["briefing"])
+        self.assertEqual(
+            rebuilt["summary"]["briefing"]["body_en"],
+            summary_result["dashboard"]["summary"]["briefing"]["body_en"],
+        )
+        self.assertFalse(briefing_generator.closed)
 
     def test_partial_error_keeps_dashboard_usable(self) -> None:
         run_dir = self._make_run("2026-03-24T000104Z_partial")
@@ -848,6 +900,12 @@ class SessionPipelineTests(unittest.TestCase):
             status="summarizing",
             stage="building_digests",
         )
+        briefing = loading_percent(
+            0,
+            1,
+            status="summarizing",
+            stage="generating_briefing",
+        )
         ready = loading_percent(
             6,
             6,
@@ -860,6 +918,8 @@ class SessionPipelineTests(unittest.TestCase):
         self.assertLess(published, 100)
         self.assertGreaterEqual(summarizing_start, published)
         self.assertLess(summarizing_start, digests_mid)
+        self.assertLess(digests_mid, briefing)
+        self.assertLess(briefing, ready)
         self.assertEqual(ready, 100)
 
     def test_session_reload_state_tracks_real_progress_until_ready(self) -> None:

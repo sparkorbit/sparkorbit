@@ -1,16 +1,37 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
 import re
+from pathlib import Path
 from typing import Any, Protocol
 
-from ..core.constants import DEFAULT_SUMMARY_PROVIDER, SUMMARY_PROVIDER_ENV_VAR
+import httpx
+
+from ..core.constants import (
+    BRIEFING_PROMPT_PACK_PATH,
+    BRIEFING_PROVIDER_ENV_VAR,
+    DEFAULT_BRIEFING_PROVIDER,
+    DEFAULT_SUMMARY_PROVIDER,
+    OLLAMA_BASE_URL,
+    OLLAMA_KEEP_ALIVE,
+    OLLAMA_MODEL,
+    OLLAMA_NUM_CTX,
+    OLLAMA_TEMPERATURE,
+    OLLAMA_TIMEOUT,
+    OLLAMA_TOP_K,
+    OLLAMA_TOP_P,
+    SUMMARY_PROVIDER_ENV_VAR,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def now_utc_iso() -> str:
-    from datetime import UTC, datetime
+    from datetime import datetime, timezone
 
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def compact_text(value: str | None, max_length: int = 124) -> str:
@@ -141,3 +162,183 @@ def build_summary_generator(provider_name: str | None = None) -> SummaryGenerato
     if resolved == "heuristic":
         return HeuristicSummaryGenerator()
     raise ValueError(f"Unknown summary provider: {resolved}")
+
+
+BRIEFING_FORMAT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "body_en": {"type": "string"},
+        "body_kr": {"type": "string"},
+    },
+    "required": ["body_en", "body_kr"],
+    "additionalProperties": False,
+}
+
+
+def _extract_markdown_code_block(text: str, info_string: str) -> str:
+    pattern = rf"```{re.escape(info_string)}\n(.*?)\n```"
+    match = re.search(pattern, text, re.DOTALL)
+    if not match:
+        raise ValueError(f"Code block '{info_string}' not found in prompt pack")
+    return match.group(1).strip()
+
+
+def _load_prompt_pack(path: Path) -> dict[str, str]:
+    markdown_text = path.read_text(encoding="utf-8")
+    return {
+        "system_prompt": _extract_markdown_code_block(markdown_text, "prompt-system"),
+        "user_prompt_template": _extract_markdown_code_block(
+            markdown_text, "prompt-user-template"
+        ),
+    }
+
+
+class BriefingGenerator:
+    provider_name = "ollama"
+    prompt_version = "daily_briefing_v1"
+
+    def __init__(self) -> None:
+        self.base_url = OLLAMA_BASE_URL.rstrip("/")
+        self.model_name = OLLAMA_MODEL
+        self.num_ctx = OLLAMA_NUM_CTX
+        self.temperature = OLLAMA_TEMPERATURE
+        self.top_p = OLLAMA_TOP_P
+        self.top_k = OLLAMA_TOP_K
+        self.keep_alive = OLLAMA_KEEP_ALIVE
+        self.http = httpx.Client(timeout=OLLAMA_TIMEOUT)
+        self._available = True
+
+        pack = _load_prompt_pack(BRIEFING_PROMPT_PACK_PATH)
+        self.system_prompt = pack["system_prompt"]
+        self.user_prompt_template = pack["user_prompt_template"]
+
+        try:
+            resp = self.http.get(f"{self.base_url}/api/tags", timeout=5.0)
+            resp.raise_for_status()
+        except Exception:
+            logger.warning(
+                "Ollama not reachable at %s — briefing will be skipped",
+                self.base_url,
+            )
+            self._available = False
+
+    def unload_model(self) -> None:
+        try:
+            self.http.post(
+                f"{self.base_url}/api/chat",
+                json={"model": self.model_name, "keep_alive": 0},
+                timeout=10.0,
+            )
+        except Exception:
+            pass
+
+    def close(self) -> None:
+        self.unload_model()
+        self.http.close()
+
+    def generate_briefing(self, briefing_input: dict[str, Any]) -> dict[str, Any]:
+        if not self._available:
+            return self._error_result("Ollama not reachable")
+
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": self.system_prompt},
+                {
+                    "role": "user",
+                    "content": self.user_prompt_template.format(
+                        briefing_input_json=json.dumps(
+                            briefing_input, ensure_ascii=False
+                        )
+                    ),
+                },
+            ],
+            "format": BRIEFING_FORMAT_SCHEMA,
+            "stream": False,
+            "think": False,
+            "keep_alive": self.keep_alive,
+            "options": {
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "top_k": self.top_k,
+                "num_ctx": self.num_ctx,
+            },
+        }
+
+        try:
+            resp = self.http.post(f"{self.base_url}/api/chat", json=payload)
+            resp.raise_for_status()
+            body = resp.json()
+            content = (body.get("message") or {}).get("content", "")
+        except Exception as exc:
+            logger.warning("Briefing generation failed: %s", exc)
+            return self._error_result(str(exc))
+
+        try:
+            cleaned = self._strip_markdown_fence(content)
+            raw = json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError):
+            raw = self._parse_plain_text(content)
+
+        return self._wrap_result(raw)
+
+    @staticmethod
+    def _strip_markdown_fence(text: str) -> str:
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            first_newline = stripped.find("\n")
+            if first_newline != -1:
+                stripped = stripped[first_newline + 1 :]
+            if stripped.endswith("```"):
+                stripped = stripped[: -3]
+        return stripped.strip()
+
+    @staticmethod
+    def _parse_plain_text(text: str) -> dict[str, str]:
+        return {"body_en": text.strip(), "body_kr": ""}
+
+    def _wrap_result(self, raw: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "body_en": compact_text(raw.get("body_en") or "", 5000),
+            "body_kr": compact_text(raw.get("body_kr") or "", 5000),
+            "error": None,
+            "run_meta": {
+                "model_name": self.model_name,
+                "prompt_version": self.prompt_version,
+                "generated_at": now_utc_iso(),
+            },
+        }
+
+    def _error_result(self, reason: str) -> dict[str, Any]:
+        return {
+            "body_en": None,
+            "body_kr": None,
+            "error": reason,
+            "run_meta": {
+                "model_name": self.model_name,
+                "prompt_version": self.prompt_version,
+                "generated_at": now_utc_iso(),
+            },
+        }
+
+    def __del__(self) -> None:  # pragma: no cover
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+def build_briefing_generator() -> BriefingGenerator | None:
+    provider_name = (
+        os.environ.get(BRIEFING_PROVIDER_ENV_VAR) or DEFAULT_BRIEFING_PROVIDER
+    ).strip().lower()
+    if provider_name in {"", "off", "none", "disabled", "false", "0"}:
+        return None
+    if provider_name != "ollama":
+        logger.warning("Unknown briefing provider: %s", provider_name)
+        return None
+    try:
+        return BriefingGenerator()
+    except Exception as exc:
+        logger.warning("Failed to initialize BriefingGenerator: %s", exc)
+        return None

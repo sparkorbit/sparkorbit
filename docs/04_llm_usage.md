@@ -381,7 +381,7 @@ HF 공식 non-thinking 일반 작업 권장값을 초기값으로 쓴다.
 | `top_k` | `20` | HF model card |
 | `min_p` | `0.0` | HF model card |
 | `repeat_penalty` | `1.0` | HF의 `repetition_penalty` 대응 |
-| `num_ctx` | `8192` | Ollama default |
+| `num_ctx` | `131072` | SparkOrbit runtime default (128K floor) |
 
 > `presence_penalty=1.5` (HF 권장)는 Ollama native chat options에 1:1 대응이 없어 reference로만 남긴다.
 
@@ -399,7 +399,9 @@ HF 공식 non-thinking 일반 작업 권장값을 초기값으로 쓴다.
 
 근사식: **`input_tokens ≈ 321 + 283 × doc_count`**
 
-`num_ctx=8192`에서 output reserve 1,200~2,000을 남기면 이론상 20~23 docs까지 가능하지만, `reason` 자유 문자열 때문에 output이 예상보다 커질 수 있다.
+runtime default는 `num_ctx=131072`로 올렸지만, 현재는 안정성과 재현성을 우선해 보수적인 chunk_size를 그대로 유지한다.
+
+기존 `num_ctx=8192` 기준으로는 output reserve 1,200~2,000을 남길 때 이론상 20~23 docs까지 가능했지만, `reason` 자유 문자열 때문에 output이 예상보다 커질 수 있었다.
 
 | 설정 | doc 수 | 상태 |
 |------|--------|------|
