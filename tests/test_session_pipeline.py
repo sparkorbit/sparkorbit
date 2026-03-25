@@ -23,6 +23,7 @@ from backend.app.core.constants import (
 )
 from backend.app.core.store import MemoryStore
 from backend.app.services.session_service import (
+    build_briefing_input,
     document_sort_key,
     get_dashboard_response,
     get_document_response,
@@ -39,7 +40,11 @@ from backend.app.services.session_service import (
     session_key,
     start_session_reload,
 )
-from backend.app.services.summary_provider import build_summary_generator
+from backend.app.services.summary_provider import (
+    _build_models_section,
+    _build_today_intro,
+    build_summary_generator,
+)
 
 
 def write_json(path: Path, payload: dict) -> None:
@@ -51,6 +56,16 @@ def write_ndjson(path: Path, rows: list[dict]) -> None:
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
         encoding="utf-8",
     )
+
+
+def read_ndjson_file(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def default_llm_payload() -> dict:
@@ -252,7 +267,6 @@ def build_base_documents(run_id: str) -> list[dict]:
 def build_run_manifest(run_id: str, sources: list[str]) -> dict:
     return {
         "run_id": run_id,
-        "profile": "full",
         "limit": 20,
         "started_at": "2026-03-24T00:00:00Z",
         "finished_at": "2026-03-24T00:01:00Z",
@@ -279,7 +293,6 @@ def build_source_manifest(sources: list[str]) -> list[dict]:
             "duration_ms": 10,
             "raw_response_paths": [],
             "raw_items_path": None,
-            "sample_path": None,
         }
         for source in sources
     ]
@@ -329,6 +342,29 @@ class FailingSummaryGenerator:
                 "generated_at": "2026-03-24T00:00:00Z",
             },
         }
+
+
+class StaticBriefingGenerator:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def generate_briefing(self, briefing_input: dict) -> dict:
+        return {
+            "body_en": (
+                f"[Papers] {briefing_input['date']} papers are clustering around a few visible themes. "
+                "[Company News] Signals aligned."
+            ),
+            "category_summaries": {},
+            "error": None,
+            "run_meta": {
+                "model_name": "briefing-test",
+                "prompt_version": "briefing_mapreduce_v8",
+                "generated_at": "2026-03-24T00:00:00Z",
+            },
+        }
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class SessionPipelineTests(unittest.TestCase):
@@ -407,7 +443,6 @@ class SessionPipelineTests(unittest.TestCase):
 
             manifest, run_dir = collect_run(
                 sources=["all"],
-                profile="smoke",
                 run_label="compat",
                 progress_callback=callback,
             )
@@ -726,13 +761,14 @@ class SessionPipelineTests(unittest.TestCase):
         self.assertEqual(dashboard["status"], "ready")
         self.assertEqual(dashboard["session"]["loading"]["stage"], "ready")
         self.assertEqual(dashboard["session"]["loading"]["percent"], 100)
+        self.assertIsNone(dashboard["summary"].get("briefing"))
 
         stored_document = get_document_response(
             self.store,
             "papers:top",
             session=session_id,
         )
-        self.assertEqual(stored_document["llm"]["status"], "not_implemented")
+        self.assertEqual(stored_document["llm"]["status"], "pending")
 
     def test_custom_summary_provider_can_be_injected(self) -> None:
         run_dir = self._make_run("2026-03-24T000103Z_injected")
@@ -753,6 +789,307 @@ class SessionPipelineTests(unittest.TestCase):
         )
         self.assertEqual(document["llm"]["status"], "complete")
         self.assertIsNotNone(document["llm"]["summary_short"])
+
+    def test_briefing_is_persisted_and_survives_dashboard_rebuild(self) -> None:
+        run_dir = self._make_run("2026-03-24T000103Z_briefing")
+        result = publish_run(self.store, run_dir, queue=False)
+        session_id = result["session_id"]
+        briefing_generator = StaticBriefingGenerator()
+
+        summary_result = run_session_enrichment(
+            self.store,
+            session_id,
+            briefing_generator=briefing_generator,
+        )
+
+        self.assertIsNotNone(summary_result["dashboard"]["summary"]["briefing"])
+        self.assertIn(
+            "[Papers]",
+            summary_result["dashboard"]["summary"]["briefing"]["body_en"],
+        )
+        self.assertIsNotNone(get_json(self.store, session_key(session_id, "briefing")))
+        self.store.delete(session_key(session_id, "dashboard"))
+
+        rebuilt = get_dashboard_response(self.store, session_id)
+        self.assertIsNotNone(rebuilt["summary"]["briefing"])
+        self.assertEqual(
+            rebuilt["summary"]["briefing"]["body_en"],
+            summary_result["dashboard"]["summary"]["briefing"]["body_en"],
+        )
+        self.assertFalse(briefing_generator.closed)
+
+    def test_runtime_summary_artifacts_are_written_to_labels_with_ids(self) -> None:
+        run_dir = self._make_run("2026-03-24T000103Z_runtime-artifacts")
+        result = publish_run(self.store, run_dir, queue=False)
+        session_id = result["session_id"]
+
+        run_session_enrichment(
+            self.store,
+            session_id,
+            generator=build_summary_generator("heuristic"),
+            briefing_generator=StaticBriefingGenerator(),
+        )
+
+        summary_rows = read_ndjson_file(
+            run_dir / "labels" / "session_document_summaries.ndjson"
+        )
+        digest_rows = read_ndjson_file(
+            run_dir / "labels" / "session_category_digests.ndjson"
+        )
+        briefing_rows = read_ndjson_file(
+            run_dir / "labels" / "session_briefings.ndjson"
+        )
+
+        papers_summary = next(
+            row for row in summary_rows if row["document_id"] == "papers:top"
+        )
+        self.assertEqual(
+            papers_summary["summary_id"],
+            f"{session_id}:document:papers:top",
+        )
+        self.assertEqual(papers_summary["status"], "complete")
+        self.assertEqual(papers_summary["provider_name"], "heuristic")
+        self.assertTrue(papers_summary["summary_short"])
+
+        papers_digest = next(row for row in digest_rows if row["category"] == "papers")
+        self.assertEqual(
+            papers_digest["digest_id"],
+            f"{session_id}:digest:papers",
+        )
+        self.assertIn("papers:top", papers_digest["document_ids"])
+
+        self.assertEqual(len(briefing_rows), 1)
+        self.assertEqual(
+            briefing_rows[0]["briefing_id"],
+            f"{session_id}:briefing:daily",
+        )
+        self.assertIn("[Papers]", briefing_rows[0]["body_en"])
+
+    def test_build_briefing_input_caps_items_and_adds_session_overview(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        run_id = "briefing-input"
+        documents: list[dict] = []
+        feed_lists: dict[str, list[str]] = {
+            "arxiv_rss_cs_ai": [],
+            "hf_daily_papers": [],
+            "hf_models_likes": [],
+            "openai_news_rss": [],
+            "google_ai_blog": [],
+            "reddit_machinelearning": [],
+            "hf_models_new": [],
+        }
+
+        for idx in range(14):
+            doc = make_document(
+                run_id=run_id,
+                document_id=f"papers:{idx}",
+                source="arxiv_rss_cs_ai",
+                source_category="papers",
+                title=f"Paper {idx}",
+                feed_score=100 - idx,
+                sort_at=(now - timedelta(hours=idx)).isoformat().replace("+00:00", "Z"),
+                reference_url=f"https://example.com/papers/{idx}",
+            )
+            doc["labels"] = {"paper_domain": "agents" if idx < 8 else "reasoning"}
+            documents.append(doc)
+            feed_lists["arxiv_rss_cs_ai"].append(doc["document_id"])
+
+        for idx in range(10):
+            source = "openai_news_rss" if idx < 5 else "google_ai_blog"
+            category = "company" if idx < 6 else "company_kr"
+            doc = make_document(
+                run_id=run_id,
+                document_id=f"company:{idx}",
+                source=source,
+                source_category=category,
+                title=f"Company {idx}",
+                feed_score=95 - idx,
+                sort_at=(now - timedelta(minutes=idx)).isoformat().replace("+00:00", "Z"),
+                reference_url=f"https://example.com/company/{idx}",
+            )
+            doc["labels"] = {
+                "company": {
+                    "decision": "keep",
+                    "company_domain": "model_release" if idx < 6 else "product_update",
+                }
+            }
+            documents.append(doc)
+            feed_lists[source].append(doc["document_id"])
+
+        for idx in range(8):
+            doc = make_document(
+                run_id=run_id,
+                document_id=f"model:{idx}",
+                source="hf_models_new",
+                source_category="models",
+                title=f"Model {idx}",
+                feed_score=90 - idx,
+                sort_at=(now - timedelta(minutes=30 + idx)).isoformat().replace("+00:00", "Z"),
+                reference_url=f"https://example.com/model/{idx}",
+                doc_type_override="model",
+            )
+            doc["discovery"] = {
+                "is_new": True,
+                "age_hours": 1,
+                "freshness_bucket": "just_now",
+                "spark_score": 95,
+                "spark_bucket": "sparkling",
+                "primary_reason": "new_model_feed",
+            }
+            doc["ranking"] = {
+                "feed_score": 95,
+                "feed_bucket": "top",
+                "age_penalty": 0,
+                "evergreen_bonus": 0,
+                "priority_reason": "fresh_and_hot",
+            }
+            documents.append(doc)
+            feed_lists["hf_models_new"].append(doc["document_id"])
+
+        for idx in range(7):
+            doc = make_document(
+                run_id=run_id,
+                document_id=f"community:{idx}",
+                source="reddit_machinelearning",
+                source_category="community",
+                title=f"Community {idx}",
+                feed_score=80 - idx,
+                sort_at=(now - timedelta(minutes=60 + idx)).isoformat().replace("+00:00", "Z"),
+                reference_url=f"https://example.com/community/{idx}",
+            )
+            documents.append(doc)
+            feed_lists["reddit_machinelearning"].append(doc["document_id"])
+
+        for idx in range(2):
+            doc = make_document(
+                run_id=run_id,
+                document_id=f"hf-paper:{idx}",
+                source="hf_daily_papers",
+                source_category="papers",
+                title=f"HF Daily Paper {idx}",
+                feed_score=70 - idx,
+                sort_at=(now - timedelta(minutes=90 + idx)).isoformat().replace("+00:00", "Z"),
+                reference_url=f"https://example.com/hf-paper/{idx}",
+            )
+            doc["labels"] = {"paper_domain": "evaluation"}
+            documents.append(doc)
+            feed_lists["hf_daily_papers"].append(doc["document_id"])
+
+        for idx in range(2):
+            doc = make_document(
+                run_id=run_id,
+                document_id=f"hf-like:{idx}",
+                source="hf_models_likes",
+                source_category="models",
+                title=f"HF Hype Model {idx}",
+                feed_score=85 - idx,
+                sort_at=(now - timedelta(minutes=120 + idx)).isoformat().replace("+00:00", "Z"),
+                reference_url=f"https://example.com/hf-like/{idx}",
+                doc_type_override="model",
+            )
+            doc["discovery"] = {
+                "is_new": False,
+                "age_hours": 24 * 180,
+                "freshness_bucket": "established",
+                "spark_score": 40,
+                "spark_bucket": "steady",
+                "primary_reason": "established",
+            }
+            doc["ranking"] = {
+                "feed_score": 14,
+                "feed_bucket": "archive",
+                "age_penalty": 38,
+                "evergreen_bonus": 12,
+                "priority_reason": "evergreen",
+            }
+            documents.append(doc)
+            feed_lists["hf_models_likes"].append(doc["document_id"])
+
+        documents_by_id = {doc["document_id"]: doc for doc in documents}
+
+        briefing_input = build_briefing_input(documents_by_id, feed_lists)
+
+        self.assertEqual(len(briefing_input["papers"]), 16)
+        self.assertEqual(len(briefing_input["company"]), 8)
+        self.assertEqual(len(briefing_input["models"]), 6)
+        self.assertEqual(len(briefing_input["community"]), 8)
+        self.assertEqual(briefing_input["session"]["window"], "today")
+        self.assertEqual(briefing_input["session"]["category_counts"]["papers"], 16)
+        self.assertEqual(briefing_input["session"]["category_counts"]["company"], 8)
+        self.assertEqual(briefing_input["session"]["category_counts"]["community"], 8)
+        self.assertIn("agents", briefing_input["session"]["dominant_paper_domains"])
+        self.assertIn("arxiv", briefing_input["session"]["paper_source_groups"])
+        self.assertIn("hf_daily", briefing_input["session"]["paper_source_groups"])
+        self.assertEqual(briefing_input["papers"][0]["source_group"], "arxiv")
+        self.assertIn("source", briefing_input["papers"][0])
+        self.assertIn("model_release", briefing_input["session"]["dominant_company_domains"])
+        self.assertIn("model_release", briefing_input["session"]["company_issue_domains"])
+        self.assertIn("hf_daily_papers", briefing_input["session"]["active_community_sources"])
+        self.assertIn("hf_models_new", briefing_input["session"]["active_model_sources"])
+        self.assertIn("hf_daily_papers", briefing_input["session"]["hf_community_sources"])
+        self.assertIn("hf_models_new", briefing_input["session"]["hf_model_sources"])
+        self.assertIn("fresh_and_hot", briefing_input["session"]["model_signal_reasons"])
+        self.assertEqual(briefing_input["models"][0]["source"], "hf_models_new")
+        self.assertIn("signal_reason", briefing_input["models"][0])
+        self.assertIn("downloads", briefing_input["models"][0])
+
+    def test_today_intro_is_non_numeric_and_handles_no_company_issue(self) -> None:
+        intro = _build_today_intro(
+            {
+                "dominant_paper_domains": ["vlm", "reasoning"],
+                "company_issue_domains": [],
+                "hf_community_sources": ["hf_daily_papers"],
+                "hf_model_sources": ["hf_models_new"],
+            }
+        )
+        self.assertIn("Today’s flow", intro)
+        self.assertIn("no single company issue", intro)
+        self.assertIn("Hugging Face", intro)
+        self.assertNotIn("papers 12", intro)
+
+    def test_models_section_names_top_signal_and_trending_items(self) -> None:
+        section = _build_models_section(
+            {
+                "hf_model_sources": ["hf_trending_models", "hf_models_new"],
+            },
+            [
+                {
+                    "title": "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled",
+                    "source": "hf_trending_models",
+                    "likes": 1247,
+                    "downloads": 173865,
+                    "feed_score": 100,
+                    "trend_rank": 2,
+                },
+                {
+                    "title": "nvidia/Nemotron-Cascade-2-30B-A3B",
+                    "source": "hf_trending_models",
+                    "likes": 282,
+                    "downloads": 38586,
+                    "feed_score": 100,
+                    "trend_rank": 3,
+                },
+                {
+                    "title": "fresh/upload-alpha",
+                    "source": "hf_models_new",
+                    "likes": 0,
+                    "downloads": 0,
+                    "feed_score": 95,
+                    "freshness": "just_now",
+                },
+            ],
+            "",
+        )
+        self.assertIn("Top signal today", section)
+        self.assertIn("Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled", section)
+        self.assertIn("Also trending on Hugging Face", section)
+        self.assertIn("nvidia/Nemotron-Cascade-2-30B-A3B", section)
+        self.assertIn(
+            "Fresh uploads are active, with attention still spread across several new entries.",
+            section,
+        )
 
     def test_partial_error_keeps_dashboard_usable(self) -> None:
         run_dir = self._make_run("2026-03-24T000104Z_partial")
@@ -892,6 +1229,12 @@ class SessionPipelineTests(unittest.TestCase):
             status="summarizing",
             stage="building_digests",
         )
+        briefing = loading_percent(
+            0,
+            1,
+            status="summarizing",
+            stage="generating_briefing",
+        )
         ready = loading_percent(
             6,
             6,
@@ -904,6 +1247,8 @@ class SessionPipelineTests(unittest.TestCase):
         self.assertLess(published, 100)
         self.assertGreaterEqual(summarizing_start, published)
         self.assertLess(summarizing_start, digests_mid)
+        self.assertLess(digests_mid, briefing)
+        self.assertLess(briefing, ready)
         self.assertEqual(ready, 100)
 
     def test_session_reload_state_tracks_real_progress_until_ready(self) -> None:
@@ -952,7 +1297,6 @@ class SessionPipelineTests(unittest.TestCase):
         start_response = start_session_reload(
             self.store,
             schedule_reload=lambda: None,
-            profile="full",
             run_label="redis-session",
         )
         self.assertEqual(start_response["status"], "collecting")
@@ -964,7 +1308,6 @@ class SessionPipelineTests(unittest.TestCase):
         ):
             run_session_reload(
                 self.store,
-                profile="full",
                 run_label="redis-session",
             )
 

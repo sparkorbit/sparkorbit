@@ -1,0 +1,59 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sparkorbit-ollama
+    ports:
+      - "${SPARKORBIT_OLLAMA_HOST_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-30m}"
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: sparkorbit-ollama-init
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen3.5:4b}"
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - >-
+        for _ in $$(seq 1 120); do
+          ollama list >/dev/null 2>&1 && break;
+          sleep 2;
+        done;
+        ollama pull "$${OLLAMA_MODEL}"
+    restart: "no"
+
+  backend:
+    environment:
+      SPARKORBIT_BRIEFING_PROVIDER: "ollama"
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen3.5:4b}"
+    depends_on:
+      - redis
+      - ollama
+
+  worker:
+    environment:
+      SPARKORBIT_BRIEFING_PROVIDER: "ollama"
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen3.5:4b}"
+    depends_on:
+      - redis
+      - ollama
+
+volumes:
+  ollama-data:

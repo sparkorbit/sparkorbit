@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..core.constants import (
-    DEFAULT_COLLECTION_PROFILE,
     DEFAULT_RUNS_DIR,
     DEFAULT_RUN_LABEL,
     SOURCE_FETCH_SCRIPTS_DIR,
@@ -15,7 +14,6 @@ from ..core.constants import (
 def collect_run(
     *,
     sources: list[str] | None = None,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     limit: int | None = None,
     output_dir: str | Path | None = None,
     run_label: str = DEFAULT_RUN_LABEL,
@@ -30,7 +28,6 @@ def collect_run(
 
     return run_collection(
         sources=sources or ["all"],
-        profile=profile,
         limit=limit,
         output_dir=str(output_dir or DEFAULT_RUNS_DIR),
         run_label=run_label,

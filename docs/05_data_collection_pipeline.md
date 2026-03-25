@@ -4,8 +4,8 @@
 
 # SparkOrbit Docs - 05. Data Collection Pipeline
 
-> Implemented PoC
-> 이 문서는 현재 저장소에 실제로 구현된 `PoC/source_fetch` collection pipeline을 설명한다.
+> Implemented pipeline
+> 이 문서는 현재 저장소에 실제로 구현된 `pipelines/source_fetch` collection pipeline을 설명한다.
 
 ## Scope
 
@@ -16,28 +16,26 @@
 - `normalized/documents.ndjson`
 - `normalized/metrics.ndjson`
 - `normalized/contract_report.json`
-- `samples/`
 - `logs/`
 
 실행 시 source별 총 소요 시간과 HTTP request 단위 timing도 함께 기록한다. 따라서 느린 source가 "네트워크 때문인지", "파싱 때문인지"를 run output만으로 다시 확인할 수 있다.
 
 ## Public Entrypoint
 
-- `PoC/source_fetch/scripts/data_collection.py`
+- `pipelines/source_fetch/scripts/data_collection.py`
 
 이 파일이 공식 CLI entrypoint다.
-profile, limit, sources, output_dir, timeout을 받아 `run_collection(...)`을 호출한다.
-실행에 필요한 `PROFILE_LIMITS`, `run_collection`은 같은 저장소의 `source_fetch/pipeline.py`에 있으므로, entrypoint와 pipeline 파일이 함께 commit / push되어 있어야 한다.
-현재 기본 `full` profile은 source당 최대 `20개`를 가져오도록 맞춘다.
+limit, sources, output_dir, timeout을 받아 `run_collection(...)`을 호출한다.
+기본 동작은 source당 최대 `20개`를 가져오도록 맞춘다.
 
 ## Code Layout
 
 | 파일 | 역할 |
 |------|------|
-| `PoC/source_fetch/scripts/data_collection.py` | 단일 CLI entrypoint |
-| `PoC/source_fetch/scripts/source_fetch/adapters.py` | source registry + per-source fetch / parse |
-| `PoC/source_fetch/scripts/source_fetch/models.py` | `SourceConfig`, `FetchResult`, `RawResponse` dataclass |
-| `PoC/source_fetch/scripts/source_fetch/pipeline.py` | orchestration, normalize, filter, ranking, report |
+| `pipelines/source_fetch/scripts/data_collection.py` | 단일 CLI entrypoint |
+| `pipelines/source_fetch/scripts/source_fetch/adapters.py` | source registry + per-source fetch / parse |
+| `pipelines/source_fetch/scripts/source_fetch/models.py` | `SourceConfig`, `FetchResult`, `RawResponse` dataclass |
+| `pipelines/source_fetch/scripts/source_fetch/pipeline.py` | orchestration, normalize, filter, ranking, report |
 
 ## Implemented Flow
 
@@ -50,13 +48,13 @@ data_collection.py
   -> compute discovery + ranking during document normalization
   -> filter out URL-less documents
   -> write documents.ndjson + metrics.ndjson
-  -> write sample preview + manifests + contract report
+  -> write manifests + contract report
 ```
 
 ## Output Structure
 
 ```text
-PoC/source_fetch/data/runs/<run_id>/
+pipelines/source_fetch/data/runs/<run_id>/
   run_manifest.json               ← 실행 메타 (run_id, 시작 시간 등)
   source_manifest.ndjson           ← source별 수집 결과 요약
   raw_responses/                   ← source별 HTTP 응답 원본
@@ -65,12 +63,14 @@ PoC/source_fetch/data/runs/<run_id>/
     documents.ndjson               ← 정규화된 전체 문서 (이후 파이프라인의 입력)
     metrics.ndjson                 ← 수집 통계
     contract_report.json           ← 필드 커버리지 리포트
-  enriched/                        ← LLM enrichment 결과 (llm_enrich가 생성)
-    document_filters.ndjson        ← company panel keep/drop + domain
+  labels/                          ← LLM 판정/분류 결과 (llm_enrich가 생성)
+    company_decisions.ndjson       ← company panel keep/drop + domain
     paper_domains.ndjson           ← paper panel domain 분류
-    failed_items.ndjson            ← needs_review 항목 모음
-    llm_runs.ndjson                ← enrichment 실행 로그
-  samples/                         ← 미리보기용 샘플
+    review_queue.ndjson            ← needs_review 항목 모음
+    llm_runs.ndjson                ← LLM 실행 로그
+    session_document_summaries.ndjson ← session runtime 문서 summary snapshot (후속 단계 생성)
+    session_category_digests.ndjson   ← session runtime category digest snapshot (후속 단계 생성)
+    session_briefings.ndjson          ← session runtime briefing snapshot (후속 단계 생성)
   logs/                            ← 수집 로그
     fetch.ndjson                   ← source별 fetch/normalize/filter/persist timing 요약
     requests.ndjson                ← HTTP request 단위 timing 로그
@@ -84,33 +84,26 @@ PoC/source_fetch/data/runs/<run_id>/
 - `reference_url`, `canonical_url`, `url`이 모두 비어 있는 문서는 기본 서빙 대상에서 제외한다.
 - `source_manifest.ndjson` 각 row에는 `duration_ms`, `fetch_duration_ms`, `request_count`, `slowest_request_name` 같은 timing summary가 들어간다.
 - `lmarena_overview`는 overview page에서 board link를 찾은 뒤, board별 dedicated page도 추가로 읽어서 전체 leaderboard row를 구조화한다.
+- `raw_responses/`, `raw_items/`, `normalized/`, `labels/`는 run별 canonical artifact다. 이후 demo, export, UI 표시를 위해 내용을 덮어쓰거나 손으로 고치지 않는다.
+- 잘못된 결과를 고치고 싶으면 기존 run artifact를 patch하지 말고, source/parser/rule/prompt를 수정한 뒤 새 run 또는 새 label output을 생성한다.
+- `labels/`는 오프라인 enrichment 전용 디렉토리가 아니라, 이후 session runtime이 생성한 summary/briefing snapshot까지 포함하는 LLM/runtime artifact 공간으로 취급한다.
 
 ## Run Examples
-
-설치 확인이나 onboarding 용도로는 `sample` run을 먼저 보는 편이 더 안전하다.
 
 default full run:
 
 ```bash
-cd PoC/source_fetch
+cd pipelines/source_fetch
 . .venv/bin/activate
 python scripts/data_collection.py --run-label full
-```
-
-sample run:
-
-```bash
-cd PoC/source_fetch
-. .venv/bin/activate
-python scripts/data_collection.py --profile sample --run-label sample
 ```
 
 wide run with higher cap:
 
 ```bash
-cd PoC/source_fetch
+cd pipelines/source_fetch
 . .venv/bin/activate
-python scripts/data_collection.py --profile full --limit 30 --run-label max
+python scripts/data_collection.py --limit 30 --run-label max
 ```
 
 ## Current Known Constraints
@@ -125,6 +118,6 @@ python scripts/data_collection.py --profile full --limit 30 --run-label max
 - source 선정 자체는 [02.1 Sources](./02_sections/02_1_sources.md)에서 관리한다.
 - normalized field contract는 [02.2 Fields](./02_sections/02_2_fields.md)에서 본다.
 - Redis session publish, dashboard serving, frontend SSE 흐름은 [03. Runtime Flow](./03_runtime_flow_draft.md)에서 본다.
-- LLM enrichment (company filter, paper domain 등)는 [04. LLM Usage](./04_llm_usage.md)에서 본다.
+- LLM 판정/분류 (company filter, paper domain 등)는 [04. LLM Usage](./04_llm_usage.md)에서 본다.
 - 현재 프론트엔드 시각, 로딩, workspace 규칙은 [06. UI Design Guide](./06_ui_design_guide.md)에서 본다.
 - 실제 setup/run/verification 절차는 [06. Operational Playbook](./06_operational_playbook.md)에서 본다.

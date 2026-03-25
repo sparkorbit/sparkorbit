@@ -16,6 +16,7 @@ services:
     container_name: sparkorbit-backend
     environment:
       SPARKORBIT_REDIS_URL: "redis://redis:6379/0"
+      SPARKORBIT_BRIEFING_PROVIDER: "off"
     depends_on:
       - redis
     ports:
@@ -31,6 +32,7 @@ services:
     environment:
       SPARKORBIT_REDIS_URL: "redis://redis:6379/0"
       SPARKORBIT_WORKER_POLL_INTERVAL: "2"
+      SPARKORBIT_BRIEFING_PROVIDER: "off"
     depends_on:
       - redis
     restart: unless-stopped

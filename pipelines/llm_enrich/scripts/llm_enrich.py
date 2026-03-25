@@ -16,12 +16,16 @@ DEFAULT_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:4b")
 DEFAULT_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "180"))
 DEFAULT_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.7"))
-DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
+DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "131072"))
 DEFAULT_TOP_P = float(os.environ.get("OLLAMA_TOP_P", "0.8"))
 DEFAULT_TOP_K = int(os.environ.get("OLLAMA_TOP_K", "20"))
 DEFAULT_MIN_P = float(os.environ.get("OLLAMA_MIN_P", "0.0"))
 DEFAULT_REPEAT_PENALTY = float(os.environ.get("OLLAMA_REPEAT_PENALTY", "1.0"))
 DEFAULT_RUNS_ROOT = Path(__file__).resolve().parents[2] / "source_fetch" / "data" / "runs"
+LABELS_DIRNAME = "labels"
+COMPANY_DECISIONS_FILENAME = "company_decisions.ndjson"
+REVIEW_QUEUE_FILENAME = "review_queue.ndjson"
+LLM_RUNS_FILENAME = "llm_runs.ndjson"
 
 PROMPT_VERSION = "company_filter_v2"
 SCHEMA_VERSION = "document_filter_v2"
@@ -189,44 +193,6 @@ def company_candidates(
     return selected
 
 
-def sample_candidates(
-    documents: list[dict[str, Any]],
-    *,
-    limit: int | None,
-    mode: str,
-) -> list[dict[str, Any]]:
-    if limit is None or limit >= len(documents):
-        return documents
-    if mode == "first":
-        return documents[:limit]
-    if mode != "round_robin_source":
-        raise ValueError(f"Unsupported sample mode: {mode}")
-
-    buckets: dict[str, list[dict[str, Any]]] = {}
-    order: list[str] = []
-    for document in documents:
-        source = document.get("source") or "unknown"
-        if source not in buckets:
-            buckets[source] = []
-            order.append(source)
-        buckets[source].append(document)
-
-    sampled: list[dict[str, Any]] = []
-    bucket_index = 0
-    while len(sampled) < limit and order:
-        source = order[bucket_index % len(order)]
-        bucket = buckets[source]
-        if bucket:
-            sampled.append(bucket.pop(0))
-        if not bucket:
-            order.remove(source)
-            if not order:
-                break
-            bucket_index -= 1
-        bucket_index += 1
-    return sampled
-
-
 def excerpt_for_prompt(document: dict[str, Any], max_chars: int = 200) -> str:
     """Excerpt for classification — enough context to resolve ambiguous titles."""
     desc = (document.get("description") or "").strip()
@@ -335,7 +301,18 @@ class OllamaClient:
         self.user_prompt_template = user_prompt_template
         self.http = httpx.Client(timeout=timeout_seconds)
 
+    def unload_model(self) -> None:
+        try:
+            self.http.post(
+                f"{self.base_url}/api/chat",
+                json={"model": self.model, "keep_alive": 0},
+                timeout=10.0,
+            )
+        except Exception:
+            pass
+
     def close(self) -> None:
+        self.unload_model()
         self.http.close()
 
     def ping(self) -> None:
@@ -479,19 +456,19 @@ def write_outputs(
     chunk_size: int,
     started_at: str,
 ) -> None:
-    enriched_dir = run_dir / "enriched"
-    enriched_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir = run_dir / LABELS_DIRNAME
+    labels_dir.mkdir(parents=True, exist_ok=True)
 
-    filters_path = enriched_dir / "document_filters.ndjson"
-    failed_path = enriched_dir / "failed_items.ndjson"
-    llm_runs_path = enriched_dir / "llm_runs.ndjson"
+    decisions_path = labels_dir / COMPANY_DECISIONS_FILENAME
+    review_queue_path = labels_dir / REVIEW_QUEUE_FILENAME
+    llm_runs_path = labels_dir / LLM_RUNS_FILENAME
 
-    filters_path.write_text("", encoding="utf-8")
-    failed_path.write_text("", encoding="utf-8")
+    decisions_path.write_text("", encoding="utf-8")
+    review_queue_path.write_text("", encoding="utf-8")
 
-    append_ndjson(filters_path, rows)
-    failed_items = [row for row in rows if row.get("decision") == "needs_review"]
-    append_ndjson(failed_path, failed_items)
+    append_ndjson(decisions_path, rows)
+    review_queue_rows = [row for row in rows if row.get("decision") == "needs_review"]
+    append_ndjson(review_queue_path, review_queue_rows)
 
     run_row = {
         "phase": "company_filter",
@@ -507,13 +484,13 @@ def write_outputs(
         "split_retries": stats["split_retries"],
         "fallback_items": stats["fallback_items"],
         "output_count": len(rows),
-        "needs_review_count": len(failed_items),
+        "needs_review_count": len(review_queue_rows),
     }
     append_ndjson(llm_runs_path, [run_row])
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run company-panel LLM enrichment via local Ollama.")
+    parser = argparse.ArgumentParser(description="Run company-panel LLM decisions via local Ollama.")
     parser.add_argument(
         "--run-dir",
         help="Run directory path. If omitted, the latest source_fetch run is used.",
@@ -521,7 +498,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--runs-root",
         default=str(DEFAULT_RUNS_ROOT),
-        help="Root directory containing source_fetch run outputs. Default: PoC/source_fetch/data/runs",
+        help="Root directory containing source_fetch run outputs. Default: pipelines/source_fetch/data/runs",
     )
     parser.add_argument(
         "--base-url",
@@ -572,7 +549,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--num-ctx",
         type=int,
         default=DEFAULT_NUM_CTX,
-        help="Requested Ollama context length. Default: 8192",
+        help="Requested Ollama context length. Default: 131072",
     )
     parser.add_argument(
         "--top-p",
@@ -603,23 +580,6 @@ def build_parser() -> argparse.ArgumentParser:
         default="30m",
         help="Ollama model keep-alive duration. Default: 30m",
     )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Optional limit on selected company documents for smoke tests.",
-    )
-    parser.add_argument(
-        "--sample-mode",
-        choices=["first", "round_robin_source"],
-        default="first",
-        help="How to choose limited smoke-test samples. Default: first",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Only print candidate counts without calling Ollama.",
-    )
     return parser
 
 
@@ -634,17 +594,13 @@ def main() -> int:
         per_source=args.per_source,
         max_age_days=max_age_days,
     )
-    candidates = sample_candidates(candidates, limit=args.limit, mode=args.sample_mode)
 
     print(f"Run dir: {run_dir}")
     print(f"Loaded documents: {len(documents)}")
     print(f"Company candidates: {len(candidates)}")
 
-    if args.dry_run:
-        return 0
-
     if not candidates:
-        raise SystemExit("No company candidates found for enrichment.")
+        raise SystemExit("No company candidates found for LLM decisions.")
 
     started_at = now_utc_iso()
     stats = {"requests": 0, "split_retries": 0, "fallback_items": 0}
@@ -715,7 +671,7 @@ def main() -> int:
     print(f"  requests: {stats['requests']}")
     print(f"  split_retries: {stats['split_retries']}")
     print(f"  fallback_items: {stats['fallback_items']}")
-    print(f"  output: {run_dir / 'enriched' / 'document_filters.ndjson'}")
+    print(f"  output: {run_dir / LABELS_DIRNAME / COMPANY_DECISIONS_FILENAME}")
     return 0
 
 

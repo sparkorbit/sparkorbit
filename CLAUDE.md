@@ -17,10 +17,10 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 ## 현재 구현된 코드 범위
 
 ### 데이터 수집
-- `PoC/source_fetch/scripts/data_collection.py` — 단일 CLI entrypoint
-- `PoC/source_fetch/scripts/source_fetch/adapters.py` — source별 fetch/parse
-- `PoC/source_fetch/scripts/source_fetch/models.py` — dataclass
-- `PoC/source_fetch/scripts/source_fetch/pipeline.py` — orchestration
+- `pipelines/source_fetch/scripts/data_collection.py` — 단일 CLI entrypoint
+- `pipelines/source_fetch/scripts/source_fetch/adapters.py` — source별 fetch/parse
+- `pipelines/source_fetch/scripts/source_fetch/models.py` — dataclass
+- `pipelines/source_fetch/scripts/source_fetch/pipeline.py` — orchestration
 
 ### 백엔드 런타임
 - `backend/app/main.py` — FastAPI app entrypoint
@@ -28,7 +28,7 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 - `backend/app/api/routes/sessions.py` — reload state, reload stream
 - `backend/app/api/routes/leaderboards.py` — leaderboard overview
 - `backend/app/services/session_service.py` — bootstrap, reload, publish, digest
-- `backend/app/services/collector.py` — `PoC/source_fetch` wrapper
+- `backend/app/services/collector.py` — `pipelines/source_fetch` wrapper
 - `backend/app/services/summary_provider.py` — summary provider abstraction
 
 ### 프론트엔드
@@ -40,30 +40,41 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 - `src/index.css` — visual tokens, loader, reveal motion
 
 ### LLM Enrichment
-- `PoC/llm_enrich/scripts/llm_enrich.py` — Company filter
-- `PoC/llm_enrich/scripts/paper_enrich.py` — Paper domain classifier
+- `pipelines/llm_enrich/scripts/llm_enrich.py` — Company filter
+- `pipelines/llm_enrich/scripts/paper_enrich.py` — Paper domain classifier
 - `docs/prompt_packs/` — prompt pack 문서 (코드와 1:1 대응)
 
 ### 런타임 레이어 정리
 
-- canonical artifact는 항상 `PoC/source_fetch/data/runs/<run_id>/` 아래 run output이다.
+- canonical artifact는 항상 `pipelines/source_fetch/data/runs/<run_id>/` 아래 run output이다.
 - Redis는 장기 저장소가 아니라 현재 세션을 빠르게 서빙하기 위한 materialized layer다.
 - frontend는 JSONL run output를 직접 읽지 않고 backend API/BFF만 사용한다.
 - homepage bootstrap과 manual reload는 현재 backend가 실제 collection부터 publish, digest까지 연결한다.
-- `PoC/llm_enrich`는 별도 오프라인 enrichment tooling이고, homepage summary lane은 backend session runtime이 만든다.
+- `pipelines/llm_enrich`는 별도 오프라인 LLM labeling tooling이고, homepage summary lane은 backend session runtime이 만든다.
 
 ### 출력 경로
 
 ```text
-PoC/source_fetch/data/runs/<run_id>/
+pipelines/source_fetch/data/runs/<run_id>/
   normalized/
     documents.ndjson         ← 수집 원본 (전체 문서)
-  enriched/
-    document_filters.ndjson  ← Company filter 결과
+  labels/
+    company_decisions.ndjson ← Company filter 결과
     paper_domains.ndjson     ← Paper domain 결과
-    failed_items.ndjson      ← needs_review 항목
+    review_queue.ndjson      ← needs_review 항목
     llm_runs.ndjson          ← 실행 로그 (append)
+    session_document_summaries.ndjson ← session runtime 문서 summary snapshot
+    session_category_digests.ndjson   ← session runtime category digest snapshot
+    session_briefings.ndjson          ← session runtime briefing snapshot
 ```
+
+## Artifact Immutability
+
+- `raw_responses/`, `raw_items/`, `normalized/documents.ndjson`, `labels/*.ndjson`는 run별 canonical artifact다.
+- 이 값들은 나중에 재검증, drill-down, 재가공, export에 다시 쓰일 수 있으므로 데모나 UI 표현을 위해 덮어쓰거나 임의 수정하지 않는다.
+- briefing, digest, category summary 같은 LLM/runtime 산출물도 "표시용 임시 문구"가 아니라 재사용 가능한 결과물로 취급한다.
+- 다른 톤, 길이, 우선순위가 필요하면 prompt pack, selection rule, provider 코드를 수정하고 `prompt_version`/run metadata를 올려 다시 생성한다.
+- frontend나 export layer는 line break, section split, truncation 같은 formatting만 할 수 있다. 저장된 summary의 의미를 바꾸는 paraphrase, manual rewrite, silent replacement는 허용하지 않는다.
 
 ## 핵심 원칙
 
@@ -85,7 +96,7 @@ PoC/source_fetch/data/runs/<run_id>/
 
 ## LLM 출력 형식 (코드가 반드시 따를 것)
 
-### Company Filter → `enriched/document_filters.ndjson`
+### Company Filter → `labels/company_decisions.ndjson`
 
 ```json
 {
@@ -110,7 +121,7 @@ PoC/source_fetch/data/runs/<run_id>/
 `reason_code` enum:
 `model_signal | product_signal | research_signal | oss_signal | benchmark_signal | partnership_signal | policy_signal | other_signal | event_or_program | recruiting_or_pr | general_promo | unclear_scope | runtime_fallback`
 
-### Paper Domain → `enriched/paper_domains.ndjson`
+### Paper Domain → `labels/paper_domains.ndjson`
 
 ```json
 {
@@ -141,10 +152,10 @@ Paper: `{"id": "...", "title": "..."}`
 |------|---------|-------|
 | 모델 | qwen3.5:4b | qwen3.5:4b |
 | runtime | Ollama | Ollama |
-| num_ctx | 8192 | 8192 |
+| num_ctx | 131072 | 131072 |
 | pre-LLM 필터 | 90일, source당 5건, github_* 제외 | 없음 (RSS 자체가 최신) |
 | 입력 건수 | 68건 (16개 소스) | 180건 (9개 소스) |
-| chunk_size | 30 | 80 |
+| chunk_size | 30 | 100 |
 | 소요 시간 | ~46초 | ~185초 |
 
 ## 작업 시 주의사항
@@ -154,4 +165,5 @@ Paper: `{"id": "...", "title": "..."}`
 - 날짜는 수집 시점에 ISO 8601(UTC)로 변환한다.
 - URL 없는 문서는 기본 서빙 대상에서 제외한다.
 - normalized contract는 shape를 유지한다. 값이 없으면 `null`, `[]`, `{}`를 쓴다.
-- 문서(docs/)와 코드(`PoC/`, `backend/app`, `src`)의 수치, enum, 필드명, loading stage가 어긋나지 않도록 한다. 변경 시 함께 업데이트한다.
+- 문서(`docs/`)와 코드(`pipelines/`, `backend/app`, `src`)의 수치, enum, 필드명, loading stage가 어긋나지 않도록 한다. 변경 시 함께 업데이트한다.
+- summary/briefing을 later use 대상으로 간주한다. "보여주기 좋게" summary 본문을 손으로 다듬는 방식은 금지하고, 항상 generation rule을 수정한 뒤 재생성한다.

@@ -11,5 +11,5 @@ __pycache__
 *.pyd
 .DS_Store
 .venv
-PoC/source_fetch/.venv
+pipelines/source_fetch/.venv
 docs/archive
