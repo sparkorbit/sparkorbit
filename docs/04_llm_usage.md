@@ -110,6 +110,9 @@ flowchart TD
 | `labels/paper_domains.ndjson` | paper panel domain 분류 |
 | `labels/review_queue.ndjson` | needs_review 항목 모음 |
 | `labels/llm_runs.ndjson` | 실행 로그 (모델, 시간, 통계) |
+| `labels/session_document_summaries.ndjson` | session runtime 문서 summary snapshot |
+| `labels/session_category_digests.ndjson` | session runtime category digest snapshot |
+| `labels/session_briefings.ndjson` | session runtime briefing snapshot |
 | `sparkorbit:session:{sid}:digest:{category}` | backend session runtime이 만든 category digest |
 
 ---

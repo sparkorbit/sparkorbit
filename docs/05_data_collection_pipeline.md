@@ -16,7 +16,6 @@
 - `normalized/documents.ndjson`
 - `normalized/metrics.ndjson`
 - `normalized/contract_report.json`
-- `samples/`
 - `logs/`
 
 실행 시 source별 총 소요 시간과 HTTP request 단위 timing도 함께 기록한다. 따라서 느린 source가 "네트워크 때문인지", "파싱 때문인지"를 run output만으로 다시 확인할 수 있다.
@@ -26,9 +25,8 @@
 - `pipelines/source_fetch/scripts/data_collection.py`
 
 이 파일이 공식 CLI entrypoint다.
-profile, limit, sources, output_dir, timeout을 받아 `run_collection(...)`을 호출한다.
-실행에 필요한 `PROFILE_LIMITS`, `run_collection`은 같은 저장소의 `source_fetch/pipeline.py`에 있으므로, entrypoint와 pipeline 파일이 함께 commit / push되어 있어야 한다.
-현재 기본 `full` profile은 source당 최대 `20개`를 가져오도록 맞춘다.
+limit, sources, output_dir, timeout을 받아 `run_collection(...)`을 호출한다.
+기본 동작은 source당 최대 `20개`를 가져오도록 맞춘다.
 
 ## Code Layout
 
@@ -50,7 +48,7 @@ data_collection.py
   -> compute discovery + ranking during document normalization
   -> filter out URL-less documents
   -> write documents.ndjson + metrics.ndjson
-  -> write sample preview + manifests + contract report
+  -> write manifests + contract report
 ```
 
 ## Output Structure
@@ -70,7 +68,9 @@ pipelines/source_fetch/data/runs/<run_id>/
     paper_domains.ndjson           ← paper panel domain 분류
     review_queue.ndjson            ← needs_review 항목 모음
     llm_runs.ndjson                ← LLM 실행 로그
-  samples/                         ← 미리보기용 샘플
+    session_document_summaries.ndjson ← session runtime 문서 summary snapshot (후속 단계 생성)
+    session_category_digests.ndjson   ← session runtime category digest snapshot (후속 단계 생성)
+    session_briefings.ndjson          ← session runtime briefing snapshot (후속 단계 생성)
   logs/                            ← 수집 로그
     fetch.ndjson                   ← source별 fetch/normalize/filter/persist timing 요약
     requests.ndjson                ← HTTP request 단위 timing 로그
@@ -86,10 +86,9 @@ pipelines/source_fetch/data/runs/<run_id>/
 - `lmarena_overview`는 overview page에서 board link를 찾은 뒤, board별 dedicated page도 추가로 읽어서 전체 leaderboard row를 구조화한다.
 - `raw_responses/`, `raw_items/`, `normalized/`, `labels/`는 run별 canonical artifact다. 이후 demo, export, UI 표시를 위해 내용을 덮어쓰거나 손으로 고치지 않는다.
 - 잘못된 결과를 고치고 싶으면 기존 run artifact를 patch하지 말고, source/parser/rule/prompt를 수정한 뒤 새 run 또는 새 label output을 생성한다.
+- `labels/`는 오프라인 enrichment 전용 디렉토리가 아니라, 이후 session runtime이 생성한 summary/briefing snapshot까지 포함하는 LLM/runtime artifact 공간으로 취급한다.
 
 ## Run Examples
-
-설치 확인이나 onboarding 용도로는 `sample` run을 먼저 보는 편이 더 안전하다.
 
 default full run:
 
@@ -99,20 +98,12 @@ cd pipelines/source_fetch
 python scripts/data_collection.py --run-label full
 ```
 
-sample run:
-
-```bash
-cd pipelines/source_fetch
-. .venv/bin/activate
-python scripts/data_collection.py --profile sample --run-label sample
-```
-
 wide run with higher cap:
 
 ```bash
 cd pipelines/source_fetch
 . .venv/bin/activate
-python scripts/data_collection.py --profile full --limit 30 --run-label max
+python scripts/data_collection.py --limit 30 --run-label max
 ```
 
 ## Current Known Constraints

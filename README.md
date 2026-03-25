@@ -62,7 +62,7 @@ cd sparkorbit/pipelines/source_fetch
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.lock.txt
-python scripts/data_collection.py --profile sample --run-label sample
+python scripts/data_collection.py --limit 1 --run-label quickstart
 ```
 
 설치 확인이 끝나면 기본 `full` 실행으로 넓게 모아볼 수 있다.

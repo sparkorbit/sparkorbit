@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 from collections import Counter
@@ -13,7 +14,6 @@ from ..core.constants import (
     ACTIVE_SESSION_KEY,
     BOOTSTRAP_STATE_KEY,
     BOOTSTRAP_STATE_TTL_SECONDS,
-    DEFAULT_COLLECTION_PROFILE,
     DEFAULT_RUN_LABEL,
     HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     ORDERED_SOURCE_CATEGORIES,
@@ -45,6 +45,12 @@ class RunArtifacts:
     paper_domains: list[dict[str, Any]]
 
 
+logger = logging.getLogger(__name__)
+
+SESSION_DOCUMENT_SUMMARIES_FILENAME = "session_document_summaries.ndjson"
+SESSION_CATEGORY_DIGESTS_FILENAME = "session_category_digests.ndjson"
+SESSION_BRIEFINGS_FILENAME = "session_briefings.ndjson"
+
 _HOMEPAGE_BOOTSTRAP_LOCK = threading.Lock()
 _HOMEPAGE_BOOTSTRAP_RUNNING = False
 _SESSION_RELOAD_LOCK = threading.Lock()
@@ -59,6 +65,10 @@ def now_utc_iso() -> str:
 
 def session_key(session_id: str, suffix: str) -> str:
     return f"{SESSION_PREFIX}:{session_id}:{suffix}"
+
+
+def artifact_root_key(session_id: str) -> str:
+    return session_key(session_id, "artifact_root")
 
 
 def set_homepage_bootstrap_running(is_running: bool) -> None:
@@ -111,6 +121,13 @@ def read_ndjson(path: Path) -> list[dict[str, Any]]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def write_ndjson(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
 
 
 def load_run_artifacts(run_dir: str | Path) -> RunArtifacts:
@@ -354,6 +371,18 @@ def feed_key(session_id: str, source: str) -> str:
 
 def digest_key(session_id: str, category: str) -> str:
     return session_key(session_id, f"digest:{category}")
+
+
+def resolve_session_artifact_root(
+    store: RedisLike,
+    session_id: str,
+    run_manifest: dict[str, Any],
+) -> Path:
+    artifact_root = get_json(store, artifact_root_key(session_id))
+    if isinstance(artifact_root, str) and artifact_root.strip():
+        return Path(artifact_root)
+    run_id = str(run_manifest.get("run_id") or session_id).strip()
+    return DEFAULT_RUNS_DIR / run_id
 
 
 def default_llm_state() -> dict[str, Any]:
@@ -724,7 +753,6 @@ def build_bootstrap_digest_items(status: str) -> list[dict[str, str]]:
 def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
     status = str(state.get("status") or "collecting")
     started_at = str(state.get("started_at") or now_utc_iso())
-    profile = str(state.get("profile") or DEFAULT_COLLECTION_PROFILE)
     error_message = compact_text(state.get("error"), 180)
     stage = str(state.get("stage") or "starting")
     detail = str(
@@ -774,7 +802,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "title": "SparkOrbit Live Bootstrap",
             "sessionId": "bootstrapping",
             "sessionDate": started_at[:10] or "unknown",
-            "window": f"{profile} snapshot",
+            "window": "live snapshot",
             "reloadRule": "홈페이지에서 active session이 없으면 collector가 자동으로 새 run을 만듭니다.",
             "metrics": metrics,
             "runtime": build_bootstrap_runtime_items(status, stage),
@@ -828,7 +856,7 @@ def build_session_block(
         "title": "SparkOrbit Redis Session",
         "sessionId": session_id,
         "sessionDate": session_date or "unknown",
-        "window": f"{run_manifest.get('profile', 'session')} snapshot",
+        "window": "live snapshot",
         "reloadRule": "POST /api/sessions/reload가 새 run을 수집하고 Redis session을 교체합니다.",
         "metrics": [
             {
@@ -1020,6 +1048,130 @@ def build_digest_from_documents(
     digest["document_ids"] = [document["document_id"] for document in documents[:8]]
     digest["updated_at"] = now_utc_iso()
     return digest
+
+
+def build_session_document_summary_rows(
+    session_id: str,
+    run_id: str,
+    documents_by_id: dict[str, dict[str, Any]],
+    *,
+    provider_name: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for document in sort_documents(list(documents_by_id.values())):
+        llm = document.get("llm") or {}
+        run_meta = llm.get("run_meta") or {}
+        document_id = str(document.get("document_id") or "")
+        rows.append(
+            {
+                "summary_id": f"{session_id}:document:{document_id}",
+                "artifact_type": "document_summary",
+                "session_id": session_id,
+                "run_id": run_id,
+                "document_id": document_id,
+                "source": document.get("source"),
+                "source_category": document.get("source_category"),
+                "status": llm.get("status"),
+                "summary_1l": llm.get("summary_1l"),
+                "summary_short": llm.get("summary_short"),
+                "key_points": llm.get("key_points") or [],
+                "entities": llm.get("entities") or [],
+                "primary_domain": llm.get("primary_domain"),
+                "subdomains": llm.get("subdomains") or [],
+                "importance_score": llm.get("importance_score"),
+                "importance_reason": llm.get("importance_reason"),
+                "evidence_chunk_ids": llm.get("evidence_chunk_ids") or [],
+                "provider_name": provider_name,
+                "model_name": run_meta.get("model_name"),
+                "prompt_version": run_meta.get("prompt_version"),
+                "fewshot_pack_version": run_meta.get("fewshot_pack_version"),
+                "generated_at": run_meta.get("generated_at"),
+            }
+        )
+    return rows
+
+
+def build_session_category_digest_rows(
+    session_id: str,
+    run_id: str,
+    digests_by_category: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for category in ORDERED_SOURCE_CATEGORIES:
+        digest = digests_by_category.get(category)
+        if digest is None:
+            continue
+        rows.append(
+            {
+                "digest_id": f"{session_id}:digest:{category}",
+                "artifact_type": "category_digest",
+                "session_id": session_id,
+                "run_id": run_id,
+                "category": category,
+                "domain": SOURCE_CATEGORY_LABELS.get(category, category),
+                "headline": digest.get("headline"),
+                "summary": digest.get("summary"),
+                "evidence": digest.get("evidence"),
+                "document_ids": digest.get("document_ids") or [],
+                "updated_at": digest.get("updated_at"),
+            }
+        )
+    return rows
+
+
+def build_session_briefing_rows(
+    session_id: str,
+    run_id: str,
+    briefing: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if briefing is None:
+        return []
+    run_meta = briefing.get("run_meta") or {}
+    return [
+        {
+            "briefing_id": f"{session_id}:briefing:daily",
+            "artifact_type": "session_briefing",
+            "session_id": session_id,
+            "run_id": run_id,
+            "body_en": briefing.get("body_en"),
+            "category_summaries": briefing.get("category_summaries") or {},
+            "error": briefing.get("error"),
+            "model_name": run_meta.get("model_name"),
+            "prompt_version": run_meta.get("prompt_version"),
+            "generated_at": run_meta.get("generated_at"),
+        }
+    ]
+
+
+def persist_session_runtime_artifacts(
+    run_dir: Path,
+    *,
+    session_id: str,
+    run_id: str,
+    documents_by_id: dict[str, dict[str, Any]],
+    digests_by_category: dict[str, dict[str, Any]],
+    briefing: dict[str, Any] | None,
+    provider_name: str,
+) -> None:
+    labels_dir = run_dir / "labels"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    write_ndjson(
+        labels_dir / SESSION_DOCUMENT_SUMMARIES_FILENAME,
+        build_session_document_summary_rows(
+            session_id,
+            run_id,
+            documents_by_id,
+            provider_name=provider_name,
+        ),
+    )
+    write_ndjson(
+        labels_dir / SESSION_CATEGORY_DIGESTS_FILENAME,
+        build_session_category_digest_rows(session_id, run_id, digests_by_category),
+    )
+    write_ndjson(
+        labels_dir / SESSION_BRIEFINGS_FILENAME,
+        build_session_briefing_rows(session_id, run_id, briefing),
+    )
 
 
 def _is_recent(doc: dict[str, Any], cutoff_date: str) -> bool:
@@ -1467,7 +1619,6 @@ def resolve_session_id(store: RedisLike, session: str | None) -> str:
 def begin_homepage_bootstrap(
     store: RedisLike,
     *,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
 ) -> dict[str, Any]:
     global _HOMEPAGE_BOOTSTRAP_RUNNING
@@ -1475,14 +1626,12 @@ def begin_homepage_bootstrap(
         if _HOMEPAGE_BOOTSTRAP_RUNNING:
             return get_bootstrap_state(store) or build_homepage_bootstrap_state(
                 status="collecting",
-                profile=profile,
                 run_label=run_label,
             )
         _HOMEPAGE_BOOTSTRAP_RUNNING = True
         state = build_homepage_bootstrap_state(
             status="collecting",
-            profile=profile,
-            run_label=run_label,
+                run_label=run_label,
         )
     set_bootstrap_state(store, state)
     return state
@@ -1491,7 +1640,6 @@ def begin_homepage_bootstrap(
 def build_homepage_bootstrap_state(
     *,
     status: str,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     stage: str = "starting",
     detail: str | None = None,
@@ -1502,7 +1650,6 @@ def build_homepage_bootstrap_state(
 ) -> dict[str, Any]:
     return {
         "status": status,
-        "profile": profile,
         "run_label": run_label,
         "stage": stage,
         "detail": detail
@@ -1523,7 +1670,6 @@ def build_homepage_bootstrap_state(
 def begin_session_reload(
     store: RedisLike,
     *,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = DEFAULT_RUN_LABEL,
 ) -> dict[str, Any]:
     global _SESSION_RELOAD_RUNNING
@@ -1531,14 +1677,12 @@ def begin_session_reload(
         if _SESSION_RELOAD_RUNNING:
             return get_reload_state(store) or build_session_reload_state(
                 status="collecting",
-                profile=profile,
                 run_label=run_label,
             )
         _SESSION_RELOAD_RUNNING = True
         state = build_session_reload_state(
             status="collecting",
-            profile=profile,
-            run_label=run_label,
+                run_label=run_label,
         )
     set_reload_state(store, state)
     return state
@@ -1547,7 +1691,6 @@ def begin_session_reload(
 def build_session_reload_state(
     *,
     status: str,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = DEFAULT_RUN_LABEL,
     stage: str = "starting",
     detail: str | None = None,
@@ -1559,7 +1702,6 @@ def build_session_reload_state(
 ) -> dict[str, Any]:
     return {
         "status": status,
-        "profile": profile,
         "run_label": run_label,
         "stage": stage,
         "detail": detail
@@ -1582,7 +1724,6 @@ def update_session_reload_state(
     store: RedisLike,
     *,
     status: str,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = DEFAULT_RUN_LABEL,
     stage: str,
     detail: str,
@@ -1595,7 +1736,6 @@ def update_session_reload_state(
     existing = get_reload_state(store) or {}
     payload = build_session_reload_state(
         status=status,
-        profile=profile,
         run_label=run_label,
         stage=stage,
         detail=detail,
@@ -1764,6 +1904,7 @@ def publish_run(
     }
 
     set_json_with_ttl(store, session_key(session_id, "meta"), meta)
+    set_json_with_ttl(store, artifact_root_key(session_id), str(artifacts.run_dir))
     set_json_with_ttl(
         store, session_key(session_id, "run_manifest"), artifacts.run_manifest
     )
@@ -2152,6 +2293,22 @@ def run_session_enrichment(
         briefing=briefing,
     )
     set_json_with_ttl(store, session_key(session_id, "dashboard"), dashboard)
+    try:
+        persist_session_runtime_artifacts(
+            resolve_session_artifact_root(store, session_id, run_manifest),
+            session_id=session_id,
+            run_id=str(run_manifest.get("run_id") or session_id),
+            documents_by_id=documents_by_id,
+            digests_by_category=digests_by_category,
+            briefing=briefing,
+            provider_name=provider_name,
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.warning(
+            "Failed to persist runtime summary artifacts for %s: %s",
+            session_id,
+            exc,
+        )
     if owns_briefing_generator and briefing_generator is not None:
         close = getattr(briefing_generator, "close", None)
         if callable(close):
@@ -2185,7 +2342,6 @@ def update_bootstrap_state(
     store: RedisLike,
     *,
     status: str,
-    profile: str,
     run_label: str,
     stage: str,
     detail: str,
@@ -2197,7 +2353,6 @@ def update_bootstrap_state(
     existing = get_bootstrap_state(store) or {}
     payload = build_homepage_bootstrap_state(
         status=status,
-        profile=profile,
         run_label=run_label,
         stage=stage,
         detail=detail,
@@ -2213,7 +2368,6 @@ def update_bootstrap_state(
 def run_homepage_bootstrap(
     store: RedisLike,
     *,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     timeout: float = 30.0,
 ) -> None:
@@ -2222,7 +2376,6 @@ def run_homepage_bootstrap(
             update_bootstrap_state(
                 store,
                 status="collecting",
-                profile=profile,
                 run_label=run_label,
                 stage=str(event.get("stage") or "fetching_sources"),
                 detail=str(
@@ -2242,7 +2395,6 @@ def run_homepage_bootstrap(
             update_bootstrap_state(
                 store,
                 status=str(event.get("status") or "collecting"),
-                profile=profile,
                 run_label=run_label,
                 stage=str(event.get("stage") or "publishing_documents"),
                 detail=str(
@@ -2259,7 +2411,6 @@ def run_homepage_bootstrap(
             )
 
         _, run_dir = collect_run(
-            profile=profile,
             run_label=run_label,
             timeout=timeout,
             progress_callback=handle_collect_progress,
@@ -2278,7 +2429,6 @@ def run_homepage_bootstrap(
             store,
             build_homepage_bootstrap_state(
                 status="error",
-                profile=profile,
                 run_label=run_label,
                 stage=str(current_state.get("stage") or "error"),
                 detail="자동 수집 중 오류가 발생했습니다.",
@@ -2300,7 +2450,6 @@ def run_session_reload(
     store: RedisLike,
     *,
     sources: list[str] | None = None,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     limit: int | None = None,
     output_dir: str | Path | None = None,
     run_label: str = DEFAULT_RUN_LABEL,
@@ -2311,7 +2460,6 @@ def run_session_reload(
             update_session_reload_state(
                 store,
                 status="collecting",
-                profile=profile,
                 run_label=run_label,
                 stage=str(event.get("stage") or "fetching_sources"),
                 detail=str(
@@ -2336,7 +2484,6 @@ def run_session_reload(
             update_session_reload_state(
                 store,
                 status=str(event.get("status") or "summarizing"),
-                profile=profile,
                 run_label=run_label,
                 stage=str(event.get("stage") or "summarizing_documents"),
                 detail=str(
@@ -2361,7 +2508,6 @@ def run_session_reload(
             update_session_reload_state(
                 store,
                 status=str(event.get("status") or "collecting"),
-                profile=profile,
                 run_label=run_label,
                 stage=str(event.get("stage") or "publishing_documents"),
                 detail=str(
@@ -2384,8 +2530,7 @@ def run_session_reload(
 
         run_manifest, run_dir = collect_run(
             sources=sources,
-            profile=profile,
-            limit=limit,
+                limit=limit,
             output_dir=output_dir,
             run_label=run_label,
             timeout=timeout,
@@ -2406,8 +2551,7 @@ def run_session_reload(
         update_session_reload_state(
             store,
             status=str(meta.get("status") or "ready"),
-            profile=profile,
-            run_label=run_label,
+                run_label=run_label,
             stage=str(meta.get("loading_stage") or meta.get("status") or "ready"),
             detail=str(
                 meta.get("loading_detail")
@@ -2428,7 +2572,6 @@ def run_session_reload(
             store,
             build_session_reload_state(
                 status="error",
-                profile=profile,
                 run_label=run_label,
                 stage=str(current_state.get("stage") or "error"),
                 detail="reload 처리 중 오류가 발생했습니다.",
@@ -2456,7 +2599,6 @@ def start_session_reload(
     *,
     schedule_reload: Callable[[], None],
     sources: list[str] | None = None,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     limit: int | None = None,
     output_dir: str | Path | None = None,
     run_label: str = DEFAULT_RUN_LABEL,
@@ -2468,7 +2610,6 @@ def start_session_reload(
 
     state = begin_session_reload(
         store,
-        profile=profile,
         run_label=run_label,
     )
     try:
@@ -2483,7 +2624,6 @@ def get_or_bootstrap_dashboard_response(
     store: RedisLike,
     *,
     schedule_bootstrap: Callable[[], None],
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
 ) -> dict[str, Any]:
     try:
@@ -2498,8 +2638,7 @@ def get_or_bootstrap_dashboard_response(
 
         bootstrap_state = begin_homepage_bootstrap(
             store,
-            profile=profile,
-            run_label=run_label,
+                run_label=run_label,
         )
         try:
             schedule_bootstrap()
@@ -2619,7 +2758,6 @@ def reload_session(
     store: RedisLike,
     *,
     sources: list[str] | None = None,
-    profile: str = DEFAULT_COLLECTION_PROFILE,
     limit: int | None = None,
     output_dir: str | Path | None = None,
     run_label: str = DEFAULT_RUN_LABEL,
@@ -2628,7 +2766,6 @@ def reload_session(
 ) -> dict[str, Any]:
     _, run_dir = collect_run(
         sources=sources,
-        profile=profile,
         limit=limit,
         output_dir=output_dir,
         run_label=run_label,

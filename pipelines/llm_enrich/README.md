@@ -47,9 +47,6 @@ python scripts/llm_enrich.py
 
 # 특정 source_fetch run에 대해 실행
 python scripts/llm_enrich.py --run-dir ../source_fetch/data/runs/<run_id>
-
-# smoke test
-python scripts/llm_enrich.py --limit 12 --chunk-size 6 --sample-mode round_robin_source
 ```
 
 ## Defaults
