@@ -120,7 +120,7 @@ const EMPTY_DASHBOARD: DashboardResponse = {
     runtime: [
       {
         name: "collector",
-        role: "백엔드가 PoC/source_fetch collection을 실행합니다.",
+        role: "백엔드가 pipelines/source_fetch collection을 실행합니다.",
         status: "waiting",
       },
       {

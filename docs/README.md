@@ -27,6 +27,6 @@
 
 ## Reality Check
 
-- 현재 저장소에는 `PoC/source_fetch`뿐 아니라 `backend/app` FastAPI runtime과 `src` React frontend도 구현되어 있다.
-- canonical source of truth는 여전히 `PoC/source_fetch/data/runs/<run_id>/` 산출물이다.
+- 현재 저장소에는 `pipelines/source_fetch`뿐 아니라 `backend/app` FastAPI runtime과 `src` React frontend도 구현되어 있다.
+- canonical source of truth는 여전히 `pipelines/source_fetch/data/runs/<run_id>/` 산출물이다.
 - Redis는 세션 serving layer이고, frontend는 backend API/BFF만 사용한다.

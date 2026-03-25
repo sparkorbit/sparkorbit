@@ -5,7 +5,7 @@
 # SparkOrbit Docs - 02.2 Normalized Document Fields
 
 > 수집 후 정규화된 문서(documents.ndjson)의 필드 레퍼런스
-> PoC 실데이터 기준: 2026-03-23
+> 실데이터 기준: 2026-03-23
 
 ## Purpose
 
@@ -28,7 +28,7 @@
 
 ## 1. Document 최상위 필드
 
-"필수"는 **화면 표시를 위해 강하게 기대하는 필드**를 뜻한다. 다만 현재 PoC 구현에서 실제 hard filter는 `title + displayable URL` 기준이고, 시간 필드는 `published_at` 대신 `sort_at` fallback을 허용한다.
+"필수"는 **화면 표시를 위해 강하게 기대하는 필드**를 뜻한다. 다만 현재 구현에서 실제 hard filter는 `title + displayable URL` 기준이고, 시간 필드는 `published_at` 대신 `sort_at` fallback을 허용한다.
 
 ### 1.1 필수 필드 (화면 표시용)
 
@@ -38,7 +38,7 @@
 | `reference_url` | string | 클릭 시 이동할 URL (Level 3 드릴다운 대상) |
 | `source` | string | 소스 어댑터 이름. 섹션 배치와 라벨 표시에 사용 |
 | `source_category` | string | 소스 그룹 분류. UI 섹션 매핑 기준 |
-| `published_at` | string (UTC) | 게시 시점. 가장 좋은 시간 필드지만, 현재 PoC는 없을 경우 `sort_at` fallback을 허용 |
+| `published_at` | string (UTC) | 게시 시점. 가장 좋은 시간 필드지만, 현재 구현은 없을 경우 `sort_at` fallback을 허용 |
 | `tags` | list[string] | 키워드 클러스터링, 필터, 검색에 사용 |
 | `engagement` | object | 소스별 engagement 지표. 핫한 정도 판단과 정렬 기준 |
 | `engagement_primary` | object | 대표 engagement 1개. `{name, value}` 형태로 소스 간 비교 가능 |

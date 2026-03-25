@@ -10,8 +10,8 @@
 
 ## Current Code Reality
 
-- 실제 구현은 `PoC/source_fetch` collection pipeline이다.
-- 공식 CLI entrypoint는 `PoC/source_fetch/scripts/data_collection.py`
+- 실제 구현은 `pipelines/source_fetch` collection pipeline이다.
+- 공식 CLI entrypoint는 `pipelines/source_fetch/scripts/data_collection.py`
 - 핵심 구현은 `adapters.py`, `models.py`, `pipeline.py`
 - Redis/UI는 아직 target architecture 문서 단계다.
 

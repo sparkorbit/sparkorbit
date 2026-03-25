@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
-SOURCE_FETCH_SCRIPTS_DIR = ROOT_DIR / "PoC" / "source_fetch" / "scripts"
-DEFAULT_RUNS_DIR = ROOT_DIR / "PoC" / "source_fetch" / "data" / "runs"
+SOURCE_FETCH_SCRIPTS_DIR = ROOT_DIR / "pipelines" / "source_fetch" / "scripts"
+DEFAULT_RUNS_DIR = ROOT_DIR / "pipelines" / "source_fetch" / "data" / "runs"
 
 SESSION_PREFIX = "sparkorbit:session"
 ACTIVE_SESSION_KEY = f"{SESSION_PREFIX}:active"

@@ -4,8 +4,8 @@
 
 # SparkOrbit Docs - 05. Data Collection Pipeline
 
-> Implemented PoC
-> 이 문서는 현재 저장소에 실제로 구현된 `PoC/source_fetch` collection pipeline을 설명한다.
+> Implemented pipeline
+> 이 문서는 현재 저장소에 실제로 구현된 `pipelines/source_fetch` collection pipeline을 설명한다.
 
 ## Scope
 
@@ -23,7 +23,7 @@
 
 ## Public Entrypoint
 
-- `PoC/source_fetch/scripts/data_collection.py`
+- `pipelines/source_fetch/scripts/data_collection.py`
 
 이 파일이 공식 CLI entrypoint다.
 profile, limit, sources, output_dir, timeout을 받아 `run_collection(...)`을 호출한다.
@@ -34,10 +34,10 @@ profile, limit, sources, output_dir, timeout을 받아 `run_collection(...)`을 
 
 | 파일 | 역할 |
 |------|------|
-| `PoC/source_fetch/scripts/data_collection.py` | 단일 CLI entrypoint |
-| `PoC/source_fetch/scripts/source_fetch/adapters.py` | source registry + per-source fetch / parse |
-| `PoC/source_fetch/scripts/source_fetch/models.py` | `SourceConfig`, `FetchResult`, `RawResponse` dataclass |
-| `PoC/source_fetch/scripts/source_fetch/pipeline.py` | orchestration, normalize, filter, ranking, report |
+| `pipelines/source_fetch/scripts/data_collection.py` | 단일 CLI entrypoint |
+| `pipelines/source_fetch/scripts/source_fetch/adapters.py` | source registry + per-source fetch / parse |
+| `pipelines/source_fetch/scripts/source_fetch/models.py` | `SourceConfig`, `FetchResult`, `RawResponse` dataclass |
+| `pipelines/source_fetch/scripts/source_fetch/pipeline.py` | orchestration, normalize, filter, ranking, report |
 
 ## Implemented Flow
 
@@ -56,7 +56,7 @@ data_collection.py
 ## Output Structure
 
 ```text
-PoC/source_fetch/data/runs/<run_id>/
+pipelines/source_fetch/data/runs/<run_id>/
   run_manifest.json               ← 실행 메타 (run_id, 시작 시간 등)
   source_manifest.ndjson           ← source별 수집 결과 요약
   raw_responses/                   ← source별 HTTP 응답 원본
@@ -92,7 +92,7 @@ PoC/source_fetch/data/runs/<run_id>/
 default full run:
 
 ```bash
-cd PoC/source_fetch
+cd pipelines/source_fetch
 . .venv/bin/activate
 python scripts/data_collection.py --run-label full
 ```
@@ -100,7 +100,7 @@ python scripts/data_collection.py --run-label full
 sample run:
 
 ```bash
-cd PoC/source_fetch
+cd pipelines/source_fetch
 . .venv/bin/activate
 python scripts/data_collection.py --profile sample --run-label sample
 ```
@@ -108,7 +108,7 @@ python scripts/data_collection.py --profile sample --run-label sample
 wide run with higher cap:
 
 ```bash
-cd PoC/source_fetch
+cd pipelines/source_fetch
 . .venv/bin/activate
 python scripts/data_collection.py --profile full --limit 30 --run-label max
 ```

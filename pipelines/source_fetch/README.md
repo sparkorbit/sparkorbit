@@ -1,14 +1,14 @@
 # Source Fetch
 
-37개 AI/Tech source에서 데이터를 수집하는 collection PoC.
+37개 AI/Tech source에서 데이터를 수집하는 collection pipeline.
 Redis 없이 `raw -> normalized` 파일로 저장한다.
-후속 LLM enrichment 코드는 [PoC/llm_enrich](../llm_enrich/) 에서 따로 관리한다.
+후속 LLM enrichment 코드는 [pipelines/llm_enrich](../llm_enrich/) 에서 따로 관리한다.
 실제 setup / run / verification 절차의 canonical 문서는 [docs/06_operational_playbook.md](../../docs/06_operational_playbook.md) 이고, 이 README는 collection quick reference로 유지한다.
 
 ## Setup
 
 ```bash
-cd PoC/source_fetch
+cd pipelines/source_fetch
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.lock.txt
@@ -27,9 +27,9 @@ python scripts/data_collection.py --run-label full
 python scripts/data_collection.py --sources hf_daily_papers hn_topstories --limit 2 --run-label quick
 ```
 
-## Handoff To LLM PoC
+## Handoff To LLM Pipeline
 
-수집이 끝나면 `PoC/llm_enrich` 가 이 run output을 읽어 후속 enrichment를 수행한다.
+수집이 끝나면 `pipelines/llm_enrich` 가 이 run output을 읽어 후속 enrichment를 수행한다.
 
 즉 경계는 아래와 같다.
 
@@ -52,7 +52,7 @@ data/runs/<run_id>/
   logs/
 ```
 
-`enriched/` 아래 결과는 `PoC/llm_enrich` 실행 후 같은 run 디렉터리에 추가된다.
+`enriched/` 아래 결과는 `pipelines/llm_enrich` 실행 후 같은 run 디렉터리에 추가된다.
 
 ## Files
 

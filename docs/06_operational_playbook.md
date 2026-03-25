@@ -26,9 +26,9 @@
 
 현재 실제로 usable 하게 맞춘 절차는 아래 네 단계다.
 
-1. `PoC/source_fetch` 데이터 수집
-2. `PoC/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 company filter enrichment
-3. `PoC/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 paper domain classification
+1. `pipelines/source_fetch` 데이터 수집
+2. `pipelines/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 company filter enrichment
+3. `pipelines/llm_enrich` 에서 `Ollama + qwen3.5:4b` 기반 paper domain classification
 4. `docker compose` 기반 `redis + backend + worker + frontend` 로컬 스택 실행
 
 아직 이 문서에 없는 절차는 공식 운영 절차로 간주하지 않는다.
@@ -38,7 +38,7 @@
 Collection 작업 루트:
 
 ```bash
-cd PoC/source_fetch
+cd pipelines/source_fetch
 ```
 
 Python 환경:
@@ -77,7 +77,7 @@ data/runs/<run_id>/
 LLM enrichment 작업 루트:
 
 ```bash
-cd PoC/llm_enrich
+cd pipelines/llm_enrich
 ```
 
 Python 환경:
@@ -221,7 +221,7 @@ python scripts/paper_enrich.py --dry-run
 ## 6. Outputs
 
 ```text
-PoC/source_fetch/data/runs/<run_id>/
+pipelines/source_fetch/data/runs/<run_id>/
   normalized/
     documents.ndjson          ← 수집 + 정규화된 전체 문서
     metrics.ndjson            ← 수집 통계
@@ -250,7 +250,7 @@ PoC/source_fetch/data/runs/<run_id>/
 운영 절차를 바꿀 때는 아래를 같이 본다.
 
 1. 이 문서를 먼저 수정한다.
-2. 필요하면 `PoC/source_fetch/README.md`, `PoC/llm_enrich/README.md`, root `README.md` 를 같이 맞춘다.
+2. 필요하면 `pipelines/source_fetch/README.md`, `pipelines/llm_enrich/README.md`, root `README.md` 를 같이 맞춘다.
 3. target design 변경이면 `04` 또는 `03`도 같이 수정한다.
 
 즉, 코드보다 문서가 먼저가 아니라도 되지만, **머지 시점에는 문서와 절차가 항상 일치해야 한다.**

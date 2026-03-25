@@ -521,7 +521,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--runs-root",
         default=str(DEFAULT_RUNS_ROOT),
-        help="Root directory containing source_fetch run outputs. Default: PoC/source_fetch/data/runs",
+        help="Root directory containing source_fetch run outputs. Default: pipelines/source_fetch/data/runs",
     )
     parser.add_argument(
         "--base-url",

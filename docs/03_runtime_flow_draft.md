@@ -21,7 +21,7 @@
 
 | Component | Path | Role |
 |----------|------|------|
-| **collector wrapper** | `backend/app/services/collector.py` | `PoC/source_fetch`의 `run_collection(...)` 호출 |
+| **collector wrapper** | `backend/app/services/collector.py` | `pipelines/source_fetch`의 `run_collection(...)` 호출 |
 | **session runtime** | `backend/app/services/session_service.py` | bootstrap, reload, publish, summarize, dashboard rebuild |
 | **summary provider** | `backend/app/services/summary_provider.py` | `noop` / `heuristic` provider abstraction |
 | **FastAPI app** | `backend/app/main.py` | `/api/*` 라우터와 app wiring |
@@ -37,7 +37,7 @@
 
 runtime이 붙어도 canonical artifact는 바뀌지 않는다.
 
-1. `PoC/source_fetch`가 `PoC/source_fetch/data/runs/<run_id>/` 아래 run output를 만든다.
+1. `pipelines/source_fetch`가 `pipelines/source_fetch/data/runs/<run_id>/` 아래 run output를 만든다.
 2. backend는 이 run output를 읽어 Redis session 키를 만든다.
 3. frontend는 JSONL run output를 직접 읽지 않고 backend API/BFF만 사용한다.
 
@@ -55,7 +55,7 @@ sequenceDiagram
     participant UI as Frontend
     participant API as FastAPI backend
     participant REDIS as Redis
-    participant COLLECT as PoC/source_fetch
+    participant COLLECT as pipelines/source_fetch
     participant RUN as run outputs
 
     UI->>API: GET /api/dashboard/stream?session=active
