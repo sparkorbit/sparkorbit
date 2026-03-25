@@ -5,6 +5,10 @@ import {
   FullscreenLoading,
   SettingsModal,
 } from "./components/app/AppChrome";
+import {
+  PayloadDebugPanel,
+  type PayloadDebugSnapshot,
+} from "./components/app/PayloadDebugPanel";
 import { LeaderboardPanel } from "./components/dashboard/LeaderboardPanel";
 import { PanelWorkspace } from "./components/dashboard/PanelWorkspace";
 import { SourcePanel } from "./components/dashboard/SourcePanel";
@@ -48,12 +52,72 @@ import type {
   SessionReloadStateResponse,
 } from "./types/dashboard";
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function extractPayloadStatus(payload: unknown) {
+  const record = asRecord(payload);
+  return asString(record?.status);
+}
+
+function extractPayloadSessionId(payload: unknown) {
+  const record = asRecord(payload);
+  const session = asRecord(record?.session);
+
+  return (
+    asString(record?.sessionId) ??
+    asString(record?.session_id) ??
+    asString(session?.sessionId)
+  );
+}
+
+function stringifyPayload(payload: unknown) {
+  try {
+    return JSON.stringify(payload, null, 2);
+  } catch {
+    return String(payload);
+  }
+}
+
+function buildFeedSourceSummary(feed: DashboardResponse["feeds"][number]) {
+  const uniqueSources = Array.from(
+    new Set(feed.items.map((item) => item.source).filter(Boolean)),
+  );
+
+  if (uniqueSources.length === 0) {
+    return feed.sourceNote || null;
+  }
+
+  const visibleSources = uniqueSources.slice(0, 2).join(" / ");
+  const extraCount =
+    uniqueSources.length > 2 ? ` +${uniqueSources.length - 2}` : "";
+
+  return `${visibleSources}${extraCount}`;
+}
+
 function App() {
-  const [dashboard, setDashboard] = useState<DashboardResponse>(EMPTY_DASHBOARD);
+  const [dashboard, setDashboard] =
+    useState<DashboardResponse>(EMPTY_DASHBOARD);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [detailState, setDetailState] = useState<DetailState>(null);
   const [selectedDigestId, setSelectedDigestId] = useState<string | null>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
+    null,
+  );
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
   const [isReloading, setIsReloading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -65,41 +129,90 @@ function App() {
     useState<SessionArenaOverview | null>(null);
   const [isLoadingLeaderboards, setIsLoadingLeaderboards] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
-  const [selectedLeaderboardId, setSelectedLeaderboardId] =
-    useState<string | null>(null);
+  const [selectedLeaderboardId, setSelectedLeaderboardId] = useState<
+    string | null
+  >(null);
+  const [payloadSnapshots, setPayloadSnapshots] = useState<
+    PayloadDebugSnapshot[]
+  >([]);
+  const [isPayloadDebugOpen, setIsPayloadDebugOpen] = useState(false);
 
   const rowHeightPx = resolveRowHeightPx(uiSettings.rowHeightMode);
 
-  async function loadDashboardData(session = "active") {
-    try {
-      const payload = await fetchDashboard(session);
-      setDashboard(payload);
-      setDashboardError(null);
-      return payload;
-    } catch (error) {
-      setDashboard((current) =>
-        current.session.sessionId === EMPTY_DASHBOARD.session.sessionId
-          ? EMPTY_DASHBOARD
-          : current,
-      );
-      setDashboardError(
-        error instanceof Error
-          ? compactText(error.message, 180)
-          : "BFF API에 연결하지 못했습니다.",
-      );
-      return EMPTY_DASHBOARD;
-    } finally {
-      setIsLoadingDashboard(false);
-    }
+  function recordPayloadSnapshot({
+    key,
+    title,
+    path,
+    transport,
+    payload,
+  }: {
+    key: string;
+    title: string;
+    path: string;
+    transport: PayloadDebugSnapshot["transport"];
+    payload: unknown;
+  }) {
+    const snapshot: PayloadDebugSnapshot = {
+      key,
+      title,
+      path,
+      transport,
+      receivedAt: new Date().toISOString(),
+      status: extractPayloadStatus(payload),
+      sessionId: extractPayloadSessionId(payload),
+      jsonText: stringifyPayload(payload),
+    };
+
+    setPayloadSnapshots((current) => [
+      snapshot,
+      ...current.filter((entry) => entry.key !== key),
+    ]);
   }
 
   useEffect(() => {
     let isDisposed = false;
     let dashboardStream: EventSource | null = null;
 
+    async function loadDashboardData(session = "active") {
+      try {
+        const payload = await fetchDashboard(session);
+        recordPayloadSnapshot({
+          key: "dashboard-fetch",
+          title: "dashboard fetch",
+          path: `/api/dashboard?session=${session}`,
+          transport: "http",
+          payload,
+        });
+        setDashboard(payload);
+        setDashboardError(null);
+        return payload;
+      } catch (error) {
+        setDashboard((current) =>
+          current.session.sessionId === EMPTY_DASHBOARD.session.sessionId
+            ? EMPTY_DASHBOARD
+            : current,
+        );
+        setDashboardError(
+          error instanceof Error
+            ? compactText(error.message, 180)
+            : "BFF API에 연결하지 못했습니다.",
+        );
+        return EMPTY_DASHBOARD;
+      } finally {
+        setIsLoadingDashboard(false);
+      }
+    }
+
     async function resumeReloadIfNeeded() {
       try {
         const payload = await fetchReloadState();
+        recordPayloadSnapshot({
+          key: "reload-state",
+          title: "reload state",
+          path: "/api/sessions/reload",
+          transport: "http",
+          payload,
+        });
         if (isDisposed) {
           return;
         }
@@ -137,6 +250,13 @@ function App() {
         try {
           const payload = JSON.parse(event.data) as DashboardResponse;
           hasReceivedMessage = true;
+          recordPayloadSnapshot({
+            key: "dashboard-stream",
+            title: "dashboard stream",
+            path: "/api/dashboard/stream?session=active",
+            transport: "sse",
+            payload,
+          });
           setDashboard(payload);
           setDashboardError(null);
         } catch (error) {
@@ -198,6 +318,13 @@ function App() {
 
       try {
         const payload = JSON.parse(event.data) as SessionReloadStateResponse;
+        recordPayloadSnapshot({
+          key: "reload-stream",
+          title: "reload stream",
+          path: "/api/sessions/reload/stream",
+          transport: "sse",
+          payload,
+        });
         if (payload.loading) {
           setBlockingLoadingState(payload.loading);
         }
@@ -256,6 +383,12 @@ function App() {
   }, [uiSettings]);
 
   useEffect(() => {
+    if (!uiSettings.payloadDebugEnabled) {
+      setIsPayloadDebugOpen(false);
+    }
+  }, [uiSettings.payloadDebugEnabled]);
+
+  useEffect(() => {
     const sessionId = dashboard.session.sessionId;
     if (
       sessionId === EMPTY_DASHBOARD.session.sessionId ||
@@ -277,6 +410,13 @@ function App() {
         if (isDisposed) {
           return;
         }
+        recordPayloadSnapshot({
+          key: "leaderboards-fetch",
+          title: "leaderboards fetch",
+          path: `/api/leaderboards?session=${sessionId}`,
+          transport: "http",
+          payload,
+        });
         setLeaderboardOverview(payload.leaderboard);
       } catch (error) {
         if (isDisposed) {
@@ -322,6 +462,13 @@ function App() {
 
     try {
       const payload = await fetchDigestDetail(digest.id);
+      recordPayloadSnapshot({
+        key: "digest-detail",
+        title: "digest detail",
+        path: `/api/digests/${digest.id}?session=active`,
+        transport: "http",
+        payload,
+      });
       setDetailState({ kind: "digest", payload });
       setDashboardError(null);
     } catch (error) {
@@ -346,6 +493,13 @@ function App() {
 
     try {
       const payload = await fetchDocument(documentId);
+      recordPayloadSnapshot({
+        key: "document-detail",
+        title: "document detail",
+        path: `/api/documents/${documentId}?session=active`,
+        transport: "http",
+        payload,
+      });
       setDetailState({ kind: "document", payload });
       setDashboardError(null);
     } catch (error) {
@@ -368,6 +522,13 @@ function App() {
       const result = await reloadSession({
         profile: "full",
         run_label: "redis-session",
+      });
+      recordPayloadSnapshot({
+        key: "reload-start",
+        title: "reload start",
+        path: "/api/sessions/reload",
+        transport: "http",
+        payload: result,
       });
       setBlockingLoadingState(result.loading);
     } catch (error) {
@@ -425,10 +586,13 @@ function App() {
 
   const infoItems = dashboard.feeds.map((feed) => ({
     id: feed.id,
+    label: feed.eyebrow,
+    title: feed.title,
+    meta: `${feed.items.length} items`,
+    detail: buildFeedSourceSummary(feed) ?? undefined,
     node: (
       <SourcePanel
         panelData={feed}
-        sessionLabel={panelSessionLabel}
         selectedDocumentId={selectedDocumentId}
         onSelectItem={handleSelectDocument}
       />
@@ -505,6 +669,13 @@ function App() {
       />
     </>
   ) : null;
+  const payloadDebugOverlay = uiSettings.payloadDebugEnabled ? (
+    <PayloadDebugPanel
+      snapshots={payloadSnapshots}
+      isOpen={isPayloadDebugOpen}
+      onToggle={() => setIsPayloadDebugOpen((current) => !current)}
+    />
+  ) : null;
 
   if (shouldShowFullscreenLoading) {
     return (
@@ -517,6 +688,7 @@ function App() {
           brand={dashboard.brand}
           loading={fullscreenLoadingState}
         />
+        {payloadDebugOverlay}
       </div>
     );
   }
@@ -553,6 +725,7 @@ function App() {
         onResetWorkspace={resetWorkspaceLayout}
         onRestoreDefaults={restoreDefaultSettings}
       />
+      {payloadDebugOverlay}
     </div>
   );
 }

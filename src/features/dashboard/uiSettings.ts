@@ -3,6 +3,7 @@ export type RowHeightMode = "compact" | "standard" | "tall";
 export type UiSettings = {
   motionEnabled: boolean;
   overlaysEnabled: boolean;
+  payloadDebugEnabled: boolean;
   rowHeightMode: RowHeightMode;
 };
 
@@ -37,6 +38,7 @@ export const ROW_HEIGHT_MODE_OPTIONS: Array<{
 export const DEFAULT_UI_SETTINGS: UiSettings = {
   motionEnabled: true,
   overlaysEnabled: true,
+  payloadDebugEnabled: false,
   rowHeightMode: "standard",
 };
 
@@ -70,6 +72,10 @@ export function loadUiSettings(): UiSettings {
         typeof parsed.overlaysEnabled === "boolean"
           ? parsed.overlaysEnabled
           : DEFAULT_UI_SETTINGS.overlaysEnabled,
+      payloadDebugEnabled:
+        typeof parsed.payloadDebugEnabled === "boolean"
+          ? parsed.payloadDebugEnabled
+          : DEFAULT_UI_SETTINGS.payloadDebugEnabled,
       rowHeightMode: validRowHeightMode,
     };
   } catch {

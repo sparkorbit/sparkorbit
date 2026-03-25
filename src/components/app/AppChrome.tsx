@@ -371,6 +371,18 @@ export function SettingsModal({
                 }
               />
 
+              <SettingsToggle
+                label="Payload Tap"
+                description="BFF에서 받은 dashboard, reload, detail payload 원문을 화면 우하단 trace panel에서 바로 확인합니다."
+                enabled={settings.payloadDebugEnabled}
+                onToggle={() =>
+                  onUpdateSettings({
+                    ...settings,
+                    payloadDebugEnabled: !settings.payloadDebugEnabled,
+                  })
+                }
+              />
+
               <div className="border border-orbit-border bg-orbit-bg p-3">
                 <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
                   Row Span

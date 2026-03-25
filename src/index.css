@@ -52,6 +52,15 @@ body {
   white-space: normal;
 }
 
+.orbit-scrollbar-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.orbit-scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
 .orbit-line-clamp-2 {
   display: -webkit-box;
   overflow: hidden;
