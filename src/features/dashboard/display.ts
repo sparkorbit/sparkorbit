@@ -27,47 +27,47 @@ const SOURCE_CATEGORY_TITLE_LABELS: Record<string, string> = {
 
 const SOURCE_DISPLAY_NAMES: Record<string, string> = {
   amazon_science: "Amazon Science",
-  anthropic_news: "Anthropic - News",
+  anthropic_news: "Anthropic News",
   apple_ml: "Apple ML",
-  arxiv_rss_cs_ai: "arXiv - AI",
-  arxiv_rss_cs_cl: "arXiv - Language AI",
-  arxiv_rss_cs_cr: "arXiv - AI Security",
-  arxiv_rss_cs_cv: "arXiv - Vision",
-  arxiv_rss_cs_ir: "arXiv - Search and Retrieval",
-  arxiv_rss_cs_lg: "arXiv - Machine Learning",
-  arxiv_rss_cs_ro: "arXiv - Robotics",
-  arxiv_rss_stat_ml: "arXiv - Statistics and ML",
-  deepmind_blog: "Google DeepMind - Blog",
-  deepseek_updates: "DeepSeek - Updates",
-  github_bytedance_repos: "ByteDance - GitHub",
-  github_curated_repos: "GitHub - Curated Repos",
-  github_mindspore_repos: "MindSpore - GitHub",
-  github_paddlepaddle_repos: "PaddlePaddle - GitHub",
-  github_tencent_hunyuan_repos: "Tencent Hunyuan - GitHub",
-  google_ai_blog: "Google AI - Blog",
-  groq_newsroom: "Groq - Newsroom",
-  hf_blog: "Hugging Face - Blog",
-  hf_daily_papers: "Hugging Face - Daily Papers",
-  hf_models_likes: "Hugging Face - Top Liked Models",
-  hf_models_new: "Hugging Face - New Models",
-  hf_trending_models: "Hugging Face - Trending Models",
-  hn_topstories: "Hacker News - Top Stories",
+  arxiv_rss_cs_ai: "ARXIV - AI",
+  arxiv_rss_cs_cl: "ARXIV - Language AI",
+  arxiv_rss_cs_cr: "ARXIV - Security",
+  arxiv_rss_cs_cv: "ARXIV - Vision",
+  arxiv_rss_cs_ir: "ARXIV - Search and Retrieval",
+  arxiv_rss_cs_lg: "ARXIV - Machine Learning",
+  arxiv_rss_cs_ro: "ARXIV - Robotics",
+  arxiv_rss_stat_ml: "ARXIV - Statistics and ML",
+  deepmind_blog: "Google DeepMind News",
+  deepseek_updates: "DeepSeek Updates",
+  github_bytedance_repos: "ByteDance GitHub",
+  github_curated_repos: "GitHub Curated Repos",
+  github_mindspore_repos: "MindSpore GitHub",
+  github_paddlepaddle_repos: "PaddlePaddle GitHub",
+  github_tencent_hunyuan_repos: "Tencent Hunyuan GitHub",
+  google_ai_blog: "Google AI News",
+  groq_newsroom: "Groq News",
+  hf_blog: "Hugging Face Blog",
+  hf_daily_papers: "Hugging Face Daily Papers",
+  hf_models_likes: "Hugging Face Top Liked Models",
+  hf_models_new: "Hugging Face New Models",
+  hf_trending_models: "Hugging Face Trending Models",
+  hn_topstories: "Hacker News Top Stories",
   kakao_tech_rss: "Kakao Tech",
-  lg_ai_research_blog: "LG AI Research - Blog",
+  lg_ai_research_blog: "LG AI Research Blog",
   lmarena_overview: "Model Rankings",
   microsoft_research: "Microsoft Research",
-  mistral_news: "Mistral AI - News",
-  naver_cloud_blog_rss: "NAVER Cloud - Blog",
-  nvidia_deep_learning: "NVIDIA - Deep Learning",
+  mistral_news: "Mistral AI News",
+  naver_cloud_blog_rss: "NAVER Cloud Blog",
+  nvidia_deep_learning: "NVIDIA Deep Learning",
   open_llm_leaderboard: "Open LLM Leaderboard",
-  openai_news_rss: "OpenAI - News",
-  qwen_blog_rss: "Qwen - Blog",
+  openai_news_rss: "OpenAI News",
+  qwen_blog_rss: "Qwen Blog",
   reddit_localllama: "Reddit - LocalLLaMA",
   reddit_machinelearning: "Reddit - MachineLearning",
   salesforce_ai_research_rss: "Salesforce AI Research",
   samsung_research_posts: "Samsung Research",
-  stability_news: "Stability AI - News",
-  upstage_blog: "Upstage - Blog",
+  stability_news: "Stability AI News",
+  upstage_blog: "Upstage Blog",
 };
 
 const DOC_TYPE_LABELS: Record<string, string> = {
@@ -185,14 +185,6 @@ export const EMPTY_DASHBOARD: DashboardResponse = {
   feeds: [],
 };
 
-export function buildPanelSessionLabel(sessionDate: string, windowLabel: string) {
-  const compactDate =
-    sessionDate.length >= 10
-      ? sessionDate.slice(5).replace("-", ".")
-      : sessionDate;
-  return `${compactDate} / ${windowLabel}`;
-}
-
 export function compactText(value: string | null | undefined, maxLength = 160) {
   if (!value) {
     return "";
@@ -232,7 +224,7 @@ function formatMappedValue(
   value: string | null | undefined,
   labels: Record<string, string>,
 ) {
-  const normalized = value?.trim();
+  const normalized = typeof value === "string" ? value.trim() : "";
   if (!normalized) {
     return "-";
   }
@@ -248,7 +240,7 @@ export function formatSourceCategoryTitle(value: string | null | undefined) {
 }
 
 export function formatReadableSourceName(value: string | null | undefined) {
-  const normalized = value?.trim();
+  const normalized = typeof value === "string" ? value.trim() : "";
   if (!normalized) {
     return "-";
   }
@@ -267,7 +259,7 @@ export function formatReadableSourceTitle(
 }
 
 export function formatDisplayDate(value: string | null | undefined) {
-  const normalized = value?.trim();
+  const normalized = typeof value === "string" ? value.trim() : "";
   if (!normalized) {
     return "";
   }

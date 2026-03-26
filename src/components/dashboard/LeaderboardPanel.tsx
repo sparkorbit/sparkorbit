@@ -1,12 +1,6 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
 
-import {
-  buildLeaderboardEntries,
-  compactText,
-  formatDisplayDate,
-  formatLeaderboardValue,
-} from "../../features/dashboard/display";
+import { buildLeaderboardEntries } from "../../features/dashboard/display";
 import type {
   SessionArenaBoard,
   SessionArenaBoardEntry,
@@ -14,16 +8,13 @@ import type {
 
 type LeaderboardPanelProps = {
   sessionLabel: string;
-  isReloading: boolean;
-  onReload: () => void;
   arenaBoards: readonly SessionArenaBoard[];
   isLoadingLeaderboards: boolean;
   leaderboardError: string | null;
   dashboardError: string | null;
 };
 
-const MAX_VISIBLE_BOARDS = 6;
-const MAX_ENTRIES = 6;
+const MAX_ENTRIES = 10;
 
 function toFiniteNumber(value: number | string | null | undefined): number | null {
   if (value == null) {
@@ -55,13 +46,24 @@ function resolveBoardTitle(board: SessionArenaBoard) {
   );
 }
 
-function resolveBoardSubtitle(board: SessionArenaBoard) {
-  const pieces = [
-    board.scoreLabel?.trim() || null,
-    compactText(board.description, 72) || null,
-  ].filter((value): value is string => Boolean(value));
+function formatHumanScore(value: number | string | null | undefined) {
+  const rating = toFiniteNumber(value);
+  if (rating == null) {
+    return null;
+  }
 
-  return pieces.join(" · ");
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(Math.round(rating));
+}
+
+function resolveHumanScore(entry: SessionArenaBoardEntry) {
+  const rating = toFiniteNumber(entry.rating);
+  if (rating != null && rating > 0) {
+    return formatHumanScore(rating);
+  }
+
+  return null;
 }
 
 function EntryCard({
@@ -71,7 +73,7 @@ function EntryCard({
   entry: SessionArenaBoardEntry;
   delayMs?: number;
 }) {
-  const rating = toFiniteNumber(entry.rating);
+  const humanScore = resolveHumanScore(entry);
 
   return (
     <article
@@ -101,9 +103,9 @@ function EntryCard({
                 {entry.modelName ?? "—"}
               </h3>
             )}
-            {rating != null ? (
+            {humanScore ? (
               <span className="shrink-0 font-mono text-[0.58rem] tabular-nums text-orbit-accent">
-                {formatLeaderboardValue(rating)}
+                {humanScore}
               </span>
             ) : null}
           </div>
@@ -125,27 +127,15 @@ function BoardCard({
   board: SessionArenaBoard;
 }) {
   const entries = buildLeaderboardEntries(board).slice(0, MAX_ENTRIES);
-  const subtitle = resolveBoardSubtitle(board);
-  const updatedAt = formatDisplayDate(board.updatedAt);
-  const totalModels = formatLeaderboardValue(board.totalModels);
-  const totalVotes = formatLeaderboardValue(board.totalVotes);
 
   return (
-    <article className="flex min-h-0 flex-col border border-orbit-border bg-orbit-bg">
+    <article className="flex h-full min-h-0 w-[24rem] flex-none snap-start flex-col border border-orbit-border bg-orbit-bg sm:w-[26rem] lg:w-[28rem] xl:w-[30rem]">
       <div className="border-b border-orbit-border px-3 py-2.5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <p className="font-mono text-[0.56rem] uppercase tracking-[0.16em] text-orbit-accent">
-              benchmark
-            </p>
-            <h3 className="orbit-wrap-anywhere mt-1.5 font-display text-[0.88rem] font-semibold text-orbit-text">
+            <h3 className="orbit-wrap-anywhere font-display text-[0.88rem] font-semibold text-orbit-text">
               {resolveBoardTitle(board)}
             </h3>
-            {subtitle ? (
-              <p className="orbit-wrap-anywhere mt-1 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
-                {subtitle}
-              </p>
-            ) : null}
           </div>
           {board.referenceUrl ? (
             <a
@@ -158,26 +148,6 @@ function BoardCard({
             </a>
           ) : null}
         </div>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orbit-border px-3 py-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          {updatedAt ? (
-            <span className="font-mono text-[0.5rem] uppercase tracking-widest text-orbit-muted">
-              {updatedAt}
-            </span>
-          ) : null}
-          {totalModels !== "-" ? (
-            <span className="font-mono text-[0.5rem] uppercase tracking-widest text-orbit-muted">
-              <span className="text-orbit-text">{totalModels}</span> models
-            </span>
-          ) : null}
-        </div>
-        {totalVotes !== "-" ? (
-          <span className="font-mono text-[0.5rem] uppercase tracking-widest text-orbit-muted">
-            <span className="text-orbit-text">{totalVotes}</span> votes
-          </span>
-        ) : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
@@ -193,7 +163,7 @@ function BoardCard({
           </div>
         ) : (
           <p className="px-2 py-3 font-mono text-[0.58rem] text-orbit-muted">
-            no entries
+            no models ranked yet
           </p>
         )}
       </div>
@@ -203,89 +173,33 @@ function BoardCard({
 
 export function LeaderboardPanel({
   sessionLabel,
-  isReloading,
-  onReload,
   arenaBoards,
   isLoadingLeaderboards,
   leaderboardError,
   dashboardError,
 }: LeaderboardPanelProps) {
   const errorMessage = leaderboardError ?? dashboardError;
-  const [pageIndex, setPageIndex] = useState(0);
-  const totalPages = Math.max(1, Math.ceil(arenaBoards.length / MAX_VISIBLE_BOARDS));
-
-  useEffect(() => {
-    setPageIndex((current) => Math.min(current, totalPages - 1));
-  }, [totalPages]);
-
-  const visibleStart = pageIndex * MAX_VISIBLE_BOARDS;
-  const visibleBoards = useMemo(
-    () => arenaBoards.slice(visibleStart, visibleStart + MAX_VISIBLE_BOARDS),
-    [arenaBoards, visibleStart],
-  );
-  const visibleEnd = visibleBoards.length > 0 ? visibleStart + visibleBoards.length : 0;
-  const headerSummary =
-    arenaBoards.length > 0
-      ? `showing ${visibleStart + 1}-${visibleEnd} of ${arenaBoards.length} boards`
-      : "no boards";
 
   return (
     <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel p-4 md:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orbit-border pb-3">
         <div className="min-w-0 flex-1">
-          <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.2em] text-orbit-accent">
-            Benchmark Grid
-          </p>
-          <h1 className="orbit-wrap-anywhere mt-2 font-display text-[1.12rem] font-semibold text-orbit-text md:text-[1.32rem]">
-            Live AI Benchmarks
+          <h1 className="orbit-wrap-anywhere font-display text-[1.12rem] font-semibold text-orbit-text md:text-[1.32rem]">
+            AI Model Leaderboard
           </h1>
-          <p className="mt-1 font-mono text-[0.58rem] uppercase tracking-[0.14em] text-orbit-muted">
-            {headerSummary}
-          </p>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              className="border border-orbit-border bg-orbit-panel px-2.5 py-1.5 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={pageIndex === 0 || arenaBoards.length <= MAX_VISIBLE_BOARDS}
-              onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
-            >
-              left
-            </button>
-            <button
-              type="button"
-              className="border border-orbit-border bg-orbit-panel px-2.5 py-1.5 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={
-                pageIndex >= totalPages - 1 || arenaBoards.length <= MAX_VISIBLE_BOARDS
-              }
-              onClick={() =>
-                setPageIndex((current) => Math.min(totalPages - 1, current + 1))
-              }
-            >
-              right
-            </button>
-          </div>
-
+        <div className="flex shrink-0 items-center justify-end">
           <span className="orbit-token-ellipsis inline-flex max-w-[16rem] border border-orbit-border-strong bg-orbit-bg px-2 py-1 font-mono text-[0.66rem] uppercase tracking-[0.14em] text-orbit-text">
             {sessionLabel}
           </span>
-          <button
-            type="button"
-            className="border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isReloading}
-            onClick={onReload}
-          >
-            {isReloading ? "refreshing" : "refresh"}
-          </button>
         </div>
       </div>
 
       {isLoadingLeaderboards ? (
         <div className="mt-3">
           <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted">
-            syncing benchmark boards…
+            loading leaderboard data...
           </p>
         </div>
       ) : null}
@@ -305,15 +219,15 @@ export function LeaderboardPanel({
               {errorMessage}
             </p>
           </div>
-        ) : visibleBoards.length === 0 ? (
+        ) : arenaBoards.length === 0 ? (
           <div className="flex h-full items-center justify-center border border-orbit-border bg-orbit-bg px-4 py-6">
             <p className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted">
-              no benchmark boards
+              no leaderboard data available
             </p>
           </div>
         ) : (
-          <div className="grid h-full min-h-0 grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3 xl:grid-rows-2">
-            {visibleBoards.map((board) => (
+          <div className="flex h-full min-h-0 gap-3 overflow-x-auto overflow-y-hidden pb-2 pr-1 snap-x snap-mandatory">
+            {arenaBoards.map((board) => (
               <BoardCard key={board.id} board={board} />
             ))}
           </div>

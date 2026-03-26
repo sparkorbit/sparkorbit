@@ -256,6 +256,7 @@ export function ConsoleHeader({
 export function SettingsModal({
   isOpen,
   settings,
+  briefingStatus,
   onClose,
   onUpdateSettings,
   onResetWorkspace,
@@ -263,6 +264,7 @@ export function SettingsModal({
 }: {
   isOpen: boolean;
   settings: UiSettings;
+  briefingStatus?: string | null;
   onClose: () => void;
   onUpdateSettings: (next: UiSettings) => void;
   onResetWorkspace: () => void;
@@ -418,6 +420,68 @@ export function SettingsModal({
                     </button>
                   ))}
                 </div>
+              </div>
+            </section>
+
+            <section className="space-y-3 border border-orbit-border bg-orbit-bg-elevated p-3">
+              <div className="border-b border-orbit-border pb-3">
+                <p className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-orbit-accent">
+                  LLM Provider
+                </p>
+                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+                  AI briefing and category summaries powered by a local LLM.
+                </p>
+              </div>
+
+              <div className="border border-orbit-border bg-orbit-bg p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
+                    Status
+                  </p>
+                  <span
+                    className={[
+                      "inline-flex border px-2 py-0.5 font-mono text-[0.56rem] uppercase tracking-[0.14em]",
+                      briefingStatus === "ready"
+                        ? "border-orbit-accent bg-orbit-panel text-orbit-accent"
+                        : briefingStatus === "processing"
+                          ? "border-orbit-accent/40 bg-orbit-panel text-orbit-accent-dim"
+                          : briefingStatus === "error"
+                            ? "border-red-600/40 bg-orbit-panel text-red-400"
+                            : "border-orbit-border bg-orbit-bg-elevated text-orbit-muted",
+                    ].join(" ")}
+                  >
+                    {briefingStatus === "ready"
+                      ? "active"
+                      : briefingStatus === "processing"
+                        ? "processing"
+                        : briefingStatus === "error"
+                          ? "error"
+                          : "off"}
+                  </span>
+                </div>
+                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+                  {briefingStatus === "ready"
+                    ? "Ollama is connected and generating AI briefings for each session."
+                    : briefingStatus === "processing"
+                      ? "LLM briefing is being generated. This may take a moment."
+                      : briefingStatus === "error"
+                        ? "Briefing generation failed. Verify Ollama is running and the model is pulled."
+                        : "LLM is not enabled. Category digests use source metadata only."}
+                </p>
+                {briefingStatus === "disabled" || !briefingStatus ? (
+                  <div className="mt-3 border border-orbit-border bg-orbit-bg-elevated px-3 py-2">
+                    <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                      to enable
+                    </p>
+                    <p className="mt-1 font-mono text-[0.64rem] leading-[1.6] text-orbit-text">
+                      SPARKORBIT_BRIEFING_PROVIDER=ollama
+                    </p>
+                    <p className="mt-1 text-[0.68rem] leading-[1.6] text-orbit-muted">
+                      Set this environment variable before starting the backend.
+                      Requires Ollama running locally with a pulled model.
+                    </p>
+                  </div>
+                ) : null}
               </div>
             </section>
 

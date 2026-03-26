@@ -69,11 +69,95 @@ function stripArxivAbstractBoilerplate(document: SessionDocument, value: string 
   return normalized.length > 0 ? normalized : value;
 }
 
+function getDocumentReferenceSnippet(document: SessionDocument) {
+  return document.reference?.snippet ?? null;
+}
+
+function getDocumentReferenceUrl(document: SessionDocument) {
+  return document.reference_url || document.canonical_url || document.url || null;
+}
+
+function normalizeDetailText(value: string | null | undefined) {
+  return (value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+const HTML_TAG_RE = /<\/?[a-z][^>]*>/gi;
+const JUNK_CONTENT_PATTERNS = [
+  // HTML error pages
+  /<!doctype\s+html/i,
+  /<html[\s>]/i,
+  /<head[\s>]/i,
+  /bad\s*gateway/i,
+  /internal\s*server\s*error/i,
+  /403\s*forbidden/i,
+  /access\s*denied/i,
+  /nginx\//i,
+  /apache\//i,
+  // HF metadata patterns (not useful as content)
+  /^region:\w+$/i,
+  /^a blog post by .+ on hugging face$/i,
+  /^(?:text-generation|text-to-image|image-text-to-text|feature-extraction|fill-mask|token-classification|sentence-similarity|text-classification|text2text-generation|question-answering|summarization|translation|zero-shot-classification|image-classification|object-detection|image-segmentation|automatic-speech-recognition|audio-classification|visual-question-answering|document-question-answering|image-to-text|video-classification|reinforcement-learning|tabular-classification|tabular-regression|text-to-speech|text-to-video|text-to-3d|image-to-3d|unconditional-image-generation|depth-estimation|image-to-image|mask-generation|image-feature-extraction)\b/i,
+];
+
+/** Test whether text is a HF tag-soup (space-separated tokens, no prose). */
+function isTagSoup(text: string): boolean {
+  const tokens = text.split(/\s+/);
+  if (tokens.length < 3) return false;
+  const tagLike = tokens.filter(
+    (t) =>
+      /^[\w.:/-]+$/.test(t) &&
+      !t.includes(" ") &&
+      t.length < 60,
+  );
+  return tagLike.length / tokens.length > 0.8;
+}
+
+/**
+ * Strip HTML tags, detect error pages / metadata-only content, and reject
+ * content that duplicates the title or is otherwise useless for display.
+ */
+function sanitizeContentText(
+  text: string | null | undefined,
+  title?: string | null,
+): string | null {
+  if (!text) return null;
+
+  // Reject junk content patterns
+  for (const pattern of JUNK_CONTENT_PATTERNS) {
+    if (pattern.test(text)) return null;
+  }
+
+  // Strip any remaining HTML tags
+  let cleaned = text.replace(HTML_TAG_RE, "").trim();
+  // Collapse whitespace
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+
+  if (cleaned.length < 8) return null;
+
+  // Reject HF-style tag soup (e.g. "transformers safetensors deepseek_v3 ...")
+  if (isTagSoup(cleaned)) return null;
+
+  // Reject if content is effectively the same as the title
+  if (title) {
+    const normTitle = title.replace(/\s+/g, " ").trim().toLowerCase();
+    const normCleaned = cleaned.toLowerCase();
+    if (normCleaned === normTitle || normCleaned.startsWith(normTitle + ".")) {
+      return null;
+    }
+  }
+
+  return cleaned;
+}
+
 function buildDocumentAuthorItems(document: SessionDocument) {
+  if (document.source_category === "community") {
+    return [];
+  }
+
   const authors =
-    document.authors.length > 0
+    Array.isArray(document.authors) && document.authors.length > 0
       ? document.authors
-      : document.author
+        : document.author
         ? [document.author]
         : [];
 
@@ -182,12 +266,43 @@ function DetailTextBlock({
 }
 
 function buildDocumentPrimaryText(document: SessionDocument) {
-  const text =
-    document.body_text ||
-    document.description ||
-    document.reference.snippet ||
-    document.summary_input_text;
-  return stripArxivAbstractBoilerplate(document, text);
+  // For empty / generated_panel scopes, only show LLM summary if available.
+  if (document.text_scope === "empty" || document.text_scope === "generated_panel") {
+    const llmSummary = document.llm?.summary_short;
+    return sanitizeContentText(llmSummary, document.title);
+  }
+
+  const candidates = [
+    document.body_text,
+    document.description,
+    getDocumentReferenceSnippet(document),
+    document.summary_input_text,
+  ];
+
+  for (const raw of candidates) {
+    const stripped = stripArxivAbstractBoilerplate(document, raw);
+    const cleaned = sanitizeContentText(stripped, document.title);
+    if (!cleaned) continue;
+
+    const normalizedText = normalizeDetailText(cleaned);
+    if (!normalizedText) continue;
+
+    const normalizedTitle = normalizeDetailText(document.title);
+    const normalizedReferenceTitle = normalizeDetailText(
+      document.reference?.display_title,
+    );
+
+    if (
+      normalizedText === normalizedTitle ||
+      normalizedText === normalizedReferenceTitle
+    ) {
+      continue;
+    }
+
+    return cleaned;
+  }
+
+  return null;
 }
 
 function buildDocumentBodyLabel(document: SessionDocument) {
@@ -210,16 +325,20 @@ function buildDocumentMetaLine(document: SessionDocument) {
 }
 
 function buildDocumentPreview(document: SessionDocument) {
-  return compactText(
-    stripArxivAbstractBoilerplate(
-      document,
-      document.description ||
-        document.reference.snippet ||
-        document.body_text ||
-        document.summary_input_text,
-    ),
-    220,
-  );
+  const candidates = [
+    document.description,
+    getDocumentReferenceSnippet(document),
+    document.body_text,
+    document.summary_input_text,
+  ];
+  for (const raw of candidates) {
+    const cleaned = sanitizeContentText(
+      stripArxivAbstractBoilerplate(document, raw),
+      document.title,
+    );
+    if (cleaned) return compactText(cleaned, 220);
+  }
+  return null;
 }
 
 export function HackerRevealCard({
@@ -251,7 +370,10 @@ export function DigestDetailPanel({
   const digestUpdatedAt = formatDisplayDate(payload.digest.updatedAt);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-orbit-bg">
+    <div
+      className="flex h-full min-h-0 flex-col bg-orbit-bg"
+      data-digest-detail-id={payload.digest.id}
+    >
       <div className="min-h-0 flex-1 overflow-auto bg-orbit-bg p-1">
         <div className="flex min-h-full flex-col gap-2">
           <HackerRevealCard delayMs={0}>
@@ -295,6 +417,7 @@ export function DigestDetailPanel({
                   <button
                     key={document.document_id}
                     type="button"
+                    data-related-document-id={document.document_id}
                     className="border border-orbit-border bg-orbit-bg px-3 py-3 text-left transition-colors duration-150 hover:border-orbit-accent"
                     onClick={() => onOpenDocument(document.document_id)}
                   >
@@ -337,22 +460,25 @@ export function DocumentDetailPanel({
   document: SessionDocument;
   onClose: () => void;
 }) {
-  const referenceUrl =
-    document.reference_url || document.canonical_url || document.url;
+  const referenceUrl = getDocumentReferenceUrl(document);
   const contextFields = filterDetailFields([
     createDetailField("source", formatReadableSourceName(document.source)),
     createDetailField("type", formatDocType(document.doc_type)),
     createDetailField("published", formatDisplayDate(document.published_at)),
     createDetailField("updated", formatDisplayDate(document.updated_at)),
+    createDetailField("online", referenceUrl, { href: referenceUrl }),
   ]);
   const authorItems = buildDocumentAuthorItems(document);
   const primaryText = buildDocumentPrimaryText(document);
   const metaLine = buildDocumentMetaLine(document);
   const openLinkLabel =
-    document.doc_type === "paper" ? "open paper" : "open link";
+    document.doc_type === "paper" ? "open paper" : "open online";
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-orbit-bg">
+    <div
+      className="flex h-full min-h-0 flex-col bg-orbit-bg"
+      data-document-detail-id={document.document_id}
+    >
       <div className="min-h-0 flex-1 overflow-auto bg-orbit-bg p-1">
         <div className="flex min-h-full flex-col gap-2">
           <HackerRevealCard delayMs={0}>
@@ -375,16 +501,18 @@ export function DocumentDetailPanel({
                   ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    className="border border-orbit-border bg-orbit-bg px-3 py-1.5 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-text transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
-                    onClick={() =>
-                      referenceUrl &&
-                      window.open(referenceUrl, "_blank", "noopener,noreferrer")
-                    }
-                  >
-                    {openLinkLabel}
-                  </button>
+                  {referenceUrl ? (
+                    <button
+                      type="button"
+                      data-open-reference-link="true"
+                      className="border border-orbit-border bg-orbit-bg px-3 py-1.5 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-text transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
+                      onClick={() =>
+                        window.open(referenceUrl, "_blank", "noopener,noreferrer")
+                      }
+                    >
+                      {openLinkLabel}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="border border-orbit-border-strong bg-orbit-bg px-3 py-1.5 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-text transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
@@ -397,12 +525,26 @@ export function DocumentDetailPanel({
             </section>
           </HackerRevealCard>
 
-          <HackerRevealCard delayMs={90}>
-            <DetailTextBlock
-              label={buildDocumentBodyLabel(document)}
-              text={primaryText}
-            />
-          </HackerRevealCard>
+          {primaryText ? (
+            <HackerRevealCard delayMs={90}>
+              <DetailTextBlock
+                label={buildDocumentBodyLabel(document)}
+                text={primaryText}
+              />
+            </HackerRevealCard>
+          ) : (
+            <HackerRevealCard delayMs={90}>
+              <section className="border border-orbit-border bg-orbit-bg-elevated p-3">
+                <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent-dim">
+                  {buildDocumentBodyLabel(document)}
+                </p>
+                <p className="mt-3 text-[0.76rem] leading-[1.7] text-orbit-muted">
+                  No content available for this item. Use the link above to
+                  view the original source.
+                </p>
+              </section>
+            </HackerRevealCard>
+          )}
 
           {authorItems.length > 0 ? (
             <HackerRevealCard delayMs={140}>

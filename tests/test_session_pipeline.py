@@ -11,15 +11,21 @@ from fastapi.testclient import TestClient
 # Make backend importable when running from repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import backend.app.services.session_service as session_service_module
 from backend.app.core.constants import ACTIVE_SESSION_KEY, SUMMARY_EXCLUDED_TEXT_SCOPES
 from backend.app.core.store import MemoryStore
 from backend.app.main import create_app
+from backend.app.services.summary_provider import NoopSummaryGenerator
 from backend.app.services.session_service import (
+    _build_paper_domain_digest,
+    build_feed_panel_title,
     build_document_note,
     compact_text,
     digest_key,
     doc_key,
     json_dumps,
+    publish_run,
+    run_session_enrichment,
     sanitize_document_for_monitor,
     select_summary_candidate_ids,
     session_key,
@@ -187,6 +193,39 @@ class TestBuildDocumentNote:
         )
 
 
+class TestBuildFeedPanelTitle:
+    def test_uses_bracketed_readable_source_title(self):
+        assert build_feed_panel_title("company", "deepmind_blog") == (
+            "[Company] Google DeepMind News"
+        )
+
+
+class TestBuildPaperDomainDigest:
+    def test_reports_pending_grouping_when_only_fallback_domain_exists(self):
+        headline, summary = _build_paper_domain_digest(
+            [
+                _make_document(document_id="paper:1", labels={"paper_domain": "others"}),
+                _make_document(document_id="paper:2", labels={}),
+            ]
+        )
+
+        assert headline == "Today's Papers: Not grouped by domain yet"
+        assert "have not been separated yet" in summary
+
+    def test_keeps_grouped_domains_and_mentions_ungrouped_remainder(self):
+        headline, summary = _build_paper_domain_digest(
+            [
+                _make_document(document_id="paper:1", labels={"paper_domain": "agents"}),
+                _make_document(document_id="paper:2", labels={"paper_domain": "reasoning"}),
+                _make_document(document_id="paper:3", labels={"paper_domain": "others"}),
+            ]
+        )
+
+        assert headline == "Today's Papers: Agents, Reasoning"
+        assert "3 papers across 2 grouped domains." in summary
+        assert "1 paper is still not grouped by domain." in summary
+
+
 class TestSanitizeDocumentForMonitor:
     def test_strips_arxiv_rss_boilerplate_from_document_fields(self):
         prefixed = (
@@ -217,16 +256,56 @@ class TestSanitizeDocumentForMonitor:
         assert sanitized["summary_input_text"].endswith(expected)
         assert "Announce Type:" not in sanitized["summary_input_text"]
 
-    def test_keeps_non_arxiv_documents_unchanged(self):
+    def test_normalizes_missing_nested_document_fields(self):
         document = _make_document(
             source="openai_news_rss",
             description="Regular description",
             body_text="Regular body",
+            authors=None,
+            related_urls=None,
+            external_ids=None,
+            engagement=None,
+            engagement_primary=None,
+            discovery=None,
+            ranking=None,
+            benchmark=None,
+            reference=None,
+            llm=None,
+            metadata=None,
+            raw_ref=None,
         )
 
         sanitized = sanitize_document_for_monitor(document)
 
-        assert sanitized == document
+        assert sanitized["description"] == "Regular description"
+        assert sanitized["body_text"] == "Regular body"
+        assert sanitized["authors"] == []
+        assert sanitized["related_urls"] == []
+        assert sanitized["external_ids"] == {}
+        assert sanitized["engagement"] == {}
+        assert sanitized["engagement_primary"] == {"name": None, "value": None}
+        assert sanitized["discovery"]["spark_score"] is None
+        assert sanitized["ranking"]["feed_score"] is None
+        assert sanitized["benchmark"]["kind"] is None
+        assert sanitized["reference"] == {
+            "source_label": None,
+            "display_title": None,
+            "display_url": None,
+            "snippet": None,
+        }
+        assert sanitized["llm"]["status"] == "pending"
+        assert sanitized["llm"]["key_points"] == []
+        assert sanitized["llm"]["entities"] == []
+        assert sanitized["llm"]["subdomains"] == []
+        assert sanitized["llm"]["evidence_chunk_ids"] == []
+        assert sanitized["llm"]["run_meta"] == {
+            "model_name": None,
+            "prompt_version": None,
+            "fewshot_pack_version": None,
+            "generated_at": None,
+        }
+        assert sanitized["metadata"] == {}
+        assert sanitized["raw_ref"] == {}
 
 
 class TestDocumentRoute:
@@ -281,3 +360,39 @@ class TestDocumentRoute:
 
         assert response.status_code == 200
         assert response.json()["digest"]["id"] == digest_id
+
+
+class TestRunSessionEnrichment:
+    def test_uses_decoded_artifact_root_for_offline_enrichment(self, monkeypatch):
+        store = MemoryStore()
+        run_dir = (
+            Path(__file__).resolve().parents[1]
+            / "pipelines"
+            / "source_fetch"
+            / "data"
+            / "runs"
+            / "2026-03-25T175100Z_cleanup-check"
+        )
+        publish_run(store, run_dir, queue=False)
+
+        captured: dict[str, Path] = {}
+
+        def fake_run_offline_llm_enrichment(store_arg, session_id, path_arg):
+            del store_arg, session_id
+            captured["run_dir"] = path_arg
+            return False
+
+        monkeypatch.setattr(
+            session_service_module,
+            "run_offline_llm_enrichment",
+            fake_run_offline_llm_enrichment,
+        )
+
+        run_session_enrichment(
+            store,
+            run_dir.name,
+            generator=NoopSummaryGenerator(),
+            briefing_generator=None,
+        )
+
+        assert captured["run_dir"] == run_dir

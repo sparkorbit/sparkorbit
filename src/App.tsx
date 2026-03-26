@@ -1,4 +1,11 @@
-import { useEffect, useState } from "react";
+import {
+  Component,
+  type ErrorInfo,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import {
   ConsoleHeader,
@@ -14,12 +21,11 @@ import { PanelWorkspace } from "./components/dashboard/PanelWorkspace";
 import { SourcePanel } from "./components/dashboard/SourcePanel";
 import { SummaryPanel } from "./components/dashboard/SummaryPanel";
 import { resetPanelWorkspaceStorage } from "./components/dashboard/panelWorkspaceStorage";
-import { shell } from "./components/dashboard/styles";
+import { categoryAccentColor, shell } from "./components/dashboard/styles";
 import type { DigestItem } from "./content/dashboardContent";
 import {
   EMPTY_ARENA_BOARDS,
   EMPTY_DASHBOARD,
-  buildPanelSessionLabel,
   compactText,
   formatReadableSourceTitle,
 } from "./features/dashboard/display";
@@ -51,6 +57,44 @@ import type {
   SessionArenaOverview,
   SessionReloadStateResponse,
 } from "./types/dashboard";
+
+const NOON_AUTO_RELOAD_STORAGE_KEY = "orbit-noon-auto-reload-date";
+const NOON_AUTO_RELOAD_HOUR = 12;
+
+function buildLocalDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function hasPassedNoon(date: Date) {
+  return date.getHours() >= NOON_AUTO_RELOAD_HOUR;
+}
+
+function readNoonAutoReloadDate() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    return window.localStorage.getItem(NOON_AUTO_RELOAD_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeNoonAutoReloadDate(dateKey: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(NOON_AUTO_RELOAD_STORAGE_KEY, dateKey);
+  } catch {
+    // ignore storage failures
+  }
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -148,6 +192,55 @@ function DetailErrorPanel({
   );
 }
 
+class DetailRenderBoundary extends Component<
+  {
+    children: ReactNode;
+    onClose: () => void;
+    resetKey: string;
+  },
+  { message: string | null }
+> {
+  state = {
+    message: null,
+  };
+
+  static getDerivedStateFromError(error: unknown) {
+    return {
+      message:
+        error instanceof Error
+          ? compactText(error.message, 180)
+          : "Could not render this item.",
+    };
+  }
+
+  componentDidCatch(error: unknown, errorInfo: ErrorInfo) {
+    void error;
+    void errorInfo;
+    // The in-panel fallback is enough for this workspace lane.
+  }
+
+  componentDidUpdate(prevProps: Readonly<{ resetKey: string }>) {
+    if (
+      prevProps.resetKey !== this.props.resetKey &&
+      this.state.message !== null
+    ) {
+      this.setState({ message: null });
+    }
+  }
+
+  render() {
+    if (this.state.message !== null) {
+      return (
+        <DetailErrorPanel
+          message={this.state.message}
+          onClose={this.props.onClose}
+        />
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   const [dashboard, setDashboard] =
     useState<DashboardResponse>(EMPTY_DASHBOARD);
@@ -173,6 +266,10 @@ function App() {
     PayloadDebugSnapshot[]
   >([]);
   const [isPayloadDebugOpen, setIsPayloadDebugOpen] = useState(false);
+  const detailRequestVersionRef = useRef(0);
+  const currentDashboardSessionIdRef = useRef(
+    EMPTY_DASHBOARD.session.sessionId,
+  );
 
   const rowHeightPx = resolveRowHeightPx(uiSettings.rowHeightMode);
 
@@ -426,6 +523,18 @@ function App() {
   }, [uiSettings.payloadDebugEnabled]);
 
   useEffect(() => {
+    currentDashboardSessionIdRef.current = dashboard.session.sessionId;
+  }, [dashboard.session.sessionId]);
+
+  useEffect(() => {
+    detailRequestVersionRef.current += 1;
+    setDetailState(null);
+    setDetailError(null);
+    setSelectedDigestId(null);
+    setSelectedDocumentId(null);
+  }, [dashboard.session.sessionId]);
+
+  useEffect(() => {
     const sessionId = dashboard.session.sessionId;
     if (
       sessionId === EMPTY_DASHBOARD.session.sessionId ||
@@ -480,6 +589,7 @@ function App() {
   }, [dashboard.session.sessionId, dashboard.status]);
 
   function resetWorkspaceLayout() {
+    detailRequestVersionRef.current += 1;
     resetPanelWorkspaceStorage();
     setDetailState(null);
     setDetailError(null);
@@ -495,22 +605,38 @@ function App() {
   }
 
   async function handleSelectDigest(digest: DigestItem) {
+    const sessionId = currentDashboardSessionIdRef.current;
+    const requestVersion = detailRequestVersionRef.current + 1;
+    detailRequestVersionRef.current = requestVersion;
     setSelectedDigestId(digest.id);
     setSelectedDocumentId(null);
+    setDetailState(null);
     setDetailError(null);
 
     try {
-      const payload = await fetchDigestDetail(digest.id);
+      const payload = await fetchDigestDetail(digest.id, sessionId);
+      if (
+        detailRequestVersionRef.current !== requestVersion ||
+        currentDashboardSessionIdRef.current !== sessionId
+      ) {
+        return;
+      }
       recordPayloadSnapshot({
         key: "digest-detail",
         title: "digest detail",
-        path: `/api/digests/${digest.id}?session=active`,
+        path: `/api/digests/${digest.id}?session=${encodeURIComponent(sessionId)}`,
         transport: "http",
         payload,
       });
       setDetailState({ kind: "digest", payload });
       setDetailError(null);
     } catch (error) {
+      if (
+        detailRequestVersionRef.current !== requestVersion ||
+        currentDashboardSessionIdRef.current !== sessionId
+      ) {
+        return;
+      }
       setDetailError(
         error instanceof Error
           ? compactText(error.message, 180)
@@ -520,22 +646,38 @@ function App() {
   }
 
   async function handleSelectDocument(documentId: string) {
+    const sessionId = currentDashboardSessionIdRef.current;
+    const requestVersion = detailRequestVersionRef.current + 1;
+    detailRequestVersionRef.current = requestVersion;
     setSelectedDocumentId(documentId);
     setSelectedDigestId(null);
+    setDetailState(null);
     setDetailError(null);
 
     try {
-      const payload = await fetchDocument(documentId);
+      const payload = await fetchDocument(documentId, sessionId);
+      if (
+        detailRequestVersionRef.current !== requestVersion ||
+        currentDashboardSessionIdRef.current !== sessionId
+      ) {
+        return;
+      }
       recordPayloadSnapshot({
         key: "document-detail",
         title: "document detail",
-        path: `/api/documents/${documentId}?session=active`,
+        path: `/api/documents/${documentId}?session=${encodeURIComponent(sessionId)}`,
         transport: "http",
         payload,
       });
       setDetailState({ kind: "document", payload });
       setDetailError(null);
     } catch (error) {
+      if (
+        detailRequestVersionRef.current !== requestVersion ||
+        currentDashboardSessionIdRef.current !== sessionId
+      ) {
+        return;
+      }
       setDetailError(
         error instanceof Error
           ? compactText(error.message, 180)
@@ -545,6 +687,7 @@ function App() {
   }
 
   async function handleReloadSession() {
+    detailRequestVersionRef.current += 1;
     setIsReloading(true);
     setBlockingLoadingState(null);
     setDashboardError(null);
@@ -576,11 +719,44 @@ function App() {
     }
   }
 
-  const sessionLabel = `${dashboard.session.sessionDate} / ${dashboard.session.window}`;
-  const panelSessionLabel = buildPanelSessionLabel(
-    dashboard.session.sessionDate,
-    dashboard.session.window,
-  );
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const maybeAutoReloadAtNoon = () => {
+      if (
+        isLoadingDashboard ||
+        isReloading ||
+        blockingLoadingState !== null ||
+        dashboard.status === "collecting"
+      ) {
+        return;
+      }
+
+      const now = new Date();
+      if (!hasPassedNoon(now)) {
+        return;
+      }
+
+      const todayKey = buildLocalDateKey(now);
+      if (readNoonAutoReloadDate() === todayKey) {
+        return;
+      }
+
+      writeNoonAutoReloadDate(todayKey);
+      void handleReloadSession();
+    };
+
+    maybeAutoReloadAtNoon();
+    const timerId = window.setInterval(maybeAutoReloadAtNoon, 60_000);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [dashboard.status, isLoadingDashboard, isReloading, blockingLoadingState]);
+
+  const sessionLabel = dashboard.session.sessionDate;
   const fullscreenLoadingState =
     dashboard.status === "collecting"
       ? dashboard.session.loading
@@ -594,29 +770,32 @@ function App() {
     leaderboardOverview ?? dashboard.session.arenaOverview;
   const arenaBoards = resolvedArenaOverview?.boards ?? EMPTY_ARENA_BOARDS;
 
-  const infoItems = dashboard.feeds.map((feed) => ({
-    id: feed.id,
-    label: undefined,
-    title: feed.title,
-    meta: `${feed.items.length} items`,
-    detail: buildFeedSourceSummary(feed) ?? undefined,
-    node: (
-      <SourcePanel
-        panelData={feed}
-        selectedDocumentId={selectedDocumentId}
-        onSelectItem={handleSelectDocument}
-      />
-    ),
-    defaultRowSpan: 1,
-    defaultColSpan: 1,
-  }));
+  const infoItems = dashboard.feeds
+    .filter((feed) => feed.eyebrow !== "Benchmark")
+    .map((feed) => ({
+      id: feed.id,
+      label: feed.eyebrow,
+      title: feed.title,
+      meta: `${feed.items.length} items`,
+      detail: buildFeedSourceSummary(feed) ?? undefined,
+      accentColor: categoryAccentColor(feed.eyebrow),
+      node: (
+        <SourcePanel
+          panelData={feed}
+          selectedDocumentId={selectedDocumentId}
+          onSelectItem={handleSelectDocument}
+        />
+      ),
+      defaultRowSpan: 1,
+      defaultColSpan: 1,
+    }));
 
   const summaryPanel = (
     <SummaryPanel
       title={dashboard.summary.title}
       digests={dashboard.summary.digests}
       briefing={dashboard.summary.briefing}
-      sessionLabel={panelSessionLabel}
+      briefingStatus={dashboard.summary.briefing_status}
       selectedDigestId={selectedDigestId}
       onSelectDigest={handleSelectDigest}
     />
@@ -627,15 +806,24 @@ function App() {
       ? {
           title: `${detailState.payload.digest.domain} Overview`,
           node: (
-            <DigestDetailPanel
-              payload={detailState.payload}
+            <DetailRenderBoundary
+              resetKey={`digest:${detailState.payload.digest.id}`}
               onClose={() => {
                 setDetailState(null);
                 setDetailError(null);
                 setSelectedDigestId(null);
               }}
-              onOpenDocument={handleSelectDocument}
-            />
+            >
+              <DigestDetailPanel
+                payload={detailState.payload}
+                onClose={() => {
+                  setDetailState(null);
+                  setDetailError(null);
+                  setSelectedDigestId(null);
+                }}
+                onOpenDocument={handleSelectDocument}
+              />
+            </DetailRenderBoundary>
           ),
         }
       : detailState?.kind === "document"
@@ -645,19 +833,28 @@ function App() {
               detailState.payload.source,
             ),
             node: (
-              <DocumentDetailPanel
-                document={detailState.payload}
+              <DetailRenderBoundary
+                resetKey={`document:${detailState.payload.document_id}`}
                 onClose={() => {
                   setDetailState(null);
                   setDetailError(null);
                   setSelectedDocumentId(null);
                 }}
-              />
+              >
+                <DocumentDetailPanel
+                  document={detailState.payload}
+                  onClose={() => {
+                    setDetailState(null);
+                    setDetailError(null);
+                    setSelectedDocumentId(null);
+                  }}
+                />
+              </DetailRenderBoundary>
             ),
           }
         : detailError
           ? {
-              title: "Details",
+              title: "Error",
               node: (
                 <DetailErrorPanel
                   message={detailError}
@@ -675,8 +872,6 @@ function App() {
   const mainPanel = (
     <LeaderboardPanel
       sessionLabel={sessionLabel}
-      isReloading={isReloading}
-      onReload={() => void handleReloadSession()}
       arenaBoards={arenaBoards}
       isLoadingLeaderboards={isLoadingLeaderboards}
       leaderboardError={leaderboardError}
@@ -747,6 +942,7 @@ function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         settings={uiSettings}
+        briefingStatus={dashboard?.summary?.briefing_status}
         onClose={() => setIsSettingsOpen(false)}
         onUpdateSettings={setUiSettings}
         onResetWorkspace={resetWorkspaceLayout}

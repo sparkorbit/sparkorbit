@@ -20,6 +20,7 @@ type PanelWorkspaceItem = {
   title?: string;
   meta?: string;
   detail?: string;
+  accentColor?: string;
   node: ReactNode;
   defaultRowSpan?: number;
   defaultColSpan?: number;
@@ -77,6 +78,24 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function parseTaggedPanelTitle(title: string | undefined, label?: string) {
+  const resolvedTitle = String(title ?? "").trim();
+  const resolvedLabel = String(label ?? "").trim();
+  const tagMatch = resolvedTitle.match(/^\[([^\]]+)\]\s*(.*)$/);
+
+  if (tagMatch) {
+    return {
+      tag: `[${tagMatch[1].trim()}]`,
+      title: tagMatch[2].trim(),
+    };
+  }
+
+  return {
+    tag: resolvedLabel ? `[${resolvedLabel}]` : "",
+    title: resolvedTitle,
+  };
+}
+
 function parseTrackSize(value: string) {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -92,6 +111,22 @@ function swapItems(order: string[], activeId: string, targetId: string) {
   }
 
   [next[fromIndex], next[toIndex]] = [next[toIndex], next[fromIndex]];
+  return next;
+}
+
+function moveItemBefore(order: string[], activeId: string, targetId: string) {
+  if (activeId === targetId) {
+    return order;
+  }
+
+  const next = order.filter((id) => id !== activeId);
+  const targetIndex = next.indexOf(targetId);
+
+  if (targetIndex === -1) {
+    return order;
+  }
+
+  next.splice(targetIndex, 0, activeId);
   return next;
 }
 
@@ -317,8 +352,13 @@ function InfoPanelVisibilityModal({
   isOpen,
   items,
   hiddenItemIds,
+  orderedItemIds,
   onClose,
   onToggleItem,
+  onReorderItem,
+  onShowGroup,
+  onHideGroup,
+  onShowOnlyGroup,
   onShowAll,
   onHideAll,
   onApply,
@@ -326,14 +366,50 @@ function InfoPanelVisibilityModal({
   isOpen: boolean;
   items: PanelWorkspaceItem[];
   hiddenItemIds: string[];
+  orderedItemIds: string[];
   onClose: () => void;
   onToggleItem: (itemId: string) => void;
+  onReorderItem: (activeId: string, targetId: string) => void;
+  onShowGroup: (groupLabel: string) => void;
+  onHideGroup: (groupLabel: string) => void;
+  onShowOnlyGroup: (groupLabel: string) => void;
   onShowAll: () => void;
   onHideAll: () => void;
   onApply: () => void;
 }) {
   const hiddenItemIdSet = new Set(hiddenItemIds);
   const visibleCount = items.length - hiddenItemIds.length;
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const orderedItems = useMemo(() => {
+    const itemMap = new Map(items.map((item) => [item.id, item]));
+    const ordered = orderedItemIds
+      .map((itemId) => itemMap.get(itemId))
+      .filter((item): item is PanelWorkspaceItem => item != null);
+    const missing = items.filter(
+      (item) => !orderedItemIds.includes(item.id),
+    );
+    return [...ordered, ...missing];
+  }, [items, orderedItemIds]);
+  const groupedItems = useMemo(() => {
+    const groups = new Map<string, PanelWorkspaceItem[]>();
+
+    for (const item of orderedItems) {
+      const groupLabel = item.label?.trim() || "Other";
+      const existing = groups.get(groupLabel);
+      if (existing) {
+        existing.push(item);
+      } else {
+        groups.set(groupLabel, [item]);
+      }
+    }
+
+    return Array.from(groups.entries()).map(([label, grouped]) => ({
+      label,
+      accentColor: grouped.find((item) => item.accentColor)?.accentColor,
+      items: grouped,
+    }));
+  }, [orderedItems]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -355,6 +431,13 @@ function InfoPanelVisibilityModal({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setDraggedItemId(null);
+      setDropTargetId(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen) {
     return null;
@@ -382,13 +465,13 @@ function InfoPanelVisibilityModal({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="font-mono text-[0.56rem] uppercase tracking-[0.16em] text-orbit-accent">
-                panel picker
+                manage panels
               </p>
               <h2 className="mt-1.5 font-display text-[0.9rem] font-semibold text-orbit-text">
-                Info Panel Cards
+                Manage Source Panels
               </h2>
               <p className="mt-1.5 text-[0.68rem] leading-[1.45] text-orbit-muted">
-                Click items to toggle card visibility, then apply.
+                Drag to change priority, click to show or hide, then apply.
               </p>
             </div>
 
@@ -397,7 +480,7 @@ function InfoPanelVisibilityModal({
               className="shrink-0 border border-orbit-border bg-orbit-panel px-2.5 py-1 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
               onClick={onClose}
             >
-              seal
+              close
             </button>
           </div>
         </div>
@@ -407,58 +490,216 @@ function InfoPanelVisibilityModal({
             <div className="flex min-h-[180px] items-center justify-center border border-orbit-border bg-orbit-bg p-4 text-center">
               <div className="max-w-sm">
                 <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
-                  no cards
+                  no source panels
                 </p>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  No cards available to control in the info panel.
+                  No source panels available.
                 </p>
               </div>
             </div>
           ) : (
-            <div className="grid gap-1 sm:grid-cols-2">
-              {items.map((item) => {
-                const resolvedTitle = item.title ?? item.label ?? item.id;
-                const isHidden = hiddenItemIdSet.has(item.id);
+            <div className="space-y-2">
+              <section className="border border-orbit-border bg-orbit-bg p-2">
+                <p className="font-mono text-[0.52rem] uppercase tracking-[0.14em] text-orbit-accent">
+                  quick groups
+                </p>
+                <p className="mt-1 text-[0.7rem] leading-[1.45] text-orbit-muted">
+                  Focus on one category or reopen one group at once.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {groupedItems.map((group) => {
+                    const groupAccent =
+                      group.accentColor || "var(--color-orbit-accent-dim)";
+
+                    return (
+                      <button
+                        key={group.label}
+                        type="button"
+                        className="border px-2 py-1 font-mono text-[0.54rem] font-semibold uppercase tracking-[0.12em] transition-colors duration-150 hover:brightness-110"
+                        style={{
+                          borderColor: `color-mix(in srgb, ${groupAccent} 50%, var(--color-orbit-border))`,
+                          backgroundColor: `color-mix(in srgb, ${groupAccent} 10%, var(--color-orbit-panel))`,
+                          color: groupAccent,
+                        }}
+                        onClick={() => onShowOnlyGroup(group.label)}
+                      >
+                        {group.label} {group.items.length}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="border border-orbit-border bg-orbit-bg p-2">
+                <p className="font-mono text-[0.52rem] uppercase tracking-[0.14em] text-orbit-accent">
+                  priority
+                </p>
+                <p className="mt-1 text-[0.7rem] leading-[1.45] text-orbit-muted">
+                  Drag the handle on each panel card to control which source shows first.
+                </p>
+              </section>
+
+              {groupedItems.map((group) => {
+                const hiddenCount = group.items.filter((item) =>
+                  hiddenItemIdSet.has(item.id),
+                ).length;
+                const visibleGroupCount = group.items.length - hiddenCount;
+                const groupAccent =
+                  group.accentColor || "var(--color-orbit-accent-dim)";
+
                 return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    aria-pressed={!isHidden}
-                    className={[
-                      "group min-w-0 border p-2 text-left transition-colors duration-150",
-                      isHidden
-                        ? "border-orbit-border bg-orbit-bg hover:border-orbit-accent/70 hover:bg-orbit-bg-elevated"
-                        : "border-orbit-accent/70 bg-orbit-panel",
-                    ].join(" ")}
-                    onClick={() => onToggleItem(item.id)}
+                  <section
+                    key={group.label}
+                    className="border border-orbit-border bg-orbit-bg"
+                    style={{
+                      backgroundColor: `color-mix(in srgb, ${groupAccent} 3%, var(--color-orbit-bg))`,
+                    }}
                   >
-                    <div className="flex items-start justify-between gap-1.5">
-                      {item.label ? (
+                    <div
+                      className="flex flex-wrap items-center justify-between gap-2 border-b border-orbit-border px-2.5 py-2"
+                      style={{
+                        backgroundColor: `color-mix(in srgb, ${groupAccent} 7%, var(--color-orbit-bg))`,
+                      }}
+                    >
+                      <div className="min-w-0">
                         <span
-                          className={[
-                            "inline-flex shrink-0 border px-1.5 py-0.5 font-mono text-[0.48rem] uppercase tracking-[0.12em]",
-                            isHidden
-                              ? "border-orbit-border bg-orbit-panel text-orbit-accent"
-                              : "border-orbit-accent bg-orbit-bg text-orbit-accent",
-                          ].join(" ")}
+                          className="inline-flex items-center border px-2 py-0.5 font-mono text-[0.56rem] font-semibold uppercase tracking-[0.14em]"
+                          style={{
+                            borderColor: `color-mix(in srgb, ${groupAccent} 55%, var(--color-orbit-border))`,
+                            backgroundColor: `color-mix(in srgb, ${groupAccent} 12%, var(--color-orbit-bg))`,
+                            color: groupAccent,
+                          }}
                         >
-                          {item.label}
+                          {group.label}
                         </span>
-                      ) : (
-                        <span />
-                      )}
+                        <p className="mt-1 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
+                          {visibleGroupCount}/{group.items.length} visible
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          className="border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
+                          onClick={() => onShowGroup(group.label)}
+                        >
+                          show
+                        </button>
+                        <button
+                          type="button"
+                          className="border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
+                          onClick={() => onHideGroup(group.label)}
+                        >
+                          hide
+                        </button>
+                        <button
+                          type="button"
+                          className="border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
+                          onClick={() => onShowOnlyGroup(group.label)}
+                        >
+                          only
+                        </button>
+                      </div>
                     </div>
-                    <div className="mt-1.5 flex items-start justify-between gap-2">
-                      <h3 className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.76rem] font-semibold leading-[1.32] text-orbit-text">
-                        {resolvedTitle}
-                      </h3>
-                      {item.meta ? (
-                        <span className="shrink-0 font-mono text-[0.5rem] uppercase tracking-[0.1em] text-orbit-muted">
-                          {item.meta}
-                        </span>
-                      ) : null}
+
+                    <div className="grid gap-1 p-2 sm:grid-cols-2">
+                      {group.items.map((item) => {
+                        const resolvedTitle = item.title ?? item.label ?? item.id;
+                        const parsedTitle = parseTaggedPanelTitle(
+                          typeof resolvedTitle === "string"
+                            ? resolvedTitle
+                            : String(resolvedTitle),
+                          item.label,
+                        );
+                        const displayTitle =
+                          parsedTitle.title || resolvedTitle;
+                        const isHidden = hiddenItemIdSet.has(item.id);
+
+                        return (
+                          <article
+                            key={item.id}
+                            className={[
+                              "group min-w-0 border p-2 transition-colors duration-150",
+                              dropTargetId === item.id && draggedItemId !== item.id
+                                ? "border-orbit-accent"
+                                : "",
+                              isHidden
+                                ? "border-orbit-border bg-orbit-bg hover:border-orbit-accent/70 hover:bg-orbit-bg-elevated"
+                                : "border-orbit-accent/70 bg-orbit-panel",
+                            ].join(" ")}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              if (draggedItemId && draggedItemId !== item.id) {
+                                setDropTargetId(item.id);
+                              }
+                            }}
+                            onDragLeave={() => {
+                              if (dropTargetId === item.id) {
+                                setDropTargetId(null);
+                              }
+                            }}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              if (draggedItemId && draggedItemId !== item.id) {
+                                onReorderItem(draggedItemId, item.id);
+                              }
+                              setDraggedItemId(null);
+                              setDropTargetId(null);
+                            }}
+                          >
+                            <div className="flex items-start gap-2">
+                              <button
+                                type="button"
+                                draggable
+                                className={[
+                                  "mt-0.5 shrink-0 border px-1.5 py-1 font-mono text-[0.48rem] uppercase tracking-[0.16em] transition-colors duration-150",
+                                  draggedItemId === item.id
+                                    ? "border-orbit-accent text-orbit-accent"
+                                    : "border-orbit-border text-orbit-muted hover:border-orbit-accent hover:text-orbit-accent",
+                                ].join(" ")}
+                                title="Drag to change priority"
+                                aria-label={`Drag to reorder ${displayTitle}`}
+                                onDragStart={(event) => {
+                                  event.dataTransfer.effectAllowed = "move";
+                                  event.dataTransfer.setData("text/plain", item.id);
+                                  setDraggedItemId(item.id);
+                                  setDropTargetId(item.id);
+                                }}
+                                onDragEnd={() => {
+                                  setDraggedItemId(null);
+                                  setDropTargetId(null);
+                                }}
+                              >
+                                drag
+                              </button>
+
+                              <button
+                                type="button"
+                                aria-pressed={!isHidden}
+                                className="min-w-0 flex-1 text-left"
+                                onClick={() => onToggleItem(item.id)}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="font-mono text-[0.48rem] uppercase tracking-[0.14em] text-orbit-muted">
+                                      priority {orderedItemIds.indexOf(item.id) + 1}
+                                    </p>
+                                    <h4 className="orbit-wrap-anywhere mt-1 min-w-0 font-display text-[0.76rem] font-semibold leading-[1.32] text-orbit-text">
+                                      {displayTitle}
+                                    </h4>
+                                  </div>
+                                  {item.meta ? (
+                                    <span className="shrink-0 font-mono text-[0.5rem] uppercase tracking-[0.1em] text-orbit-muted">
+                                      {item.meta}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </button>
+                            </div>
+                          </article>
+                        );
+                      })}
                     </div>
-                  </button>
+                  </section>
                 );
               })}
             </div>
@@ -497,7 +738,7 @@ function InfoPanelVisibilityModal({
                 className="border border-orbit-accent bg-orbit-panel px-2.5 py-1 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg"
                 onClick={onApply}
               >
-                apply visibility
+                apply
               </button>
             </div>
           </div>
@@ -754,6 +995,14 @@ function PanelBoard({
               colSpan: item.defaultColSpan ?? DEFAULT_COL_SPAN,
             };
             const resolvedTitle = item.title ?? item.label ?? item.id;
+            const parsedTitle = parseTaggedPanelTitle(
+              typeof resolvedTitle === "string"
+                ? resolvedTitle
+                : String(resolvedTitle),
+              item.label,
+            );
+            const displayTitle =
+              parsedTitle.title || (!parsedTitle.tag ? resolvedTitle : "");
             const placement = placements.get(item.id);
             const resolvedColSpan =
               placement?.colSpan ?? clamp(size.colSpan, 1, columnCount);
@@ -776,21 +1025,31 @@ function PanelBoard({
               >
                 <div
                   className={[
-                    "h-full min-h-0 border bg-orbit-bg-elevated transition-colors duration-150",
+                    "h-full min-h-0 border transition-colors duration-150",
                     swapTargetId === item.id
                       ? "border-orbit-accent"
                       : "border-orbit-border group-hover:border-orbit-border-strong",
                     activeDragId === item.id ? "opacity-25" : "",
                   ].join(" ")}
+                  style={{
+                    backgroundColor: item.accentColor
+                      ? `color-mix(in srgb, ${item.accentColor} 4%, var(--color-orbit-bg-elevated))`
+                      : "var(--color-orbit-bg-elevated)",
+                  }}
                 >
                   <div className="flex h-full min-h-0 flex-col">
                     <div
                       className={[
-                        "flex h-7 min-w-0 items-stretch justify-between border-b bg-orbit-bg transition-colors duration-150",
+                        "flex h-8 min-w-0 items-stretch justify-between border-b transition-colors duration-150",
                         activeDragId === item.id || swapTargetId === item.id
                           ? "border-orbit-accent"
                           : "border-orbit-border group-hover:border-orbit-border-strong",
                       ].join(" ")}
+                      style={{
+                        backgroundColor: item.accentColor
+                          ? `color-mix(in srgb, ${item.accentColor} 8%, var(--color-orbit-bg))`
+                          : "var(--color-orbit-bg)",
+                      }}
                     >
                       <button
                         type="button"
@@ -798,34 +1057,53 @@ function PanelBoard({
                         onPointerDown={(event) =>
                           beginPanelDrag(event, item.id)
                         }
-                        title="Grab to reroute slot position"
+                        title="Drag to reorder"
                       >
                         <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                          <span
-                            className={[
-                              "shrink-0 text-[0.86rem] leading-none",
-                              activeDragId === item.id
-                                ? "text-orbit-accent"
-                                : "text-orbit-accent-dim",
-                            ].join(" ")}
-                          >
-                            ::
-                          </span>
-                          {resolvedTitle ? (
+                          {parsedTitle.tag ? (
+                            <span
+                              className="shrink-0 border px-1.5 py-0.5 font-mono text-[0.48rem] font-semibold uppercase tracking-[0.14em]"
+                              style={{
+                                borderColor:
+                                  activeDragId === item.id ||
+                                  swapTargetId === item.id
+                                    ? "var(--color-orbit-accent)"
+                                    : item.accentColor
+                                      ? `color-mix(in srgb, ${item.accentColor} 55%, var(--color-orbit-border))`
+                                      : "var(--color-orbit-border)",
+                                backgroundColor:
+                                  activeDragId === item.id ||
+                                  swapTargetId === item.id
+                                    ? "color-mix(in srgb, var(--color-orbit-accent) 12%, var(--color-orbit-bg))"
+                                    : item.accentColor
+                                      ? `color-mix(in srgb, ${item.accentColor} 12%, var(--color-orbit-bg))`
+                                      : "var(--color-orbit-bg)",
+                                color:
+                                  activeDragId === item.id ||
+                                  swapTargetId === item.id
+                                    ? "var(--color-orbit-accent)"
+                                    : item.accentColor ||
+                                      "var(--color-orbit-accent-dim)",
+                              }}
+                            >
+                              {parsedTitle.tag}
+                            </span>
+                          ) : null}
+                          {displayTitle ? (
                             <span
                               className={[
-                                "orbit-token-ellipsis font-display text-[0.72rem] font-semibold tracking-[-0.01em]",
+                                "orbit-token-ellipsis font-display text-[0.78rem] font-semibold tracking-[-0.01em]",
                                 activeDragId === item.id ||
                                 swapTargetId === item.id
                                   ? "text-orbit-accent"
                                   : "text-orbit-text",
                               ].join(" ")}
                             >
-                              {resolvedTitle}
+                              {displayTitle}
                             </span>
-                          ) : (
+                          ) : parsedTitle.tag ? null : (
                             <span className="font-mono text-[0.58rem] uppercase tracking-[0.14em] text-orbit-muted">
-                              slot
+                              untitled
                             </span>
                           )}
                         </span>
@@ -844,10 +1122,10 @@ function PanelBoard({
                             ].join(" ")}
                           >
                             {swapTargetId === item.id
-                              ? "swap"
+                              ? "drop here"
                               : activeDragId === item.id
-                                ? "routing"
-                                : "move"}
+                                ? "dragging"
+                                : "drag"}
                           </span>
                         </span>
                       </button>
@@ -861,8 +1139,8 @@ function PanelBoard({
                               ? "border-orbit-accent text-orbit-accent"
                               : "border-orbit-border text-orbit-muted hover:border-orbit-accent hover:bg-orbit-panel hover:text-orbit-accent",
                           ].join(" ")}
-                          aria-label={`Close ${item.title ?? item.label ?? item.id} card`}
-                          title="Hide this card"
+                          aria-label={`Hide ${item.title ?? item.label ?? item.id}`}
+                          title="Hide this feed"
                           onPointerDown={(event) => event.stopPropagation()}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -874,26 +1152,14 @@ function PanelBoard({
                       ) : null}
                     </div>
 
-                    {item.label || item.detail ? (
-                      <div className="border-b border-orbit-border bg-orbit-panel/45 px-3 py-2">
-                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                          {item.label ? (
-                            <span className="inline-flex shrink-0 border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.46rem] uppercase tracking-[0.12em] text-orbit-accent">
-                              {item.label}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="min-h-0 flex-1 p-px">{item.node}</div>
+                    <div className="min-h-0 flex-1">{item.node}</div>
                   </div>
                 </div>
 
                 <button
                   type="button"
                   className="absolute inset-x-0 bottom-0 z-20 flex h-2 cursor-row-resize items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-                  title="Drag to adjust row span. Double-click to reset to default"
+                  title="Drag to resize height. Double-click to reset"
                   onDoubleClick={() => {
                     setSizes((current) => ({
                       ...current,
@@ -942,7 +1208,7 @@ function PanelBoard({
                   <button
                     type="button"
                     className="absolute bottom-0 right-0 top-7 z-20 flex w-2 cursor-col-resize items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-                    title="Drag to adjust col span. Double-click to reset to default"
+                    title="Drag to resize width. Double-click to reset"
                     onDoubleClick={() => {
                       setSizes((current) => ({
                         ...current,
@@ -1040,7 +1306,7 @@ function PanelBoard({
                   {swapTargetId ? "swap" : "routing"}
                 </span>
               </div>
-              <div className="min-h-0 flex-1 p-px opacity-95">
+              <div className="min-h-0 flex-1 opacity-95">
                 {draggedItem.node}
               </div>
             </div>
@@ -1094,20 +1360,20 @@ function DefaultMainPanel() {
     <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel p-4 md:p-5">
       <div className="border-b border-orbit-border pb-3">
         <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.2em] text-orbit-accent">
-          Core Slot
+          Dashboard
         </p>
         <h1 className="mt-2 font-display text-[1.12rem] font-semibold text-orbit-text md:text-[1.28rem]">
-          Main Panel Reserved
+          AI World Monitor
         </h1>
       </div>
       <div className="mt-4 flex min-h-0 flex-1 items-center justify-center border border-orbit-border bg-orbit-bg p-5 text-center">
         <div className="max-w-xl">
           <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent-dim">
-            Reserved Space
+            Getting Started
           </p>
           <p className="mt-3 text-[0.84rem] leading-[1.65] text-orbit-muted">
-            Main visualizations, detail views, and expanded content appear in
-            this area.
+            Benchmark rankings, document details, and category overviews appear
+            here.
           </p>
         </div>
       </div>
@@ -1132,6 +1398,10 @@ export function PanelWorkspace({
   const [draftHiddenInfoItemIds, setDraftHiddenInfoItemIds] = useState<
     string[]
   >([]);
+  const [draftInfoItemOrder, setDraftInfoItemOrder] = useState<string[]>(() =>
+    loadOrder(infoItemIds, PANEL_WORKSPACE_STORAGE.infoOrder),
+  );
+  const [infoBoardVersion, setInfoBoardVersion] = useState(0);
   const resolvedHiddenInfoItemIds = hiddenInfoItemIds.filter((id) =>
     infoItemIdSet.has(id),
   );
@@ -1142,6 +1412,11 @@ export function PanelWorkspace({
   const hiddenInfoItems = infoItems.filter((item) =>
     hiddenInfoItemIdSet.has(item.id),
   );
+  const resolvedDraftInfoItemOrder = useMemo(() => {
+    const valid = draftInfoItemOrder.filter((id) => infoItemIdSet.has(id));
+    const missing = infoItemIds.filter((id) => !valid.includes(id));
+    return [...valid, ...missing];
+  }, [draftInfoItemOrder, infoItemIdSet, infoItemIds]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1162,11 +1437,13 @@ export function PanelWorkspace({
 
   function openInfoPanelPicker() {
     setDraftHiddenInfoItemIds(resolvedHiddenInfoItemIds);
+    setDraftInfoItemOrder(loadOrder(infoItemIds, PANEL_WORKSPACE_STORAGE.infoOrder));
     setIsInfoPanelPickerOpen(true);
   }
 
   function closeInfoPanelPicker() {
     setDraftHiddenInfoItemIds(resolvedHiddenInfoItemIds);
+    setDraftInfoItemOrder(loadOrder(infoItemIds, PANEL_WORKSPACE_STORAGE.infoOrder));
     setIsInfoPanelPickerOpen(false);
   }
 
@@ -1178,6 +1455,43 @@ export function PanelWorkspace({
     );
   }
 
+  function reorderDraftInfoItem(activeId: string, targetId: string) {
+    setDraftInfoItemOrder((current) =>
+      moveItemBefore(
+        current.filter((id) => infoItemIdSet.has(id)).concat(
+          infoItemIds.filter((id) => !current.includes(id)),
+        ),
+        activeId,
+        targetId,
+      ),
+    );
+  }
+
+  function resolveGroupItemIds(groupLabel: string) {
+    return infoItems
+      .filter((item) => (item.label?.trim() || "Other") === groupLabel)
+      .map((item) => item.id);
+  }
+
+  function showInfoItemGroup(groupLabel: string) {
+    const groupIds = resolveGroupItemIds(groupLabel);
+    setDraftHiddenInfoItemIds((current) =>
+      current.filter((id) => !groupIds.includes(id)),
+    );
+  }
+
+  function hideInfoItemGroup(groupLabel: string) {
+    const groupIds = resolveGroupItemIds(groupLabel);
+    setDraftHiddenInfoItemIds((current) => [
+      ...new Set([...current, ...groupIds]),
+    ]);
+  }
+
+  function showOnlyInfoItemGroup(groupLabel: string) {
+    const groupIds = new Set(resolveGroupItemIds(groupLabel));
+    setDraftHiddenInfoItemIds(infoItemIds.filter((id) => !groupIds.has(id)));
+  }
+
   function showAllInfoItems() {
     setDraftHiddenInfoItemIds([]);
   }
@@ -1187,7 +1501,14 @@ export function PanelWorkspace({
   }
 
   function applyInfoPanelVisibility() {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(
+        PANEL_WORKSPACE_STORAGE.infoOrder,
+        JSON.stringify(resolvedDraftInfoItemOrder),
+      );
+    }
     setHiddenInfoItemIds(draftHiddenInfoItemIds);
+    setInfoBoardVersion((current) => current + 1);
     setIsInfoPanelPickerOpen(false);
   }
 
@@ -1195,13 +1516,13 @@ export function PanelWorkspace({
   const bottomPanel =
     summaryPanel ??
     (hasUnassigned ? (
-      <WorkspaceSection eyebrow="Overflow Rack" title="Loose Panels">
+      <WorkspaceSection eyebrow="More Sources" title="Additional Source Panels">
         <PanelBoard
           items={unassignedItems}
           orderStorageKey={PANEL_WORKSPACE_STORAGE.unassignedOrder}
           sizeStorageKey={PANEL_WORKSPACE_STORAGE.unassignedSize}
-          emptyTitle="No remaining panels"
-          emptyDescription="No panels awaiting classification."
+          emptyTitle="No additional source panels"
+          emptyDescription="All source panels are shown above."
           rowHeightPx={rowHeightPx}
         />
       </WorkspaceSection>
@@ -1216,33 +1537,36 @@ export function PanelWorkspace({
 
         <div className="min-h-0 overflow-hidden xl:col-start-3 xl:row-start-1 xl:row-span-3">
           <WorkspaceSection
-            eyebrow="Details"
-            title={infoPanelOverride?.title ?? "Selected Items"}
+            eyebrow={infoPanelOverride ? "Selected Source" : "Browse Sources"}
+            title={infoPanelOverride?.title ?? "Choose a Source Panel"}
             itemCount={infoPanelOverride ? undefined : visibleInfoItems.length}
             action={
               infoItems.length > 0 ? (
                 <button
                   type="button"
                   className="shrink-0 border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.54rem] uppercase tracking-[0.14em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
-                  onClick={openInfoPanelPicker}
-                >
-                  panels {visibleInfoItems.length}/{infoItems.length}
+                onClick={openInfoPanelPicker}
+              >
+                  manage panels
                 </button>
               ) : null
             }
           >
             {infoPanelOverride?.node ?? (
               <PanelBoard
+                key={`info-board-${infoBoardVersion}`}
                 items={visibleInfoItems}
                 orderStorageKey={PANEL_WORKSPACE_STORAGE.infoOrder}
                 sizeStorageKey={PANEL_WORKSPACE_STORAGE.infoSize}
                 emptyTitle={
-                  hiddenInfoItems.length > 0 ? "All panels are hidden" : "No items yet"
+                  hiddenInfoItems.length > 0
+                    ? "All source panels are hidden"
+                    : "No source panels yet"
                 }
                 emptyDescription={
                   hiddenInfoItems.length > 0
-                    ? "Use the panels button in the header to restore hidden panels."
-                    : "Select a panel or document to view details here."
+                    ? "Click manage panels above to show hidden panels."
+                    : "Source panels will appear here once data is loaded."
                 }
                 maxDynamicColumns={3}
                 minColumnWidthPx={320}
@@ -1264,8 +1588,13 @@ export function PanelWorkspace({
         isOpen={isInfoPanelPickerOpen}
         items={infoItems}
         hiddenItemIds={draftHiddenInfoItemIds}
+        orderedItemIds={resolvedDraftInfoItemOrder}
         onClose={closeInfoPanelPicker}
         onToggleItem={toggleDraftInfoItem}
+        onReorderItem={reorderDraftInfoItem}
+        onShowGroup={showInfoItemGroup}
+        onHideGroup={hideInfoItemGroup}
+        onShowOnlyGroup={showOnlyInfoItemGroup}
         onShowAll={showAllInfoItems}
         onHideAll={hideAllInfoItems}
         onApply={applyInfoPanelVisibility}

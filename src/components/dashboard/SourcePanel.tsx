@@ -2,14 +2,17 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import type { FeedPanel as FeedPanelData } from "../../content/dashboardContent";
 import { formatDisplayDate } from "../../features/dashboard/display";
-import { DashboardPanel } from "./DashboardPanel";
-import { card } from "./styles";
+import { categoryAccentColor } from "./styles";
 
 const htmlEntityDecoder =
   typeof document !== "undefined" ? document.createElement("textarea") : null;
 const COMPACT_PANEL_HEIGHT_PX = 460;
 
-function decodeHtmlEntities(value: string) {
+function decodeHtmlEntities(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
   if (htmlEntityDecoder === null || !value.includes("&")) {
     return value;
   }
@@ -33,6 +36,7 @@ export function SourcePanel({
 }: SourcePanelProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [isCompactLayout, setIsCompactLayout] = useState(false);
+  const catColor = categoryAccentColor(panelData.eyebrow);
 
   useEffect(() => {
     const contentElement = panelRef.current?.parentElement;
@@ -70,93 +74,96 @@ export function SourcePanel({
   }, []);
 
   return (
-    <DashboardPanel style={style}>
+    <div
+      className="flex h-full min-h-0 flex-col"
+      style={{
+        ...style,
+        backgroundColor: `color-mix(in srgb, ${catColor} 2%, var(--color-orbit-bg))`,
+      }}
+    >
       <div
         ref={panelRef}
-        className={[
-          "grid min-h-0 flex-1",
-          isCompactLayout ? "gap-px" : "gap-1",
-        ].join(" ")}
+        className="orbit-scrollbar-hidden min-h-0 flex-1 overflow-y-auto"
       >
-        {panelData.items.map((item) => {
-          const resolvedTitle = decodeHtmlEntities(item.title);
-          const resolvedMeta = decodeHtmlEntities(item.meta);
-          const resolvedNote = decodeHtmlEntities(item.note);
-          const resolvedTimestamp = formatDisplayDate(item.timestamp);
+        <div
+          className="flex min-h-full flex-col gap-[1px]"
+          style={{ backgroundColor: "var(--color-orbit-border)" }}
+        >
+          {panelData.items.map((item, index) => {
+            const resolvedTitle = decodeHtmlEntities(item.title);
+            const resolvedNote = decodeHtmlEntities(item.note);
+            const resolvedTimestamp = formatDisplayDate(item.timestamp);
+            const isSelected = selectedDocumentId === item.documentId;
+            const isOdd = index % 2 === 1;
 
-          return (
-            <button
-              key={item.documentId}
-              type="button"
-              className={[
-                `${card} min-w-0 overflow-hidden p-0 text-left transition-colors duration-150`,
-                onSelectItem
-                  ? "hover:border-orbit-border-strong hover:bg-orbit-bg-elevated"
-                  : "",
-                selectedDocumentId === item.documentId
-                  ? "border-orbit-accent bg-orbit-panel"
-                  : "",
-              ].join(" ")}
-              onClick={() => onSelectItem?.(item.documentId)}
-            >
-              {isCompactLayout ? (
-                <div className="flex items-start gap-1.5 px-2 py-1.5">
-                  <span
-                    aria-hidden="true"
-                    className={[
-                      "mt-[0.22rem] shrink-0 text-[0.5rem] leading-none",
-                      selectedDocumentId === item.documentId
-                        ? "text-orbit-accent"
-                        : "text-orbit-accent-dim",
-                    ].join(" ")}
-                  >
-                    &bull;
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="orbit-line-clamp-2 orbit-wrap-anywhere font-display text-[0.75rem] font-semibold leading-[1.18] tracking-[-0.01em] text-orbit-text">
-                      {resolvedTitle}
-                    </h3>
-                    {resolvedTimestamp ? (
-                      <p className="mt-0.5 font-mono text-[0.46rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                        {resolvedTimestamp}
-                      </p>
-                    ) : null}
-                  </div>
+            return (
+              <button
+                key={item.documentId}
+                type="button"
+                data-feed-item-document-id={item.documentId}
+                className={[
+                  "group min-w-0 text-left transition-all duration-150",
+                  isSelected
+                    ? ""
+                    : onSelectItem
+                      ? "hover:brightness-125"
+                      : "",
+                ].join(" ")}
+                style={{
+                  backgroundColor: isSelected
+                    ? `color-mix(in srgb, ${catColor} 15%, var(--color-orbit-bg-elevated))`
+                    : isOdd
+                      ? `color-mix(in srgb, ${catColor} 4%, var(--color-orbit-bg-elevated))`
+                      : `color-mix(in srgb, ${catColor} 2%, var(--color-orbit-bg))`,
+                }}
+                onClick={() => onSelectItem?.(item.documentId)}
+              >
+                <div className="flex min-h-0">
+                  {/* category color bar */}
+                  <div
+                    className="w-[3px] shrink-0 transition-opacity duration-150"
+                    style={{
+                      backgroundColor: catColor,
+                      opacity: isSelected ? 1 : 0.3,
+                    }}
+                  />
+
+                  {isCompactLayout ? (
+                    <div className="flex min-w-0 flex-1 items-baseline gap-2 px-3 py-2">
+                      <h3 className="orbit-line-clamp-1 orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.74rem] font-semibold leading-[1.3] text-orbit-text">
+                        {resolvedTitle}
+                      </h3>
+                      {resolvedTimestamp ? (
+                        <span className="shrink-0 font-mono text-[0.44rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
+                          {resolvedTimestamp}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="min-w-0 flex-1 px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="orbit-line-clamp-2 orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.78rem] font-semibold leading-[1.35] text-orbit-text">
+                          {resolvedTitle}
+                        </h3>
+                        {resolvedTimestamp ? (
+                          <span className="mt-0.5 shrink-0 font-mono text-[0.46rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
+                            {resolvedTimestamp}
+                          </span>
+                        ) : null}
+                      </div>
+                      {resolvedNote ? (
+                        <p className="orbit-line-clamp-1 orbit-wrap-anywhere mt-1 text-[0.64rem] leading-[1.5] text-orbit-muted">
+                          {resolvedNote}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="flex items-start gap-2 px-2.5 py-2">
-                  <span
-                    aria-hidden="true"
-                    className={[
-                      "mt-[0.3rem] shrink-0 text-[0.56rem] leading-none",
-                      selectedDocumentId === item.documentId
-                        ? "text-orbit-accent"
-                        : "text-orbit-accent-dim",
-                    ].join(" ")}
-                  >
-                    &bull;
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="orbit-line-clamp-2 orbit-wrap-anywhere font-display text-[0.8rem] font-semibold leading-[1.3] tracking-[-0.01em] text-orbit-text">
-                      {resolvedTitle}
-                    </h3>
-                    <p className="orbit-wrap-anywhere mt-1 font-mono text-[0.48rem] uppercase tracking-[0.08em] text-orbit-accent-dim">
-                      {[resolvedTimestamp, resolvedMeta]
-                        .filter(Boolean)
-                        .join(" / ")}
-                    </p>
-                    {resolvedNote ? (
-                      <p className="orbit-line-clamp-1 orbit-wrap-anywhere mt-1 text-[0.66rem] leading-[1.45] text-orbit-muted">
-                        {resolvedNote}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              )}
-            </button>
-          );
-        })}
+              </button>
+            );
+          })}
+        </div>
       </div>
-    </DashboardPanel>
+    </div>
   );
 }
