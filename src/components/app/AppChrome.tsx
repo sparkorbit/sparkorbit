@@ -274,6 +274,9 @@ export function GitHubStarPrompt({
                 repo ping / 저장소 알림
               </span>
             </div>
+            <p className="mt-2 font-mono text-[0.56rem] uppercase tracking-[0.14em] text-orbit-accent-dim">
+              more observers wanted / 관측 동료 모집중
+            </p>
 
             <h2 className="mt-2 font-display text-[0.98rem] font-semibold text-orbit-text">
               You&apos;ve been orbiting for a minute.
@@ -282,10 +285,10 @@ export function GitHubStarPrompt({
               1분 정도 둘러보셨네요.
             </p>
             <p className="mt-2 text-[0.76rem] leading-[1.62] text-orbit-muted">
-              Help more people discover our glorious little mess.
+              Bring more observers into the orbit.
             </p>
             <p className="mt-1 text-[0.74rem] leading-[1.62] text-orbit-muted">
-              우리의 삽질이 더 많은 사람들과 함께할 수 있도록 도와주세요. -&gt;
+              더 많은 사람들이 이 관측 궤도에 함께할 수 있도록 도와주세요.
             </p>
 
             <div className="mt-3 flex items-center gap-2">

@@ -67,6 +67,7 @@ const NOON_AUTO_RELOAD_STORAGE_KEY = "orbit-noon-auto-reload-date";
 const NOON_AUTO_RELOAD_HOUR = 12;
 const GITHUB_STAR_PROMPT_STORAGE_KEY = "sparkorbit-github-star-prompt-v1";
 const GITHUB_STAR_PROMPT_DELAY_MS = 60 * 1000;
+const GITHUB_STAR_PROMPT_VISIBLE_MS = 20 * 1000;
 const GITHUB_REPO_URL = "https://github.com/sparkorbit/sparkorbit";
 
 function buildLocalDateKey(date: Date) {
@@ -395,6 +396,8 @@ function App() {
   >([]);
   const [isPayloadDebugOpen, setIsPayloadDebugOpen] = useState(false);
   const [hasStarPromptDelayElapsed, setHasStarPromptDelayElapsed] =
+    useState(false);
+  const [hasGitHubStarPromptShown, setHasGitHubStarPromptShown] =
     useState(false);
   const [isGitHubStarPromptOpen, setIsGitHubStarPromptOpen] = useState(false);
   const [activeJob, setActiveJob] = useState<ActiveJobResponse | null>(null);
@@ -1137,6 +1140,7 @@ function App() {
   useEffect(() => {
     if (
       !hasStarPromptDelayElapsed ||
+      hasGitHubStarPromptShown ||
       isGitHubStarPromptOpen ||
       shouldShowFullscreenLoading ||
       isSettingsOpen ||
@@ -1145,13 +1149,29 @@ function App() {
       return;
     }
 
+    setHasGitHubStarPromptShown(true);
     setIsGitHubStarPromptOpen(true);
   }, [
+    hasGitHubStarPromptShown,
     hasStarPromptDelayElapsed,
     isGitHubStarPromptOpen,
     isSettingsOpen,
     shouldShowFullscreenLoading,
   ]);
+
+  useEffect(() => {
+    if (!isGitHubStarPromptOpen) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      setIsGitHubStarPromptOpen(false);
+    }, GITHUB_STAR_PROMPT_VISIBLE_MS);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [isGitHubStarPromptOpen]);
 
   function handleAcceptGitHubStarPrompt() {
     writeGitHubStarPromptState("accepted");

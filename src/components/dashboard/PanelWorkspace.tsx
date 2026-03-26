@@ -905,7 +905,7 @@ function PanelBoard({
   }
 
   return (
-    <div className="orbit-scrollbar-hidden h-full overflow-auto bg-orbit-bg p-1">
+    <div className="h-full overflow-auto bg-orbit-bg p-1">
       {orderedItems.length > 0 ? (
         <div
           ref={gridRef}
@@ -1132,14 +1132,14 @@ function WorkspaceSection({
   children: ReactNode;
 }) {
   return (
-    <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel">
-      <div className="flex items-center justify-between gap-2 border-b border-orbit-border bg-orbit-bg px-3 py-2">
+    <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel p-3 md:p-3">
+      <div className="flex items-center justify-between gap-2 border-b border-orbit-border pb-2">
         <h2 className="font-display text-[0.86rem] font-semibold text-orbit-text">
           {title}
         </h2>
         {action}
       </div>
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className="mt-2 min-h-0 flex-1">{children}</div>
     </section>
   );
 }

@@ -157,22 +157,22 @@ export function SourcePanel({
                   />
 
                   {isCompactLayout ? (
-                    <div className="min-w-0 flex-1 px-3 py-2">
-                      <h3 className="orbit-line-clamp-1 orbit-wrap-anywhere min-w-0 font-display text-[0.74rem] font-semibold leading-[1.3] text-orbit-text">
+                    <div className="min-w-0 flex-1 px-3 py-1.5">
+                      <h3 className="orbit-line-clamp-1 orbit-wrap-anywhere min-w-0 font-display text-[0.68rem] font-semibold leading-[1.3] text-orbit-text">
                         {resolvedTitle}
                       </h3>
                       {(scoreLabel || resolvedTimestamp) ? (
-                        <div className="mt-1 flex items-center gap-2">
+                        <div className="mt-0.5 flex items-center gap-2">
                           {scoreLabel ? (
                             <span
-                              className="font-mono text-[0.44rem] tabular-nums tracking-[0.08em]"
+                              className="font-mono text-[0.42rem] tabular-nums tracking-[0.08em]"
                               style={{ color: catColor, opacity: 0.85 }}
                             >
                               {scoreLabel}
                             </span>
                           ) : null}
                           {resolvedTimestamp ? (
-                            <span className="font-mono text-[0.44rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
+                            <span className="font-mono text-[0.42rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
                               {resolvedTimestampLabel}{resolvedTimestamp}
                             </span>
                           ) : null}
@@ -180,29 +180,29 @@ export function SourcePanel({
                       ) : null}
                     </div>
                   ) : (
-                    <div className="min-w-0 flex-1 px-3 py-2.5">
-                      <h3 className="orbit-line-clamp-2 orbit-wrap-anywhere min-w-0 font-display text-[0.78rem] font-semibold leading-[1.35] text-orbit-text">
+                    <div className="min-w-0 flex-1 px-3 py-2">
+                      <h3 className="orbit-line-clamp-2 orbit-wrap-anywhere min-w-0 font-display text-[0.72rem] font-semibold leading-[1.3] text-orbit-text">
                         {resolvedTitle}
                       </h3>
                       {(scoreLabel || resolvedTimestamp) ? (
-                        <div className="mt-1 flex items-center gap-2">
+                        <div className="mt-0.5 flex items-center gap-2">
                           {scoreLabel ? (
                             <span
-                              className="font-mono text-[0.46rem] tabular-nums tracking-[0.08em]"
+                              className="font-mono text-[0.42rem] tabular-nums tracking-[0.08em]"
                               style={{ color: catColor, opacity: 0.85 }}
                             >
                               {scoreLabel}
                             </span>
                           ) : null}
                           {resolvedTimestamp ? (
-                            <span className="font-mono text-[0.46rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
+                            <span className="font-mono text-[0.42rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
                               {resolvedTimestampLabel}{resolvedTimestamp}
                             </span>
                           ) : null}
                         </div>
                       ) : null}
                       {resolvedNote ? (
-                        <p className="orbit-line-clamp-2 orbit-wrap-anywhere mt-1.5 text-[0.64rem] leading-[1.5] text-orbit-muted">
+                        <p className="orbit-line-clamp-2 orbit-wrap-anywhere mt-1 text-[0.58rem] leading-[1.45] text-orbit-muted">
                           {resolvedNote}
                         </p>
                       ) : null}
