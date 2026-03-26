@@ -829,19 +829,26 @@ function PanelBoard({
                             </span>
                           )}
                         </span>
-                        <span
-                          className={[
-                            "shrink-0 font-mono text-[0.5rem] uppercase tracking-widest",
-                            activeDragId === item.id || swapTargetId === item.id
-                              ? "text-orbit-accent"
-                              : "text-orbit-muted",
-                          ].join(" ")}
-                        >
-                          {swapTargetId === item.id
-                            ? "swap"
-                            : activeDragId === item.id
-                              ? "routing"
-                              : "move"}
+                        <span className="flex shrink-0 items-center gap-2">
+                          {item.meta ? (
+                            <span className="font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
+                              {item.meta}
+                            </span>
+                          ) : null}
+                          <span
+                            className={[
+                              "font-mono text-[0.5rem] uppercase tracking-widest",
+                              activeDragId === item.id || swapTargetId === item.id
+                                ? "text-orbit-accent"
+                                : "text-orbit-muted",
+                            ].join(" ")}
+                          >
+                            {swapTargetId === item.id
+                              ? "swap"
+                              : activeDragId === item.id
+                                ? "routing"
+                                : "move"}
+                          </span>
                         </span>
                       </button>
 
@@ -867,19 +874,12 @@ function PanelBoard({
                       ) : null}
                     </div>
 
-                    {item.label || item.meta || item.detail ? (
+                    {item.label || item.detail ? (
                       <div className="border-b border-orbit-border bg-orbit-panel/45 px-3 py-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                            {item.label ? (
-                              <span className="inline-flex shrink-0 border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.46rem] uppercase tracking-[0.12em] text-orbit-accent">
-                                {item.label}
-                              </span>
-                            ) : null}
-                          </div>
-                          {item.meta ? (
-                            <span className="shrink-0 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-orbit-muted">
-                              {item.meta}
+                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          {item.label ? (
+                            <span className="inline-flex shrink-0 border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.46rem] uppercase tracking-[0.12em] text-orbit-accent">
+                              {item.label}
                             </span>
                           ) : null}
                         </div>
@@ -1097,17 +1097,17 @@ function DefaultMainPanel() {
           Core Slot
         </p>
         <h1 className="mt-2 font-display text-[1.12rem] font-semibold text-orbit-text md:text-[1.28rem]">
-          Command Slot Reserved
+          Main Panel Reserved
         </h1>
       </div>
       <div className="mt-4 flex min-h-0 flex-1 items-center justify-center border border-orbit-border bg-orbit-bg p-5 text-center">
         <div className="max-w-xl">
           <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent-dim">
-            Idle Surface
+            Reserved Space
           </p>
           <p className="mt-3 text-[0.84rem] leading-[1.65] text-orbit-muted">
-            Main visualizations, trace results, drill-downs, and operator
-            workspaces are routed to this surface.
+            Main visualizations, detail views, and expanded content appear in
+            this area.
           </p>
         </div>
       </div>
@@ -1216,8 +1216,8 @@ export function PanelWorkspace({
 
         <div className="min-h-0 overflow-hidden xl:col-start-3 xl:row-start-1 xl:row-span-3">
           <WorkspaceSection
-            eyebrow="Side Channel"
-            title={infoPanelOverride?.title ?? "Trace Stack"}
+            eyebrow="Details"
+            title={infoPanelOverride?.title ?? "Selected Items"}
             itemCount={infoPanelOverride ? undefined : visibleInfoItems.length}
             action={
               infoItems.length > 0 ? (
@@ -1226,7 +1226,7 @@ export function PanelWorkspace({
                   className="shrink-0 border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.54rem] uppercase tracking-[0.14em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
                   onClick={openInfoPanelPicker}
                 >
-                  cards {visibleInfoItems.length}/{infoItems.length}
+                  panels {visibleInfoItems.length}/{infoItems.length}
                 </button>
               ) : null
             }
@@ -1237,12 +1237,12 @@ export function PanelWorkspace({
                 orderStorageKey={PANEL_WORKSPACE_STORAGE.infoOrder}
                 sizeStorageKey={PANEL_WORKSPACE_STORAGE.infoSize}
                 emptyTitle={
-                  hiddenInfoItems.length > 0 ? "Only hidden cards remain" : "No traces"
+                  hiddenInfoItems.length > 0 ? "All panels are hidden" : "No items yet"
                 }
                 emptyDescription={
                   hiddenInfoItems.length > 0
-                    ? "Use the cards button in the header to restore hidden cards."
-                    : "No panels connected to the side channel yet."
+                    ? "Use the panels button in the header to restore hidden panels."
+                    : "Select a panel or document to view details here."
                 }
                 maxDynamicColumns={3}
                 minColumnWidthPx={320}

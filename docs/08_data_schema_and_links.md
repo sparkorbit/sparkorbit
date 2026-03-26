@@ -9,6 +9,16 @@
 > 수집 → LLM 라벨 → 세션 머지 → 브리핑까지 이어지는 데이터 스키마, 조인 키, 링크 관계를 정의한다.
 > 새로운 파이프라인 단계나 프론트엔드 기능을 추가할 때 이 문서의 스키마와 관계를 따른다.
 
+### Monitor Sync Rule
+
+dashboard/monitor에 보이는 계약은 backend materialized payload와 frontend renderer가 함께 유지해야 한다.
+
+규칙:
+
+1. monitor-visible payload field를 추가/삭제/이름 변경하면 backend 응답 생성 코드와 frontend 소비 코드를 같은 수정에서 함께 바꾼다.
+2. `session`, `summary`, `feeds`, `document detail`, `digest detail`에 영향을 주는 변경은 TS 타입, content mapping, render fallback까지 같이 점검한다.
+3. backend에서 더 이상 보내지지 않는 필드를 frontend가 계속 읽거나, frontend가 기대하는 필드를 backend가 빠뜨리는 상태를 허용하지 않는다.
+
 ---
 
 ## 0. 전체 데이터 흐름과 조인 키
@@ -575,7 +585,8 @@ feed:{source} = [doc_id_1, doc_id_2, ...]
 | 필드 | 출처 | 설명 |
 |------|------|------|
 | `documentId` | `document_id` | PK |
-| `referenceUrl` | `reference_url` → `canonical_url` → `url` (fallback chain) | 클릭 링크 |
+| `referenceUrl` | `reference_url` → `canonical_url` → `url` (fallback chain) | detail panel의 원문 action 링크 |
+| `timestamp` | `sort_at` → `updated_at` → `published_at` → `fetched_at` | compact panel에서 쓰는 날짜 기준값 |
 | `source` | `build_document_badge()` — author, owner, board_name 등 | 배지 텍스트 |
 | `type` | `prettify_doc_type(doc_type)` | 문서 유형 표시 |
 | `title` | `title` | 제목 |

@@ -26,7 +26,7 @@ export function SummaryPanel({
     <DashboardPanel style={style}>
       <div className="mb-2 border-b border-orbit-border pb-2.5">
         <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-orbit-accent">
-          Signal Sweep
+          Overview
         </p>
         <h2 className="orbit-line-clamp-2 orbit-wrap-anywhere mt-1.5 font-display text-[0.98rem] font-semibold leading-[1.35] tracking-[-0.02em] text-orbit-text">
           {title}
@@ -36,7 +36,7 @@ export function SummaryPanel({
         <section className="mb-2 border border-orbit-accent/60 bg-orbit-bg-elevated px-3 py-2.5">
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent">
-              Daily Briefing
+              Today in AI
             </span>
             {briefing.run_meta?.prompt_version ? (
               <span className="inline-flex border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.5rem] uppercase tracking-widest text-orbit-muted">
@@ -70,7 +70,7 @@ export function SummaryPanel({
               {/* accent bar + header row */}
               <div
                 className={[
-                  "flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2",
+                  "flex min-w-0 items-center gap-2 border-b px-3 py-2",
                   isSelected
                     ? "border-orbit-accent/40"
                     : "border-orbit-border group-hover:border-orbit-border-strong",
@@ -88,10 +88,6 @@ export function SummaryPanel({
                     {digest.domain}
                   </span>
                 </div>
-                {/* evidence: standard chip per design guide */}
-                <span className="orbit-token-ellipsis inline-flex max-w-40 border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.5rem] uppercase tracking-widest text-orbit-text">
-                  {digest.evidence}
-                </span>
               </div>
 
               {/* body */}

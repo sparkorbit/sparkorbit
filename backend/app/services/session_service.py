@@ -30,6 +30,7 @@ from ..core.constants import (
     SESSION_PREFIX,
     SESSION_TTL_SECONDS,
     SOURCE_CATEGORY_LABELS,
+    SUMMARY_EXCLUDED_TEXT_SCOPES,
 )
 from ..core.store import RedisLike
 from .collector import collect_run
@@ -326,26 +327,206 @@ def compact_text(value: str | None, max_length: int = 124) -> str:
     return normalized[: max_length - 3].rstrip() + "..."
 
 
+_ARXIV_ABSTRACT_PREFIX_PATTERNS = (
+    re.compile(
+        r"(^|\n\n)\s*(?:arXiv:\s*[0-9]{4}\.[0-9]{4,5}(?:v\d+)?\s+)?Announce Type:\s*[^\n]*?\s+Abstract:\s*",
+        re.I,
+    ),
+    re.compile(r"(^|\n\n)\s*Abstract:\s*", re.I),
+)
+
+
+def strip_arxiv_monitor_abstract(value: Any) -> Any:
+    if not isinstance(value, str) or not value.strip():
+        return value
+    cleaned = value
+    for pattern in _ARXIV_ABSTRACT_PREFIX_PATTERNS:
+        cleaned = pattern.sub(r"\1", cleaned, count=1)
+    cleaned = cleaned.strip()
+    return cleaned or value
+
+
+def sanitize_document_for_monitor(document: Any) -> Any:
+    if not isinstance(document, dict):
+        return document
+    source = str(document.get("source") or "")
+    if not source.startswith("arxiv_rss_"):
+        return document
+
+    next_document = deepcopy(document)
+    next_document["description"] = strip_arxiv_monitor_abstract(
+        next_document.get("description")
+    )
+    next_document["body_text"] = strip_arxiv_monitor_abstract(
+        next_document.get("body_text")
+    )
+    next_document["summary_input_text"] = strip_arxiv_monitor_abstract(
+        next_document.get("summary_input_text")
+    )
+
+    llm = next_document.get("llm")
+    if isinstance(llm, dict):
+        next_document["llm"] = {
+            **llm,
+            "summary_1l": strip_arxiv_monitor_abstract(llm.get("summary_1l")),
+            "summary_short": strip_arxiv_monitor_abstract(llm.get("summary_short")),
+        }
+
+    reference = next_document.get("reference")
+    if isinstance(reference, dict):
+        next_document["reference"] = {
+            **reference,
+            "snippet": strip_arxiv_monitor_abstract(reference.get("snippet")),
+        }
+
+    return next_document
+
+
+SOURCE_DISPLAY_NAMES = {
+    "amazon_science": "Amazon Science",
+    "anthropic_news": "Anthropic - News",
+    "apple_ml": "Apple ML",
+    "arxiv_rss_cs_ai": "arXiv - AI",
+    "arxiv_rss_cs_cl": "arXiv - Language AI",
+    "arxiv_rss_cs_cr": "arXiv - AI Security",
+    "arxiv_rss_cs_cv": "arXiv - Vision",
+    "arxiv_rss_cs_ir": "arXiv - Search and Retrieval",
+    "arxiv_rss_cs_lg": "arXiv - Machine Learning",
+    "arxiv_rss_cs_ro": "arXiv - Robotics",
+    "arxiv_rss_stat_ml": "arXiv - Statistics and ML",
+    "deepmind_blog": "Google DeepMind - Blog",
+    "deepseek_updates": "DeepSeek - Updates",
+    "github_bytedance_repos": "ByteDance - GitHub",
+    "github_curated_repos": "GitHub - Curated Repos",
+    "github_mindspore_repos": "MindSpore - GitHub",
+    "github_paddlepaddle_repos": "PaddlePaddle - GitHub",
+    "github_tencent_hunyuan_repos": "Tencent Hunyuan - GitHub",
+    "google_ai_blog": "Google AI - Blog",
+    "groq_newsroom": "Groq - Newsroom",
+    "hf_blog": "Hugging Face - Blog",
+    "hf_daily_papers": "Hugging Face - Daily Papers",
+    "hf_models_likes": "Hugging Face - Top Liked Models",
+    "hf_models_new": "Hugging Face - New Models",
+    "hf_trending_models": "Hugging Face - Trending Models",
+    "hn_topstories": "Hacker News - Top Stories",
+    "kakao_tech_rss": "Kakao Tech",
+    "lg_ai_research_blog": "LG AI Research - Blog",
+    "lmarena_overview": "LMArena",
+    "microsoft_research": "Microsoft Research",
+    "mistral_news": "Mistral AI - News",
+    "naver_cloud_blog_rss": "NAVER Cloud - Blog",
+    "nvidia_deep_learning": "NVIDIA - Deep Learning",
+    "open_llm_leaderboard": "Open LLM Leaderboard",
+    "openai_news_rss": "OpenAI - News",
+    "qwen_blog_rss": "Qwen - Blog",
+    "reddit_localllama": "Reddit - LocalLLaMA",
+    "reddit_machinelearning": "Reddit - MachineLearning",
+    "salesforce_ai_research_rss": "Salesforce AI Research",
+    "samsung_research_posts": "Samsung Research",
+    "stability_news": "Stability AI - News",
+    "upstage_blog": "Upstage - Blog",
+}
+
+SOURCE_CATEGORY_TITLE_LABELS = {
+    "papers": "Paper",
+    "models": "Model",
+    "community": "Community",
+    "company": "Company",
+    "company_kr": "Company KR",
+    "company_cn": "Company CN",
+    "benchmark": "Benchmark",
+}
+
+SOURCE_PANEL_TITLES = {
+    "arxiv_rss_cs_ai": "AI Research Papers",
+    "arxiv_rss_cs_cl": "Language AI Papers",
+    "arxiv_rss_cs_cr": "AI Security Papers",
+    "arxiv_rss_cs_cv": "Vision AI Papers",
+    "arxiv_rss_cs_ir": "Search and Retrieval Papers",
+    "arxiv_rss_cs_lg": "Machine Learning Papers",
+    "arxiv_rss_cs_ro": "Robotics Papers",
+    "arxiv_rss_stat_ml": "Statistics and ML Papers",
+    "hf_daily_papers": "Daily Research Picks",
+    "hf_models_likes": "Popular AI Models",
+    "hf_models_new": "New AI Models",
+    "hf_trending_models": "Trending AI Models",
+    "lmarena_overview": "Model Rankings",
+    "open_llm_leaderboard": "Model Benchmarks",
+}
+
+
 def prettify_source_name(source: str) -> str:
+    normalized_source = str(source or "").strip()
+    if not normalized_source:
+        return "-"
+
+    mapped = SOURCE_DISPLAY_NAMES.get(normalized_source)
+    if mapped:
+        return mapped
+
     parts = []
-    for part in source.split("_"):
+    for part in normalized_source.split("_"):
+        if part in {"rss", "api", "posts"}:
+            continue
         if part == "ai":
             parts.append("AI")
-        elif part == "rss":
-            parts.append("RSS")
         elif part == "hf":
-            parts.append("HF")
+            parts.append("Hugging Face")
         elif part == "hn":
-            parts.append("HN")
+            parts.append("Hacker News")
         elif part == "kr":
             parts.append("KR")
         elif part == "cn":
             parts.append("CN")
         elif part == "llm":
             parts.append("LLM")
+        elif part == "arxiv":
+            parts.append("ARXIV")
+        elif part == "github":
+            parts.append("GitHub")
+        elif part == "reddit":
+            parts.append("Reddit")
+        elif part == "openai":
+            parts.append("OpenAI")
+        elif part == "naver":
+            parts.append("NAVER")
+        elif part == "nvidia":
+            parts.append("NVIDIA")
         else:
             parts.append(part.capitalize())
-    return " ".join(parts)
+    return " ".join(parts) if parts else normalized_source
+
+
+def prettify_source_category_title(category: Any) -> str:
+    resolved = str(category or "").strip()
+    if not resolved:
+        return "Source"
+    return SOURCE_CATEGORY_TITLE_LABELS.get(resolved, prettify_source_name(resolved))
+
+
+def build_feed_panel_title(category: Any, source: str) -> str:
+    normalized_source = str(source or "").strip()
+    if normalized_source in SOURCE_PANEL_TITLES:
+        return SOURCE_PANEL_TITLES[normalized_source]
+
+    readable = prettify_source_name(normalized_source)
+    readable_base = (
+        readable.replace(" - News", "")
+        .replace(" - Blog", "")
+        .replace(" - Updates", "")
+        .strip()
+    )
+    resolved_category = str(category or "").strip()
+
+    if resolved_category == "papers":
+        return f"{readable_base} Papers"
+    if resolved_category == "models":
+        return f"{readable_base} Models"
+    if resolved_category in {"company", "company_kr", "company_cn"}:
+        return f"{readable_base} Updates"
+    if resolved_category == "benchmark":
+        return f"{readable_base} Rankings"
+    return readable_base or readable
 
 
 DOC_TYPE_LABELS = {
@@ -449,6 +630,22 @@ def sort_documents(documents: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(documents, key=document_sort_key, reverse=True)
 
 
+_GENERIC_TITLES = frozenset({
+    "news", "blog", "post", "article", "home", "about", "contact",
+    "updates", "update", "research", "papers", "paper", "model",
+    "models", "stories", "story", "announcements", "announcement",
+})
+
+
+def _is_generic_title(title: str | None) -> bool:
+    if not title:
+        return True
+    stripped = title.strip()
+    if len(stripped) < 4:
+        return True
+    return stripped.lower() in _GENERIC_TITLES
+
+
 def has_displayable_reference(document: dict[str, Any]) -> bool:
     if not document.get("title"):
         return False
@@ -503,6 +700,7 @@ def default_llm_state() -> dict[str, Any]:
 
 
 def build_document_note(document: dict[str, Any]) -> str:
+    document = sanitize_document_for_monitor(document)
     llm = document.get("llm") or {}
     reference = document.get("reference") or {}
     return compact_text(
@@ -565,6 +763,7 @@ def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
         or document.get("canonical_url")
         or document.get("url")
         or "",
+        "timestamp": document_timestamp(document) or None,
         "source": build_document_badge(document),
         "type": prettify_doc_type(document.get("doc_type")),
         "title": str(document.get("title") or "-"),
@@ -575,19 +774,19 @@ def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
 
 def loading_stage_label(stage: str, status: str) -> str:
     labels = {
-        "starting": "Link Prep",
-        "fetching_sources": "Signal Sweep",
-        "writing_artifacts": "Trace Write",
-        "publishing_session": "Cache Relay",
-        "publishing_documents": "Cache Write",
-        "publishing_views": "View Relay",
-        "published": "Relay Armed",
-        "summarizing_documents": "Pattern Pass",
-        "building_digests": "Sweep Build",
-        "generating_briefing": "Briefing Gen",
-        "ready": "Grid Ready",
-        "partial_error": "Partial Ready",
-        "error": "Fault",
+        "starting": "Preparing",
+        "fetching_sources": "Collecting Sources",
+        "writing_artifacts": "Saving Results",
+        "publishing_session": "Updating Dashboard",
+        "publishing_documents": "Updating Documents",
+        "publishing_views": "Updating Views",
+        "published": "Data Ready",
+        "summarizing_documents": "Writing Summaries",
+        "building_digests": "Building Overview",
+        "generating_briefing": "Writing Briefing",
+        "ready": "Ready",
+        "partial_error": "Ready with Issues",
+        "error": "Error",
     }
     if status == "partial_error":
         return labels["partial_error"]
@@ -598,43 +797,43 @@ def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
     steps = [
         {
             "id": "prepare",
-            "label": "Handshake",
-            "detail": "Accepting request and locking scan scope and run parameters.",
+            "label": "Prepare",
+            "detail": "Setting up the scan request and current run scope.",
         },
         {
             "id": "collect",
-            "label": "Sweep",
-            "detail": "Collector is scanning raw signals from each source.",
+            "label": "Collect",
+            "detail": "Reading new items from each source.",
         },
         {
             "id": "normalize",
-            "label": "Trace Write",
-            "detail": "Writing manifest and normalized artifacts to the trace directory.",
+            "label": "Save Results",
+            "detail": "Writing manifests and normalized artifacts to disk.",
         },
         {
             "id": "publish-docs",
-            "label": "Cache Docs",
-            "detail": "Pushing displayable documents into cache keys.",
+            "label": "Update Documents",
+            "detail": "Publishing readable documents into the cache.",
         },
         {
             "id": "publish-views",
-            "label": "Relay Views",
-            "detail": "Refreshing feeds and live views.",
+            "label": "Update Views",
+            "detail": "Refreshing feeds and dashboard views.",
         },
         {
             "id": "summarize",
-            "label": "Pattern Pass",
+            "label": "Write Summaries",
             "detail": "Extracting key lines from selected documents.",
         },
         {
             "id": "digest",
-            "label": "Sweep Build",
-            "detail": "Bundling sweeps and recording final state.",
+            "label": "Build Overview",
+            "detail": "Building category overviews and recording final state.",
         },
         {
             "id": "briefing",
             "label": "Briefing",
-            "detail": "Generating a daily briefing from the collected signals.",
+            "detail": "Generating a daily briefing from the collected documents.",
         },
     ]
 
@@ -769,22 +968,22 @@ def build_runtime_items(status: str, *, stage: str | None = None) -> list[dict[s
     return [
         {
             "name": "collector",
-            "role": "Collector maintains raw traces as canonical artifacts.",
+            "role": "Collects raw source data and saves the canonical artifacts.",
             "status": collector_status,
         },
         {
             "name": "enricher",
-            "role": "Extracts key lines and generates signal sweeps.",
+            "role": "Builds summaries and overview text from collected documents.",
             "status": enricher_status,
         },
         {
             "name": "redis",
-            "role": "Relay cache stores documents, feeds, sweeps, and live views.",
+            "role": "Stores documents, feeds, summaries, and live dashboard views.",
             "status": redis_status,
         },
         {
             "name": "ui",
-            "role": "UI reads only relay responses and trace details.",
+            "role": "Displays only the server responses prepared for the UI.",
             "status": "live",
         },
     ]
@@ -808,30 +1007,30 @@ def build_bootstrap_runtime_items(status: str, stage: str) -> list[dict[str, str
     return [
         {
             "name": "collector",
-            "role": "Collector runs a full scan on first visit.",
+            "role": "Runs a full source scan on first visit.",
             "status": collector_status,
         },
         {
             "name": "enricher",
-            "role": "Populates key lines and sweeps after publish.",
+            "role": "Adds summaries after documents are published.",
             "status": enricher_status,
         },
         {
             "name": "redis",
-            "role": "Replaces the active cache once collector results arrive.",
+            "role": "Replaces the active cache when the new run is ready.",
             "status": redis_status,
         },
         {
             "name": "ui",
-            "role": "Monitors cold boot status via stream.",
+            "role": "Shows startup progress through the live stream.",
             "status": ui_status,
         },
     ]
 
 
 def build_bootstrap_digest_items(status: str) -> list[dict[str, str]]:
-    collecting_summary = "Signal sweeps will be populated once the scan completes."
-    error_summary = "Cold boot failed. Please reopen the link or re-run the probe."
+    collecting_summary = "Summaries will appear once the scan completes."
+    error_summary = "Startup failed. Please reopen the page or run refresh again."
     summary = collecting_summary if status == "collecting" else error_summary
     evidence = "pending" if status == "collecting" else "error"
     return [
@@ -882,20 +1081,20 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "note": detail,
         },
         {
-            "label": "sweeps",
+            "label": "summaries",
             "value": "pending" if status == "collecting" else "error",
             "note": error_message
-            or "Will proceed to summarization once the collector finishes.",
+            or "Summary generation starts after source collection finishes.",
         },
     ]
     return {
         "brand": {
-            "name": "BLACKSITE",
-            "tagline": "Cold Boot",
+            "name": "AI World Monitor",
+            "tagline": "Starting Up",
         },
         "status": status,
         "session": {
-            "title": "Cold Boot Relay",
+            "title": "Starting Scan",
             "sessionId": "bootstrapping",
             "sessionDate": started_at[:10] or "unknown",
             "window": "live scan",
@@ -911,7 +1110,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "loading": loading,
         },
         "summary": {
-            "title": "Signal Sweep",
+            "title": "Today in AI",
             "headline": error_message or detail,
             "digests": build_bootstrap_digest_items(status),
         },
@@ -974,7 +1173,7 @@ def build_session_block(
                 "note": "Number of documents with live references",
             },
             {
-                "label": "sweeps",
+                "label": "summaries",
                 "value": digests_ready,
                 "note": f"summaries {meta.get('summaries_ready', 0)} / state {meta.get('status')}",
             },
@@ -986,7 +1185,7 @@ def build_session_block(
         "rules": [
             "Run output is the canonical reference data.",
             "Cache only holds per-source feeds and UI views.",
-            "Cross-source mixing is performed only in sweeps.",
+            "Cross-source mixing is performed only in summaries.",
         ],
         "arenaOverview": arena_overview,
         "loading": loading,
@@ -1088,7 +1287,7 @@ def build_lmarena_session_overview(
         )
 
     return {
-        "title": "Arena Rank Feed",
+        "title": "Model Leaderboards",
         "boards": boards,
     }
 
@@ -1566,11 +1765,12 @@ def build_dashboard_payload(
     }
 
     for source, document_ids in sorted(feed_lists.items()):
-        documents = [
-            documents_by_id[document_id]
+        documents = sort_documents(
+            document
             for document_id in document_ids
-            if document_id in documents_by_id
-        ]
+            if (document := documents_by_id.get(document_id)) is not None
+            and not _is_generic_title(document.get("title"))
+        )
         if not documents:
             continue
         top_document = documents[0]
@@ -1580,11 +1780,11 @@ def build_dashboard_payload(
         feeds.append(
             {
                 "id": source,
-                "title": prettify_source_name(source),
-                "eyebrow": SOURCE_CATEGORY_LABELS.get(category, category),
+                "title": build_feed_panel_title(category, source),
+                "eyebrow": prettify_source_category_title(category),
                 "sourceNote": (manifest_entry.get("notes") or [None])[0]
                 or f"{prettify_doc_type(top_document.get('doc_type'))} / {build_document_note(top_document)}",
-                "items": [build_feed_item(document) for document in documents[:3]],
+                "items": [build_feed_item(document) for document in documents],
             }
         )
 
@@ -1620,15 +1820,15 @@ def build_dashboard_payload(
 
     return {
         "brand": {
-            "name": "BLACKSITE",
-            "tagline": "Signal Relay",
+            "name": "AI World Monitor",
+            "tagline": "AI World Monitor",
         },
         "status": meta.get("status") or "published",
         "session": build_session_block(
             session_id, meta, run_manifest, source_manifest, documents_by_id
         ),
         "summary": {
-            "title": "Signal Sweep",
+            "title": "Today in AI",
             "headline": f"{hottest_digest['domain']} / {hottest_digest['headline']}",
             "briefing": briefing if briefing and not briefing.get("error") else None,
             "digests": digests,
@@ -1655,7 +1855,7 @@ def get_documents_by_id(
     for document_id in document_ids:
         document = get_json(store, doc_key(session_id, document_id))
         if document is not None:
-            documents[document_id] = document
+            documents[document_id] = sanitize_document_for_monitor(document)
     return documents
 
 
@@ -1926,7 +2126,7 @@ def select_summary_candidate_ids(
             continue
         if not (document.get("summary_input_text") or "").strip():
             continue
-        if document.get("text_scope") == "empty":
+        if document.get("text_scope") in SUMMARY_EXCLUDED_TEXT_SCOPES:
             continue
         category = str(document.get("source_category") or "community")
         grouped.setdefault(category, [])
@@ -2410,7 +2610,7 @@ def run_session_enrichment(
 
     digests_by_category: dict[str, dict[str, Any]] = {}
     meta["loading_stage"] = "building_digests"
-    meta["loading_detail"] = "Bundling signal sweeps."
+    meta["loading_detail"] = "Building category overviews."
     meta["loading_progress_current"] = 0
     meta["loading_progress_total"] = len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_current_source"] = None
@@ -2680,7 +2880,7 @@ def run_homepage_bootstrap(
                 status="error",
                 run_label=run_label,
                 stage=str(current_state.get("stage") or "error"),
-                detail="A fault occurred during cold boot.",
+                detail="An error occurred during startup.",
                 progress_current=int(current_state.get("progress_current") or 0),
                 progress_total=int(current_state.get("progress_total") or 0),
                 current_source=(
@@ -2737,7 +2937,7 @@ def run_session_reload(
                 stage=str(event.get("stage") or "summarizing_documents"),
                 detail=str(
                     event.get("detail")
-                    or "Updating pattern pass and sweeps."
+                    or "Updating summaries and overviews."
                 ),
                 progress_current=int(event.get("progress_current") or 0),
                 progress_total=int(event.get("progress_total") or 0),
@@ -2975,7 +3175,7 @@ def get_digest_response(
         digest = build_placeholder_digest(digest_id, documents)
 
     documents = [
-        get_json(store, doc_key(session_id, document_id))
+        sanitize_document_for_monitor(get_json(store, doc_key(session_id, document_id)))
         for document_id in digest.get("document_ids", [])
     ]
     return {
@@ -3001,7 +3201,7 @@ def get_document_response(
     document = get_json(store, doc_key(session_id, document_id))
     if document is None:
         raise KeyError(f"Unknown document: {document_id}")
-    return document
+    return sanitize_document_for_monitor(document)
 
 
 def reload_session(

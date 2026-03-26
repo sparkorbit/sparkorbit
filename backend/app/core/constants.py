@@ -40,7 +40,7 @@ SESSION_RETAIN_COUNT = env_int(
     minimum=1,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 5
 DEFAULT_RUN_LABEL = "redis-session"
 HOMEPAGE_BOOTSTRAP_RUN_LABEL = "homepage-entry"
 
@@ -74,7 +74,7 @@ SOURCE_CATEGORY_LABELS = {
     "company": "Company",
     "company_kr": "Company KR",
     "company_cn": "Company CN",
-    "benchmark": "Rank Feed",
+    "benchmark": "Model Rankings",
 }
 
 ORDERED_SOURCE_CATEGORIES = (
@@ -85,4 +85,8 @@ ORDERED_SOURCE_CATEGORIES = (
     "company_kr",
     "company_cn",
     "benchmark",
+)
+
+SUMMARY_EXCLUDED_TEXT_SCOPES = frozenset(
+    {"empty", "metadata_only", "metric_summary", "generated_panel"}
 )

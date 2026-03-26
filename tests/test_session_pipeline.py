@@ -1,1350 +1,283 @@
+"""Tests for session pipeline helpers in session_service."""
+
 from __future__ import annotations
 
-import json
-import shutil
 import sys
-import tempfile
-import types
-import unittest
 from pathlib import Path
-from unittest.mock import patch
+from urllib.parse import quote
 
-from backend.app.core.constants import (
-    ACTIVE_SESSION_KEY,
-    BOOTSTRAP_STATE_KEY,
-    ORDERED_SOURCE_CATEGORIES,
-    QUEUE_SESSION_ENRICH_KEY,
-    RECENT_SESSIONS_KEY,
-    RELOAD_STATE_KEY,
-    RELOAD_STATE_TTL_SECONDS,
-    SCHEMA_VERSION,
-    SESSION_RETAIN_COUNT,
-    SESSION_TTL_SECONDS,
-)
+from fastapi.testclient import TestClient
+
+# Make backend importable when running from repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from backend.app.core.constants import ACTIVE_SESSION_KEY, SUMMARY_EXCLUDED_TEXT_SCOPES
 from backend.app.core.store import MemoryStore
+from backend.app.main import create_app
 from backend.app.services.session_service import (
-    begin_homepage_bootstrap,
-    build_briefing_input,
-    document_sort_key,
-    get_dashboard_response,
-    get_document_response,
-    get_json,
-    get_leaderboard_response,
-    get_or_bootstrap_dashboard_response,
-    get_session_reload_response,
-    loading_percent,
-    publish_run,
-    reset_homepage_bootstrap_state,
-    reset_session_reload_state,
-    run_session_enrichment,
-    run_session_reload,
+    build_document_note,
+    compact_text,
+    digest_key,
+    doc_key,
+    json_dumps,
+    sanitize_document_for_monitor,
+    select_summary_candidate_ids,
     session_key,
-    start_session_reload,
-)
-from backend.app.services.summary_provider import (
-    _build_models_section,
-    _build_today_intro,
-    build_summary_generator,
 )
 
 
-def write_json(path: Path, payload: dict) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-
-def write_ndjson(path: Path, rows: list[dict]) -> None:
-    path.write_text(
-        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
-        encoding="utf-8",
-    )
-
-
-def read_ndjson_file(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-
-def default_llm_payload() -> dict:
-    return {
-        "status": "pending",
-        "summary_1l": None,
-        "summary_short": None,
-        "key_points": [],
-        "entities": [],
-        "primary_domain": None,
-        "subdomains": [],
-        "importance_score": None,
-        "importance_reason": None,
-        "evidence_chunk_ids": [],
-        "run_meta": {
-            "model_name": None,
-            "prompt_version": None,
-            "fewshot_pack_version": None,
-            "generated_at": None,
-        },
-    }
-
-
-def make_document(
-    *,
-    run_id: str,
-    document_id: str,
-    source: str,
-    source_category: str,
-    title: str,
-    feed_score: float,
-    sort_at: str,
-    reference_url: str | None = None,
+def _make_document(
+    document_id: str = "src:1",
+    title: str = "Test",
     text_scope: str = "full_text",
-    summary_input_text: str | None = None,
-    metadata: dict | None = None,
-    benchmark: dict | None = None,
-    doc_type_override: str | None = None,
+    source_category: str = "papers",
+    summary_input_text: str = "Some meaningful text for summary",
+    reference_url: str = "https://example.com",
+    **overrides,
 ) -> dict:
-    doc_type_map = {
-        "papers": "paper",
-        "models": "model",
-        "community": "post",
-        "benchmark": "benchmark",
-        "company": "blog",
-        "company_kr": "blog",
-        "company_cn": "blog",
-    }
-    doc_type = doc_type_override or doc_type_map.get(source_category, "blog")
-    resolved_reference = reference_url or f"https://example.com/{document_id}"
-    description = f"{title} description"
-    return {
+    base = {
         "document_id": document_id,
-        "run_id": run_id,
-        "source": source,
-        "source_category": source_category,
-        "source_method": "rss",
-        "source_endpoint": f"https://example.com/{source}.xml",
-        "source_item_id": document_id,
-        "doc_type": doc_type,
-        "content_type": doc_type,
-        "text_scope": text_scope,
         "title": title,
-        "description": description,
-        "url": resolved_reference if reference_url is not None else None,
-        "canonical_url": resolved_reference if reference_url is not None else None,
+        "text_scope": text_scope,
+        "source_category": source_category,
+        "summary_input_text": summary_input_text,
         "reference_url": reference_url,
-        "author": source,
-        "authors": [source],
-        "published_at": sort_at,
-        "updated_at": None,
-        "sort_at": sort_at,
-        "time_semantics": "published",
-        "timestamp_kind": "published",
-        "body_text": summary_input_text or f"{title} full body text",
-        "summary_input_text": summary_input_text or f"{title} full body text",
-        "language": "EN",
-        "content_format": "plain_text",
-        "external_ids": {},
-        "related_urls": [],
-        "tags": [source_category],
-        "engagement": {"likes": int(feed_score * 10)},
-        "engagement_primary": {"name": "likes", "value": int(feed_score * 10)},
-        "discovery": {
-            "spark_score": round(feed_score / 10, 2),
-            "primary_reason": "synthetic-test",
-        },
-        "ranking": {
-            "feed_score": feed_score,
-            "priority_reason": "synthetic-test",
-        },
-        "benchmark": {
-            "board_name": "Synthetic Board" if source_category == "benchmark" else None,
-            "rank": 1 if source_category == "benchmark" else None,
-            "score_value": 95.5 if source_category == "benchmark" else None,
-            "score_unit": "%" if source_category == "benchmark" else None,
-            **(benchmark or {}),
-        },
-        "reference": {
-            "source_label": source,
-            "display_title": title,
-            "display_url": resolved_reference if reference_url is not None else None,
-            "snippet": description,
-        },
-        "llm": default_llm_payload(),
-        "metadata": {"test_case": "session_pipeline", **(metadata or {})},
-        "raw_ref": {"fetch_id": None, "line_index": None, "response_file": None},
-        "fetched_at": sort_at,
+        "sort_at": "2026-03-25T00:00:00Z",
+        "ranking": {"feed_score": 1},
+        "discovery": {"spark_score": 0},
+        "llm": {"status": "pending"},
     }
+    base.update(overrides)
+    return base
 
 
-def build_base_documents(run_id: str) -> list[dict]:
-    return [
-        make_document(
-            run_id=run_id,
-            document_id="company:high",
-            source="openai_news_rss",
-            source_category="company",
-            title="OpenAI launches new model",
-            feed_score=98,
-            sort_at="2026-03-24T10:00:00Z",
-            reference_url="https://openai.com/news/model",
-        ),
-        make_document(
-            run_id=run_id,
-            document_id="company:low",
-            source="openai_news_rss",
-            source_category="company",
-            title="OpenAI updates docs",
-            feed_score=74,
-            sort_at="2026-03-24T08:00:00Z",
-            reference_url="https://openai.com/news/docs",
-        ),
-        make_document(
-            run_id=run_id,
-            document_id="community:top",
-            source="reddit_machinelearning",
-            source_category="community",
-            title="Community discusses new training trick",
-            feed_score=88,
-            sort_at="2026-03-24T09:30:00Z",
-            reference_url="https://reddit.com/r/MachineLearning/top",
-        ),
-        make_document(
-            run_id=run_id,
-            document_id="papers:top",
+# ---------------------------------------------------------------------------
+# select_summary_candidate_ids
+# ---------------------------------------------------------------------------
+
+class TestSelectSummaryCandidateIds:
+    def test_full_text_included(self):
+        docs = [_make_document(text_scope="full_text")]
+        assert select_summary_candidate_ids(docs) == {"src:1"}
+
+    def test_abstract_included(self):
+        docs = [_make_document(text_scope="abstract")]
+        assert select_summary_candidate_ids(docs) == {"src:1"}
+
+    def test_excerpt_included(self):
+        docs = [_make_document(text_scope="excerpt")]
+        assert select_summary_candidate_ids(docs) == {"src:1"}
+
+    def test_empty_excluded(self):
+        docs = [_make_document(text_scope="empty")]
+        assert select_summary_candidate_ids(docs) == set()
+
+    def test_metadata_only_excluded(self):
+        docs = [_make_document(text_scope="metadata_only")]
+        assert select_summary_candidate_ids(docs) == set()
+
+    def test_metric_summary_excluded(self):
+        docs = [_make_document(text_scope="metric_summary")]
+        assert select_summary_candidate_ids(docs) == set()
+
+    def test_generated_panel_excluded(self):
+        docs = [_make_document(text_scope="generated_panel")]
+        assert select_summary_candidate_ids(docs) == set()
+
+    def test_missing_summary_input_excluded(self):
+        docs = [_make_document(summary_input_text="")]
+        assert select_summary_candidate_ids(docs) == set()
+
+    def test_missing_title_excluded(self):
+        docs = [_make_document(title="")]
+        assert select_summary_candidate_ids(docs) == set()
+
+    def test_limit_per_category(self):
+        docs = [
+            _make_document(document_id=f"src:{i}", source_category="papers")
+            for i in range(12)
+        ]
+        result = select_summary_candidate_ids(docs, limit_per_category=5)
+        assert len(result) == 5
+
+    def test_mixed_scopes(self):
+        docs = [
+            _make_document(document_id="good:1", text_scope="full_text"),
+            _make_document(document_id="bad:1", text_scope="metadata_only"),
+            _make_document(document_id="good:2", text_scope="abstract"),
+            _make_document(document_id="bad:2", text_scope="generated_panel"),
+        ]
+        result = select_summary_candidate_ids(docs)
+        assert result == {"good:1", "good:2"}
+
+
+# ---------------------------------------------------------------------------
+# SUMMARY_EXCLUDED_TEXT_SCOPES constant
+# ---------------------------------------------------------------------------
+
+class TestSummaryExcludedTextScopes:
+    def test_contains_expected_scopes(self):
+        assert "empty" in SUMMARY_EXCLUDED_TEXT_SCOPES
+        assert "metadata_only" in SUMMARY_EXCLUDED_TEXT_SCOPES
+        assert "metric_summary" in SUMMARY_EXCLUDED_TEXT_SCOPES
+        assert "generated_panel" in SUMMARY_EXCLUDED_TEXT_SCOPES
+
+    def test_does_not_exclude_content_scopes(self):
+        assert "full_text" not in SUMMARY_EXCLUDED_TEXT_SCOPES
+        assert "abstract" not in SUMMARY_EXCLUDED_TEXT_SCOPES
+        assert "excerpt" not in SUMMARY_EXCLUDED_TEXT_SCOPES
+
+
+# ---------------------------------------------------------------------------
+# compact_text
+# ---------------------------------------------------------------------------
+
+class TestCompactText:
+    def test_none_returns_empty(self):
+        assert compact_text(None) == ""
+
+    def test_short_text_unchanged(self):
+        assert compact_text("hello world", 20) == "hello world"
+
+    def test_long_text_truncated(self):
+        result = compact_text("a" * 200, 50)
+        assert len(result) == 50
+        assert result.endswith("...")
+
+    def test_whitespace_normalized(self):
+        assert compact_text("hello   world\n\tfoo") == "hello world foo"
+
+
+# ---------------------------------------------------------------------------
+# build_document_note
+# ---------------------------------------------------------------------------
+
+class TestBuildDocumentNote:
+    def test_prefers_llm_summary(self):
+        doc = _make_document(description="desc", llm={"summary_short": "llm summary"})
+        assert build_document_note(doc) == "llm summary"
+
+    def test_falls_back_to_description(self):
+        doc = _make_document(description="the description")
+        assert build_document_note(doc) == "the description"
+
+    def test_falls_back_to_snippet(self):
+        doc = _make_document(
+            description=None,
+            reference={"snippet": "the snippet"},
+        )
+        assert build_document_note(doc) == "the snippet"
+
+    def test_strips_arxiv_rss_boilerplate_from_summary(self):
+        prefixed = (
+            "arXiv:2603.22306v1 Announce Type: new Abstract: "
+            "Affective judgment in real interaction is rarely a purely local prediction problem."
+        )
+        doc = _make_document(
             source="arxiv_rss_cs_ai",
-            source_category="papers",
-            title="A fresh paper on agent memory",
-            feed_score=92,
-            sort_at="2026-03-24T07:15:00Z",
-            reference_url="https://arxiv.org/abs/2603.00001",
-        ),
-        make_document(
-            run_id=run_id,
-            document_id="models:top",
-            source="hf_models_new",
-            source_category="models",
-            title="A freshly released multimodal model card",
-            feed_score=90,
-            sort_at="2026-03-24T07:45:00Z",
-            reference_url="https://huggingface.co/example/model",
-            metadata={"pipeline_tag": "image-text-to-text"},
-            doc_type_override="model",
-        ),
-        make_document(
-            run_id=run_id,
-            document_id="company-kr:top",
-            source="naver_cloud_blog_rss",
-            source_category="company_kr",
-            title="Naver Cloud ships new inference stack",
-            feed_score=81,
-            sort_at="2026-03-24T06:00:00Z",
-            reference_url="https://example.com/naver-cloud",
-        ),
-        make_document(
-            run_id=run_id,
-            document_id="company-cn:top",
-            source="qwen_blog_rss",
-            source_category="company_cn",
-            title="Qwen shares roadmap update",
-            feed_score=79,
-            sort_at="2026-03-24T05:00:00Z",
-            reference_url="https://example.com/qwen-roadmap",
-        ),
-        make_document(
-            run_id=run_id,
-            document_id="benchmark:top",
-            source="open_llm_leaderboard",
-            source_category="benchmark",
-            title="Leaderboard snapshot highlights a new top model",
-            feed_score=85,
-            sort_at="2026-03-24T04:00:00Z",
-            reference_url="https://example.com/leaderboard",
-        ),
-    ]
+            description=prefixed,
+            llm={"summary_short": prefixed},
+        )
+        assert build_document_note(doc) == (
+            "Affective judgment in real interaction is rarely a purely local prediction problem."
+        )
 
 
-def build_run_manifest(run_id: str, sources: list[str]) -> dict:
-    return {
-        "run_id": run_id,
-        "limit": 20,
-        "started_at": "2026-03-24T00:00:00Z",
-        "finished_at": "2026-03-24T00:01:00Z",
-        "git_commit": None,
-        "requested_sources": sources,
-        "success_count": len(sources),
-        "skipped_count": 0,
-        "excluded_count": 0,
-        "error_count": 0,
-    }
-
-
-def build_source_manifest(sources: list[str]) -> list[dict]:
-    return [
-        {
-            "source": source,
-            "endpoint": f"https://example.com/{source}.xml",
-            "status": "ok",
-            "item_count": 1,
-            "normalized_count": 1,
-            "metric_count": 0,
-            "excluded_document_count": 0,
-            "notes": [f"{source} synthetic manifest entry"],
-            "duration_ms": 10,
-            "raw_response_paths": [],
-            "raw_items_path": None,
-        }
-        for source in sources
-    ]
-
-
-def create_run_directory(run_id: str, documents: list[dict]) -> Path:
-    temp_root = Path(tempfile.mkdtemp(prefix="sparkorbit-session-test-"))
-    run_dir = temp_root / run_id
-    normalized_dir = run_dir / "normalized"
-    normalized_dir.mkdir(parents=True, exist_ok=True)
-
-    sources = sorted({str(document["source"]) for document in documents})
-    write_json(run_dir / "run_manifest.json", build_run_manifest(run_id, sources))
-    write_ndjson(run_dir / "source_manifest.ndjson", build_source_manifest(sources))
-    write_ndjson(normalized_dir / "documents.ndjson", documents)
-    write_ndjson(normalized_dir / "metrics.ndjson", [])
-    return run_dir
-
-
-class FailingSummaryGenerator:
-    model_name = "failing-test"
-    prompt_version = "test"
-    fewshot_pack_version = "test"
-
-    def __init__(self) -> None:
-        self._failed = False
-
-    def summarize_document(self, document: dict) -> dict:
-        if not self._failed:
-            self._failed = True
-            raise RuntimeError(f"forced summary failure for {document['document_id']}")
-        return {
-            "status": "complete",
-            "summary_1l": document["title"],
-            "summary_short": document["title"],
-            "key_points": [document["source"]],
-            "entities": [],
-            "primary_domain": document["source_category"],
-            "subdomains": [],
-            "importance_score": 42,
-            "importance_reason": "test",
-            "evidence_chunk_ids": [],
-            "run_meta": {
-                "model_name": self.model_name,
-                "prompt_version": self.prompt_version,
-                "fewshot_pack_version": self.fewshot_pack_version,
-                "generated_at": "2026-03-24T00:00:00Z",
-            },
-        }
-
-
-class StaticBriefingGenerator:
-    def __init__(self) -> None:
-        self.closed = False
-
-    def generate_briefing(self, briefing_input: dict) -> dict:
-        return {
-            "body_en": (
-                f"[Papers] {briefing_input['date']} papers are clustering around a few visible themes. "
-                "[Company News] Signals aligned."
+class TestSanitizeDocumentForMonitor:
+    def test_strips_arxiv_rss_boilerplate_from_document_fields(self):
+        prefixed = (
+            "arXiv:2603.22306v1 Announce Type: new Abstract: "
+            "Affective judgment in real interaction is rarely a purely local prediction problem."
+        )
+        document = _make_document(
+            source="arxiv_rss_cs_ai",
+            description=prefixed,
+            body_text=prefixed,
+            summary_input_text=(
+                "Memory Bear AI Memory Science Engine for Multimodal Affective Intelligence: A Technical Report"
+                "\n\n"
+                + prefixed
             ),
-            "category_summaries": {},
-            "error": None,
-            "run_meta": {
-                "model_name": "briefing-test",
-                "prompt_version": "briefing_mapreduce_v8",
-                "generated_at": "2026-03-24T00:00:00Z",
-            },
+            reference={"snippet": prefixed},
+            llm={"summary_short": prefixed, "summary_1l": prefixed},
+        )
+
+        sanitized = sanitize_document_for_monitor(document)
+
+        expected = "Affective judgment in real interaction is rarely a purely local prediction problem."
+        assert sanitized["description"] == expected
+        assert sanitized["body_text"] == expected
+        assert sanitized["reference"]["snippet"] == expected
+        assert sanitized["llm"]["summary_short"] == expected
+        assert sanitized["llm"]["summary_1l"] == expected
+        assert sanitized["summary_input_text"].endswith(expected)
+        assert "Announce Type:" not in sanitized["summary_input_text"]
+
+    def test_keeps_non_arxiv_documents_unchanged(self):
+        document = _make_document(
+            source="openai_news_rss",
+            description="Regular description",
+            body_text="Regular body",
+        )
+
+        sanitized = sanitize_document_for_monitor(document)
+
+        assert sanitized == document
+
+
+class TestDocumentRoute:
+    def test_document_route_supports_url_shaped_document_ids(self):
+        store = MemoryStore()
+        session_id = "session-1"
+        document_id = (
+            "deepmind_blog:https://deepmind.google/discover/blog/"
+            "thinking-into-the-future-latent-lookahead-training-for-transformers"
+        )
+        document = {
+            "document_id": document_id,
+            "title": "Thinking into the Future",
+            "source": "deepmind_blog",
+            "source_category": "company",
+            "doc_type": "blog",
+        }
+        store.set(ACTIVE_SESSION_KEY, session_id)
+        store.set(doc_key(session_id, document_id), json_dumps(document))
+
+        client = TestClient(create_app(store))
+        response = client.get(f"/api/documents/{quote(document_id, safe='')}?session=active")
+
+        assert response.status_code == 200
+        assert response.json()["document_id"] == document_id
+
+    def test_digest_route_supports_path_unsafe_ids(self):
+        store = MemoryStore()
+        session_id = "session-1"
+        digest_id = "company/blogs"
+        digest = {
+            "id": digest_id,
+            "domain": "Company",
+            "headline": "Headline",
+            "summary": "Summary",
+            "evidence": "mixed",
+            "document_ids": [],
+            "updated_at": "2026-03-25T00:00:00Z",
         }
 
-    def close(self) -> None:
-        self.closed = True
-
-
-class SessionPipelineTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.store = MemoryStore()
-        self._temp_roots: list[Path] = []
-        reset_homepage_bootstrap_state(self.store)
-        reset_session_reload_state(self.store)
-
-    def tearDown(self) -> None:
-        reset_homepage_bootstrap_state(self.store)
-        reset_session_reload_state(self.store)
-        for path in self._temp_roots:
-            shutil.rmtree(path, ignore_errors=True)
-
-    def _make_run(self, run_id: str, *, documents: list[dict] | None = None) -> Path:
-        run_dir = create_run_directory(run_id, documents or build_base_documents(run_id))
-        self._temp_roots.append(run_dir.parent)
-        return run_dir
-
-    def test_publish_creates_meta_docs_feeds_dashboard_and_active(self) -> None:
-        run_dir = self._make_run("2026-03-24T000101Z_publish")
-        result = publish_run(self.store, run_dir)
-        session_id = result["session_id"]
-
-        self.assertEqual(self.store.get(ACTIVE_SESSION_KEY), session_id)
-        self.assertEqual(len(self.store.lists[QUEUE_SESSION_ENRICH_KEY]), 1)
-
-        meta = get_json(self.store, session_key(session_id, "meta"))
-        self.assertEqual(meta["status"], "published")
-        self.assertTrue(meta["feeds_ready"])
-        self.assertFalse(meta["digests_ready"])
-
-        dashboard = get_json(self.store, session_key(session_id, "dashboard"))
-        self.assertEqual(dashboard["status"], "published")
-        self.assertGreater(len(dashboard["feeds"]), 0)
-        self.assertEqual(dashboard["session"]["loading"]["stage"], "published")
-        self.assertLess(dashboard["session"]["loading"]["percent"], 100)
-
-        doc_keys = [
-            key
-            for key in self.store.values
-            if key.startswith(f"sparkorbit:session:{session_id}:doc:")
-        ]
-        self.assertEqual(len(doc_keys), meta["docs_total"])
-        self.assertEqual(
-            self.store.ttl_for(session_key(session_id, "meta")),
-            SESSION_TTL_SECONDS,
+        store.set(ACTIVE_SESSION_KEY, session_id)
+        store.set(session_key(session_id, "meta"), json_dumps({"status": "ready"}))
+        store.set(
+            session_key(session_id, "run_manifest"),
+            json_dumps({"run_id": session_id}),
         )
-        self.assertEqual(
-            self.store.ttl_for(session_key(session_id, "dashboard")),
-            SESSION_TTL_SECONDS,
-        )
+        store.set(session_key(session_id, "source_manifest"), json_dumps([]))
+        store.set(digest_key(session_id, digest_id), json_dumps(digest))
 
-    def test_collect_run_keeps_progress_callback_compatibility(self) -> None:
-        calls: list[dict] = []
-        callback = lambda payload: None
-        fake_package = types.ModuleType("source_fetch")
-        fake_package.__path__ = []
-        fake_pipeline = types.ModuleType("source_fetch.pipeline")
+        client = TestClient(create_app(store))
+        response = client.get(f"/api/digests/{quote(digest_id, safe='')}?session=active")
 
-        def fake_run_collection(**kwargs):
-            calls.append(kwargs)
-            return {"run_id": "synthetic"}, Path("/tmp/synthetic-run")
-
-        fake_pipeline.run_collection = fake_run_collection
-
-        with patch.dict(
-            sys.modules,
-            {
-                "source_fetch": fake_package,
-                "source_fetch.pipeline": fake_pipeline,
-            },
-        ):
-            from backend.app.services.collector import collect_run
-
-            manifest, run_dir = collect_run(
-                sources=["all"],
-                run_label="compat",
-                progress_callback=callback,
-            )
-
-        self.assertEqual(manifest["run_id"], "synthetic")
-        self.assertEqual(run_dir, Path("/tmp/synthetic-run"))
-        self.assertEqual(len(calls), 1)
-        self.assertIs(calls[0]["progress_callback"], callback)
-
-    def test_feed_lists_are_sorted_by_feed_score_then_sort_at(self) -> None:
-        run_dir = self._make_run("2026-03-24T000102Z_sorted")
-        result = publish_run(self.store, run_dir, queue=False)
-        session_id = result["session_id"]
-        meta = get_json(self.store, session_key(session_id, "meta"))
-
-        for source in meta["source_ids"]:
-            document_ids = self.store.lrange(
-                f"sparkorbit:session:{session_id}:feed:{source}",
-                0,
-                -1,
-            )
-            documents = [
-                get_document_response(self.store, document_id, session=session_id)
-                for document_id in document_ids
-            ]
-            self.assertEqual(
-                [document["document_id"] for document in documents],
-                [
-                    document["document_id"]
-                    for document in sorted(
-                        documents,
-                        key=document_sort_key,
-                        reverse=True,
-                    )
-                ],
-            )
-
-    def test_publish_filters_url_less_documents(self) -> None:
-        run_id = "2026-03-24T111111Z_no_url"
-        documents = build_base_documents(run_id) + [
-            make_document(
-                run_id=run_id,
-                document_id="synthetic:no-url",
-                source="openai_news_rss",
-                source_category="company",
-                title="Should not be published",
-                feed_score=99,
-                sort_at="2026-03-24T11:11:11Z",
-                reference_url=None,
-            )
-        ]
-        documents[-1]["url"] = None
-        documents[-1]["canonical_url"] = None
-        documents[-1]["reference"]["display_url"] = None
-
-        run_dir = self._make_run(run_id, documents=documents)
-        result = publish_run(self.store, run_dir, queue=False)
-        session_id = result["session_id"]
-
-        self.assertIsNone(
-            self.store.get(f"sparkorbit:session:{session_id}:doc:synthetic:no-url"),
-        )
-        dashboard = get_dashboard_response(self.store, session_id)
-        self.assertFalse(
-            any(
-                item["documentId"] == "synthetic:no-url"
-                for feed in dashboard["feeds"]
-                for item in feed["items"]
-            ),
-        )
-
-    def test_session_includes_lmarena_type_rankings(self) -> None:
-        run_id = "2026-03-24T111112Z_lmarena"
-        documents = build_base_documents(run_id) + [
-            make_document(
-                run_id=run_id,
-                document_id="lmarena:text",
-                source="lmarena_overview",
-                source_category="benchmark",
-                title="LMArena Text",
-                feed_score=91,
-                sort_at="2026-03-24T12:00:00Z",
-                reference_url="https://arena.ai/leaderboard/text",
-                doc_type_override="benchmark_panel",
-                metadata={
-                    "leaderboard_link": "/leaderboard/text",
-                    "total_votes": 5602397,
-                    "total_models": 330,
-                    "top_entries": [
-                        {
-                            "rank": 1,
-                            "model_name": "Model Alpha",
-                            "organization": "Org A",
-                            "rating": 1402.5,
-                            "votes": 230123,
-                            "url": "https://arena.ai/model-alpha",
-                        },
-                        {
-                            "rank": 2,
-                            "model_name": "Model Beta",
-                            "organization": "Org B",
-                            "rating": 1398.1,
-                            "votes": 210456,
-                            "url": "https://arena.ai/model-beta",
-                        },
-                    ],
-                },
-                benchmark={
-                    "kind": "leaderboard_panel",
-                    "board_id": "/leaderboard/text",
-                    "board_name": "LMArena Text",
-                    "snapshot_at": "2026-03-24T12:00:00Z",
-                    "rank": 1,
-                    "score_label": "Arena rating",
-                    "score_value": 1402.5,
-                    "score_unit": "elo_like_rating",
-                    "votes": 230123,
-                    "model_name": "Model Alpha",
-                    "organization": "Org A",
-                    "total_models": 330,
-                    "total_votes": 5602397,
-                },
-            )
-        ]
-
-        run_dir = self._make_run(run_id, documents=documents)
-        publish_run(self.store, run_dir, queue=False)
-        dashboard = get_dashboard_response(self.store)
-
-        arena_overview = dashboard["session"]["arenaOverview"]
-        self.assertIsNotNone(arena_overview)
-        self.assertEqual(arena_overview["title"], "Arena Rank Feed")
-        self.assertEqual(arena_overview["boards"][0]["label"], "Text")
-        self.assertEqual(
-            arena_overview["boards"][0]["documentId"],
-            "lmarena:text",
-        )
-        self.assertEqual(
-            arena_overview["boards"][0]["topModel"]["modelName"],
-            "Model Alpha",
-        )
-        self.assertIsNotNone(arena_overview["boards"][0]["description"])
-        self.assertEqual(len(arena_overview["boards"][0]["topEntries"]), 2)
-        lmarena_feed = next(
-            feed for feed in dashboard["feeds"] if feed["id"] == "lmarena_overview"
-        )
-        self.assertEqual(lmarena_feed["items"][0]["type"], "Rank Board")
-        self.assertIn("Arena rating 1,402.5", lmarena_feed["items"][0]["meta"])
-        self.assertNotIn("elo_like_rating", lmarena_feed["items"][0]["meta"])
-
-    def test_models_category_is_included_in_dashboard_digest_and_feed(self) -> None:
-        run_dir = self._make_run("2026-03-24T111112Z_models")
-        result = publish_run(self.store, run_dir, queue=False)
-        session_id = result["session_id"]
-
-        summary_result = run_session_enrichment(self.store, session_id)
-        dashboard = get_dashboard_response(self.store, session_id)
-
-        self.assertEqual(summary_result["meta"]["status"], "ready")
-        self.assertTrue(
-            any(digest["id"] == "models" for digest in dashboard["summary"]["digests"])
-        )
-        self.assertTrue(
-            any(feed["eyebrow"] == "Models" for feed in dashboard["feeds"])
-        )
-        models_digest = next(
-            digest
-            for digest in dashboard["summary"]["digests"]
-            if digest["id"] == "models"
-        )
-        self.assertEqual(models_digest["evidence"], "1 docs · Model")
-        models_feed = next(
-            feed for feed in dashboard["feeds"] if feed["id"] == "hf_models_new"
-        )
-        self.assertEqual(models_feed["items"][0]["type"], "Model")
-
-    def test_leaderboard_response_exposes_dedicated_payload(self) -> None:
-        run_id = "2026-03-24T111113Z_leaderboard_api"
-        documents = build_base_documents(run_id) + [
-            make_document(
-                run_id=run_id,
-                document_id="lmarena:vision",
-                source="lmarena_overview",
-                source_category="benchmark",
-                title="LMArena Vision",
-                feed_score=90,
-                sort_at="2026-03-24T12:30:00Z",
-                reference_url="https://arena.ai/leaderboard/vision",
-                doc_type_override="benchmark_panel",
-                metadata={
-                    "leaderboard_link": "/leaderboard/vision",
-                    "total_votes": 810245,
-                    "total_models": 94,
-                    "top_entries": [
-                        {
-                            "rank": 1,
-                            "model_name": "Vision Alpha",
-                            "organization": "Vision Org",
-                            "rating": 1288.1,
-                            "votes": 12003,
-                            "url": "https://arena.ai/vision-alpha",
-                        }
-                    ],
-                },
-                benchmark={
-                    "kind": "leaderboard_panel",
-                    "board_id": "/leaderboard/vision",
-                    "board_name": "LMArena Vision",
-                    "snapshot_at": "2026-03-24T12:30:00Z",
-                    "rank": 1,
-                    "score_value": 1288.1,
-                    "votes": 12003,
-                    "model_name": "Vision Alpha",
-                    "organization": "Vision Org",
-                    "total_models": 94,
-                    "total_votes": 810245,
-                },
-            )
-        ]
-
-        run_dir = self._make_run(run_id, documents=documents)
-        result = publish_run(self.store, run_dir, queue=False)
-
-        payload = get_leaderboard_response(self.store, session=result["session_id"])
-        self.assertEqual(payload["sessionId"], result["session_id"])
-        self.assertEqual(payload["status"], "published")
-        self.assertIsNotNone(payload["leaderboard"])
-        self.assertEqual(payload["leaderboard"]["boards"][0]["label"], "Vision")
-        self.assertEqual(
-            payload["leaderboard"]["boards"][0]["documentId"],
-            "lmarena:vision",
-        )
-        self.assertEqual(
-            payload["leaderboard"]["boards"][0]["topModel"]["modelName"],
-            "Vision Alpha",
-        )
-
-    def test_leaderboard_response_recovers_from_stale_dashboard(self) -> None:
-        run_id = "2026-03-24T111114Z_stale_leaderboard"
-        documents = build_base_documents(run_id) + [
-            make_document(
-                run_id=run_id,
-                document_id="lmarena:search",
-                source="lmarena_overview",
-                source_category="benchmark",
-                title="LMArena Search",
-                feed_score=87,
-                sort_at="2026-03-24T12:45:00Z",
-                reference_url="https://arena.ai/leaderboard/search",
-                doc_type_override="benchmark_panel",
-                metadata={
-                    "leaderboard_link": "/leaderboard/search",
-                    "total_votes": 247944,
-                    "total_models": 22,
-                    "top_entries": [
-                        {
-                            "rank": 1,
-                            "model_name": "Search Alpha",
-                            "organization": "Org Search",
-                            "rating": 1255.41,
-                            "votes": 3607,
-                            "url": "https://arena.ai/search-alpha",
-                        }
-                    ],
-                },
-                benchmark={
-                    "kind": "leaderboard_panel",
-                    "board_id": "/leaderboard/search",
-                    "board_name": "LMArena Search",
-                    "snapshot_at": "2026-03-24T12:45:00Z",
-                    "rank": 1,
-                    "score_value": 1255.41,
-                    "votes": 3607,
-                    "model_name": "Search Alpha",
-                    "organization": "Org Search",
-                    "total_models": 22,
-                    "total_votes": 247944,
-                },
-            )
-        ]
-
-        run_dir = self._make_run(run_id, documents=documents)
-        result = publish_run(self.store, run_dir, queue=False)
-        session_id = result["session_id"]
-        dashboard = get_json(self.store, session_key(session_id, "dashboard"))
-        dashboard["session"]["arenaOverview"] = None
-        self.store.set(session_key(session_id, "dashboard"), json.dumps(dashboard))
-
-        payload = get_leaderboard_response(self.store, session=session_id)
-        self.assertIsNotNone(payload["leaderboard"])
-        self.assertEqual(payload["leaderboard"]["boards"][0]["label"], "Search")
-        rebuilt_dashboard = get_json(self.store, session_key(session_id, "dashboard"))
-        self.assertIsNotNone(rebuilt_dashboard["session"]["arenaOverview"])
-
-    def test_enrichment_without_llm_provider_still_creates_digests(self) -> None:
-        run_dir = self._make_run("2026-03-24T000103Z_enrich")
-        result = publish_run(self.store, run_dir)
-        session_id = result["session_id"]
-
-        summary_result = run_session_enrichment(self.store, session_id)
-        meta = summary_result["meta"]
-
-        self.assertEqual(meta["status"], "ready")
-        self.assertTrue(meta["digests_ready"])
-        self.assertEqual(meta["summaries_ready"], 0)
-        self.assertEqual(meta["summary_provider"], "noop")
-
-        for category in ORDERED_SOURCE_CATEGORIES:
-            digest = get_json(
-                self.store,
-                f"sparkorbit:session:{session_id}:digest:{category}",
-            )
-            self.assertIsNotNone(digest)
-
-        dashboard = get_dashboard_response(self.store, session_id)
-        self.assertEqual(dashboard["status"], "ready")
-        self.assertEqual(dashboard["session"]["loading"]["stage"], "ready")
-        self.assertEqual(dashboard["session"]["loading"]["percent"], 100)
-        self.assertIsNone(dashboard["summary"].get("briefing"))
-
-        stored_document = get_document_response(
-            self.store,
-            "papers:top",
-            session=session_id,
-        )
-        self.assertEqual(stored_document["llm"]["status"], "pending")
-
-    def test_custom_summary_provider_can_be_injected(self) -> None:
-        run_dir = self._make_run("2026-03-24T000103Z_injected")
-        result = publish_run(self.store, run_dir, queue=False)
-        session_id = result["session_id"]
-
-        summary_result = run_session_enrichment(
-            self.store,
-            session_id,
-            generator=build_summary_generator("heuristic"),
-        )
-
-        self.assertGreater(summary_result["meta"]["summaries_ready"], 0)
-        document = get_document_response(
-            self.store,
-            "papers:top",
-            session=session_id,
-        )
-        self.assertEqual(document["llm"]["status"], "complete")
-        self.assertIsNotNone(document["llm"]["summary_short"])
-
-    def test_briefing_is_persisted_and_survives_dashboard_rebuild(self) -> None:
-        run_dir = self._make_run("2026-03-24T000103Z_briefing")
-        result = publish_run(self.store, run_dir, queue=False)
-        session_id = result["session_id"]
-        briefing_generator = StaticBriefingGenerator()
-
-        summary_result = run_session_enrichment(
-            self.store,
-            session_id,
-            briefing_generator=briefing_generator,
-        )
-
-        self.assertIsNotNone(summary_result["dashboard"]["summary"]["briefing"])
-        self.assertIn(
-            "[Papers]",
-            summary_result["dashboard"]["summary"]["briefing"]["body_en"],
-        )
-        self.assertIsNotNone(get_json(self.store, session_key(session_id, "briefing")))
-        self.store.delete(session_key(session_id, "dashboard"))
-
-        rebuilt = get_dashboard_response(self.store, session_id)
-        self.assertIsNotNone(rebuilt["summary"]["briefing"])
-        self.assertEqual(
-            rebuilt["summary"]["briefing"]["body_en"],
-            summary_result["dashboard"]["summary"]["briefing"]["body_en"],
-        )
-        self.assertFalse(briefing_generator.closed)
-
-    def test_runtime_summary_artifacts_are_written_to_labels_with_ids(self) -> None:
-        run_dir = self._make_run("2026-03-24T000103Z_runtime-artifacts")
-        result = publish_run(self.store, run_dir, queue=False)
-        session_id = result["session_id"]
-
-        run_session_enrichment(
-            self.store,
-            session_id,
-            generator=build_summary_generator("heuristic"),
-            briefing_generator=StaticBriefingGenerator(),
-        )
-
-        summary_rows = read_ndjson_file(
-            run_dir / "labels" / "session_document_summaries.ndjson"
-        )
-        digest_rows = read_ndjson_file(
-            run_dir / "labels" / "session_category_digests.ndjson"
-        )
-        briefing_rows = read_ndjson_file(
-            run_dir / "labels" / "session_briefings.ndjson"
-        )
-
-        papers_summary = next(
-            row for row in summary_rows if row["document_id"] == "papers:top"
-        )
-        self.assertEqual(
-            papers_summary["summary_id"],
-            f"{session_id}:document:papers:top",
-        )
-        self.assertEqual(papers_summary["status"], "complete")
-        self.assertEqual(papers_summary["provider_name"], "heuristic")
-        self.assertTrue(papers_summary["summary_short"])
-
-        papers_digest = next(row for row in digest_rows if row["category"] == "papers")
-        self.assertEqual(
-            papers_digest["digest_id"],
-            f"{session_id}:digest:papers",
-        )
-        self.assertIn("papers:top", papers_digest["document_ids"])
-
-        self.assertEqual(len(briefing_rows), 1)
-        self.assertEqual(
-            briefing_rows[0]["briefing_id"],
-            f"{session_id}:briefing:daily",
-        )
-        self.assertIn("[Papers]", briefing_rows[0]["body_en"])
-
-    def test_build_briefing_input_caps_items_and_adds_session_overview(self) -> None:
-        from datetime import datetime, timedelta, timezone
-
-        now = datetime.now(timezone.utc)
-        run_id = "briefing-input"
-        documents: list[dict] = []
-        feed_lists: dict[str, list[str]] = {
-            "arxiv_rss_cs_ai": [],
-            "hf_daily_papers": [],
-            "hf_models_likes": [],
-            "openai_news_rss": [],
-            "google_ai_blog": [],
-            "reddit_machinelearning": [],
-            "hf_models_new": [],
-        }
-
-        for idx in range(14):
-            doc = make_document(
-                run_id=run_id,
-                document_id=f"papers:{idx}",
-                source="arxiv_rss_cs_ai",
-                source_category="papers",
-                title=f"Paper {idx}",
-                feed_score=100 - idx,
-                sort_at=(now - timedelta(hours=idx)).isoformat().replace("+00:00", "Z"),
-                reference_url=f"https://example.com/papers/{idx}",
-            )
-            doc["labels"] = {"paper_domain": "agents" if idx < 8 else "reasoning"}
-            documents.append(doc)
-            feed_lists["arxiv_rss_cs_ai"].append(doc["document_id"])
-
-        for idx in range(10):
-            source = "openai_news_rss" if idx < 5 else "google_ai_blog"
-            category = "company" if idx < 6 else "company_kr"
-            doc = make_document(
-                run_id=run_id,
-                document_id=f"company:{idx}",
-                source=source,
-                source_category=category,
-                title=f"Company {idx}",
-                feed_score=95 - idx,
-                sort_at=(now - timedelta(minutes=idx)).isoformat().replace("+00:00", "Z"),
-                reference_url=f"https://example.com/company/{idx}",
-            )
-            doc["labels"] = {
-                "company": {
-                    "decision": "keep",
-                    "company_domain": "model_release" if idx < 6 else "product_update",
-                }
-            }
-            documents.append(doc)
-            feed_lists[source].append(doc["document_id"])
-
-        for idx in range(8):
-            doc = make_document(
-                run_id=run_id,
-                document_id=f"model:{idx}",
-                source="hf_models_new",
-                source_category="models",
-                title=f"Model {idx}",
-                feed_score=90 - idx,
-                sort_at=(now - timedelta(minutes=30 + idx)).isoformat().replace("+00:00", "Z"),
-                reference_url=f"https://example.com/model/{idx}",
-                doc_type_override="model",
-            )
-            doc["discovery"] = {
-                "is_new": True,
-                "age_hours": 1,
-                "freshness_bucket": "just_now",
-                "spark_score": 95,
-                "spark_bucket": "sparkling",
-                "primary_reason": "new_model_feed",
-            }
-            doc["ranking"] = {
-                "feed_score": 95,
-                "feed_bucket": "top",
-                "age_penalty": 0,
-                "evergreen_bonus": 0,
-                "priority_reason": "fresh_and_hot",
-            }
-            documents.append(doc)
-            feed_lists["hf_models_new"].append(doc["document_id"])
-
-        for idx in range(7):
-            doc = make_document(
-                run_id=run_id,
-                document_id=f"community:{idx}",
-                source="reddit_machinelearning",
-                source_category="community",
-                title=f"Community {idx}",
-                feed_score=80 - idx,
-                sort_at=(now - timedelta(minutes=60 + idx)).isoformat().replace("+00:00", "Z"),
-                reference_url=f"https://example.com/community/{idx}",
-            )
-            documents.append(doc)
-            feed_lists["reddit_machinelearning"].append(doc["document_id"])
-
-        for idx in range(2):
-            doc = make_document(
-                run_id=run_id,
-                document_id=f"hf-paper:{idx}",
-                source="hf_daily_papers",
-                source_category="papers",
-                title=f"HF Daily Paper {idx}",
-                feed_score=70 - idx,
-                sort_at=(now - timedelta(minutes=90 + idx)).isoformat().replace("+00:00", "Z"),
-                reference_url=f"https://example.com/hf-paper/{idx}",
-            )
-            doc["labels"] = {"paper_domain": "evaluation"}
-            documents.append(doc)
-            feed_lists["hf_daily_papers"].append(doc["document_id"])
-
-        for idx in range(2):
-            doc = make_document(
-                run_id=run_id,
-                document_id=f"hf-like:{idx}",
-                source="hf_models_likes",
-                source_category="models",
-                title=f"HF Hype Model {idx}",
-                feed_score=85 - idx,
-                sort_at=(now - timedelta(minutes=120 + idx)).isoformat().replace("+00:00", "Z"),
-                reference_url=f"https://example.com/hf-like/{idx}",
-                doc_type_override="model",
-            )
-            doc["discovery"] = {
-                "is_new": False,
-                "age_hours": 24 * 180,
-                "freshness_bucket": "established",
-                "spark_score": 40,
-                "spark_bucket": "steady",
-                "primary_reason": "established",
-            }
-            doc["ranking"] = {
-                "feed_score": 14,
-                "feed_bucket": "archive",
-                "age_penalty": 38,
-                "evergreen_bonus": 12,
-                "priority_reason": "evergreen",
-            }
-            documents.append(doc)
-            feed_lists["hf_models_likes"].append(doc["document_id"])
-
-        documents_by_id = {doc["document_id"]: doc for doc in documents}
-
-        briefing_input = build_briefing_input(documents_by_id, feed_lists)
-
-        self.assertEqual(len(briefing_input["papers"]), 16)
-        self.assertEqual(len(briefing_input["company"]), 8)
-        self.assertEqual(len(briefing_input["models"]), 6)
-        self.assertEqual(len(briefing_input["community"]), 8)
-        self.assertEqual(briefing_input["session"]["window"], "today")
-        self.assertEqual(briefing_input["session"]["category_counts"]["papers"], 16)
-        self.assertEqual(briefing_input["session"]["category_counts"]["company"], 8)
-        self.assertEqual(briefing_input["session"]["category_counts"]["community"], 8)
-        self.assertIn("agents", briefing_input["session"]["dominant_paper_domains"])
-        self.assertIn("arxiv", briefing_input["session"]["paper_source_groups"])
-        self.assertIn("hf_daily", briefing_input["session"]["paper_source_groups"])
-        self.assertEqual(briefing_input["papers"][0]["source_group"], "arxiv")
-        self.assertIn("source", briefing_input["papers"][0])
-        self.assertIn("model_release", briefing_input["session"]["dominant_company_domains"])
-        self.assertIn("model_release", briefing_input["session"]["company_issue_domains"])
-        self.assertIn("hf_daily_papers", briefing_input["session"]["active_community_sources"])
-        self.assertIn("hf_models_new", briefing_input["session"]["active_model_sources"])
-        self.assertIn("hf_daily_papers", briefing_input["session"]["hf_community_sources"])
-        self.assertIn("hf_models_new", briefing_input["session"]["hf_model_sources"])
-        self.assertIn("fresh_and_hot", briefing_input["session"]["model_signal_reasons"])
-        self.assertEqual(briefing_input["models"][0]["source"], "hf_models_new")
-        self.assertIn("signal_reason", briefing_input["models"][0])
-        self.assertIn("downloads", briefing_input["models"][0])
-
-    def test_today_intro_is_non_numeric_and_handles_no_company_issue(self) -> None:
-        intro = _build_today_intro(
-            {
-                "dominant_paper_domains": ["vlm", "reasoning"],
-                "company_issue_domains": [],
-                "hf_community_sources": ["hf_daily_papers"],
-                "hf_model_sources": ["hf_models_new"],
-            }
-        )
-        self.assertIn("Today’s flow", intro)
-        self.assertIn("no single company issue", intro)
-        self.assertIn("Hugging Face", intro)
-        self.assertNotIn("papers 12", intro)
-
-    def test_models_section_names_top_signal_and_trending_items(self) -> None:
-        section = _build_models_section(
-            {
-                "hf_model_sources": ["hf_trending_models", "hf_models_new"],
-            },
-            [
-                {
-                    "title": "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled",
-                    "source": "hf_trending_models",
-                    "likes": 1247,
-                    "downloads": 173865,
-                    "feed_score": 100,
-                    "trend_rank": 2,
-                },
-                {
-                    "title": "nvidia/Nemotron-Cascade-2-30B-A3B",
-                    "source": "hf_trending_models",
-                    "likes": 282,
-                    "downloads": 38586,
-                    "feed_score": 100,
-                    "trend_rank": 3,
-                },
-                {
-                    "title": "fresh/upload-alpha",
-                    "source": "hf_models_new",
-                    "likes": 0,
-                    "downloads": 0,
-                    "feed_score": 95,
-                    "freshness": "just_now",
-                },
-            ],
-            "",
-        )
-        self.assertIn("Top signal today", section)
-        self.assertIn("Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled", section)
-        self.assertIn("Also trending on Hugging Face", section)
-        self.assertIn("nvidia/Nemotron-Cascade-2-30B-A3B", section)
-        self.assertIn(
-            "Fresh uploads are active, with attention still spread across several new entries.",
-            section,
-        )
-
-    def test_partial_error_keeps_dashboard_usable(self) -> None:
-        run_dir = self._make_run("2026-03-24T000104Z_partial")
-        result = publish_run(self.store, run_dir, queue=False)
-        session_id = result["session_id"]
-
-        summary_result = run_session_enrichment(
-            self.store,
-            session_id,
-            generator=FailingSummaryGenerator(),
-        )
-
-        self.assertEqual(summary_result["meta"]["status"], "partial_error")
-        dashboard = get_dashboard_response(self.store, session_id)
-        self.assertEqual(dashboard["status"], "partial_error")
-
-        errored_documents = [
-            json.loads(value)
-            for key, value in self.store.values.items()
-            if key.startswith(f"sparkorbit:session:{session_id}:doc:")
-            and json.loads(value).get("llm", {}).get("status") == "error"
-        ]
-        self.assertGreaterEqual(len(errored_documents), 1)
-
-    def test_session_rollover_prunes_sessions_beyond_retention_limit(self) -> None:
-        first_run_dir = self._make_run("2026-03-24T010101Z_first")
-        second_run_dir = self._make_run("2026-03-24T020202Z_second")
-        third_run_dir = self._make_run("2026-03-24T030303Z_third")
-
-        first = publish_run(self.store, first_run_dir, queue=True)
-        second = publish_run(self.store, second_run_dir, queue=True)
-        third = publish_run(self.store, third_run_dir, queue=True)
-
-        self.assertEqual(self.store.get(ACTIVE_SESSION_KEY), third["session_id"])
-        self.assertEqual(
-            get_json(self.store, RECENT_SESSIONS_KEY),
-            [third["session_id"], second["session_id"]][:SESSION_RETAIN_COUNT],
-        )
-        self.assertIsNone(
-            self.store.get(session_key(first["session_id"], "dashboard")),
-        )
-        self.assertIsNotNone(
-            self.store.get(session_key(second["session_id"], "dashboard")),
-        )
-        self.assertIsNotNone(
-            self.store.get(session_key(third["session_id"], "dashboard")),
-        )
-        queue_session_ids = [
-            json.loads(item)["session_id"]
-            for item in self.store.lrange(QUEUE_SESSION_ENRICH_KEY, 0, -1)
-        ]
-        self.assertNotIn(first["session_id"], queue_session_ids)
-        self.assertIn(second["session_id"], queue_session_ids)
-        self.assertIn(third["session_id"], queue_session_ids)
-
-    def test_dashboard_rebuilds_when_materialized_key_is_missing(self) -> None:
-        run_dir = self._make_run("2026-03-24T000105Z_rebuild")
-        result = publish_run(self.store, run_dir, queue=False)
-        session_id = result["session_id"]
-
-        self.store.delete(session_key(session_id, "dashboard"))
-        rebuilt = get_dashboard_response(self.store, session_id)
-
-        self.assertEqual(rebuilt["session"]["sessionId"], session_id)
-        self.assertIsNotNone(
-            self.store.get(session_key(session_id, "dashboard")),
-        )
-
-    def test_dashboard_rebuilds_when_cached_copy_uses_old_schema(self) -> None:
-        run_dir = self._make_run("2026-03-24T000106Z_stale_dashboard")
-        result = publish_run(self.store, run_dir, queue=False)
-        session_id = result["session_id"]
-
-        stale_meta = get_json(self.store, session_key(session_id, "meta"))
-        stale_dashboard = get_json(self.store, session_key(session_id, "dashboard"))
-        stale_meta["schema_version"] = SCHEMA_VERSION - 1
-        stale_dashboard["brand"]["tagline"] = "Redis Session Pipeline"
-        self.store.set(
-            session_key(session_id, "meta"),
-            json.dumps(stale_meta, ensure_ascii=False),
-        )
-        self.store.set(
-            session_key(session_id, "dashboard"),
-            json.dumps(stale_dashboard, ensure_ascii=False),
-        )
-
-        rebuilt = get_dashboard_response(self.store, session_id)
-
-        self.assertEqual(rebuilt["brand"]["name"], "BLACKSITE")
-        self.assertEqual(rebuilt["brand"]["tagline"], "Signal Relay")
-        refreshed_meta = get_json(self.store, session_key(session_id, "meta"))
-        self.assertEqual(refreshed_meta["schema_version"], SCHEMA_VERSION)
-
-    def test_homepage_dashboard_bootstraps_collection_when_active_session_is_missing(self) -> None:
-        scheduled: list[str] = []
-
-        dashboard = get_or_bootstrap_dashboard_response(
-            self.store,
-            schedule_bootstrap=lambda: scheduled.append("queued"),
-        )
-        second_dashboard = get_or_bootstrap_dashboard_response(
-            self.store,
-            schedule_bootstrap=lambda: scheduled.append("queued-again"),
-        )
-
-        self.assertEqual(dashboard["status"], "collecting")
-        self.assertEqual(second_dashboard["status"], "collecting")
-        self.assertEqual(scheduled, ["queued"])
-        self.assertEqual(dashboard["session"]["loading"]["stage"], "starting")
-
-        bootstrap_state = get_json(self.store, BOOTSTRAP_STATE_KEY)
-        self.assertIsNotNone(bootstrap_state)
-        self.assertEqual(bootstrap_state["status"], "collecting")
-
-    def test_homepage_dashboard_does_not_schedule_duplicate_bootstrap_after_eager_claim(self) -> None:
-        scheduled: list[str] = []
-
-        initial_state, should_start = begin_homepage_bootstrap(self.store)
-        dashboard = get_or_bootstrap_dashboard_response(
-            self.store,
-            schedule_bootstrap=lambda: scheduled.append("queued"),
-        )
-
-        self.assertTrue(should_start)
-        self.assertEqual(initial_state["status"], "collecting")
-        self.assertEqual(dashboard["status"], "collecting")
-        self.assertEqual(scheduled, [])
-
-    def test_begin_homepage_bootstrap_claims_run_only_once(self) -> None:
-        first_state, first_should_start = begin_homepage_bootstrap(self.store)
-        second_state, second_should_start = begin_homepage_bootstrap(self.store)
-
-        self.assertTrue(first_should_start)
-        self.assertFalse(second_should_start)
-        self.assertEqual(first_state["status"], "collecting")
-        self.assertEqual(second_state["status"], "collecting")
-
-    def test_loading_percent_tracks_overall_pipeline_without_resetting_to_zero(self) -> None:
-        fetching_mid = loading_percent(
-            3,
-            10,
-            status="collecting",
-            stage="fetching_sources",
-        )
-        published = loading_percent(
-            1,
-            1,
-            status="published",
-            stage="published",
-        )
-        summarizing_start = loading_percent(
-            0,
-            8,
-            status="summarizing",
-            stage="summarizing_documents",
-        )
-        digests_mid = loading_percent(
-            3,
-            6,
-            status="summarizing",
-            stage="building_digests",
-        )
-        briefing = loading_percent(
-            0,
-            1,
-            status="summarizing",
-            stage="generating_briefing",
-        )
-        ready = loading_percent(
-            6,
-            6,
-            status="ready",
-            stage="ready",
-        )
-
-        self.assertGreater(fetching_mid, 0)
-        self.assertLess(fetching_mid, published)
-        self.assertLess(published, 100)
-        self.assertGreaterEqual(summarizing_start, published)
-        self.assertLess(summarizing_start, digests_mid)
-        self.assertLess(digests_mid, briefing)
-        self.assertLess(briefing, ready)
-        self.assertEqual(ready, 100)
-
-    def test_session_reload_state_tracks_real_progress_until_ready(self) -> None:
-        run_id = "2026-03-24T030303Z_reload"
-        run_dir = self._make_run(run_id)
-        run_manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
-        snapshots: list[dict] = []
-
-        def fake_collect_run(**kwargs):
-            progress_callback = kwargs.get("progress_callback")
-            if progress_callback:
-                progress_callback(
-                    {
-                        "stage": "starting",
-                        "run_id": run_id,
-                        "total_sources": 3,
-                        "completed_sources": 0,
-                        "current_source": None,
-                        "detail": "Preparing 3 source(s) for collection.",
-                    }
-                )
-                progress_callback(
-                    {
-                        "stage": "fetching_sources",
-                        "run_id": run_id,
-                        "total_sources": 3,
-                        "completed_sources": 1,
-                        "current_source": "openai_news_rss",
-                        "detail": "Completed openai_news_rss with status ok.",
-                    }
-                )
-                snapshots.append(get_session_reload_response(self.store))
-                progress_callback(
-                    {
-                        "stage": "fetching_sources",
-                        "run_id": run_id,
-                        "total_sources": 3,
-                        "completed_sources": 3,
-                        "current_source": "arxiv_rss_cs_ai",
-                        "detail": "Completed arxiv_rss_cs_ai with status ok.",
-                    }
-                )
-                snapshots.append(get_session_reload_response(self.store))
-            return run_manifest, run_dir
-
-        start_response = start_session_reload(
-            self.store,
-            schedule_reload=lambda: None,
-            run_label="redis-session",
-        )
-        self.assertEqual(start_response["status"], "collecting")
-        self.assertEqual(start_response["loading"]["stage"], "starting")
-
-        with patch(
-            "backend.app.services.session_service.collect_run",
-            side_effect=fake_collect_run,
-        ):
-            run_session_reload(
-                self.store,
-                run_label="redis-session",
-            )
-
-        final_response = get_session_reload_response(self.store)
-        self.assertEqual(final_response["status"], "ready")
-        self.assertEqual(final_response["session_id"], run_id)
-        self.assertEqual(final_response["loading"]["stage"], "ready")
-        self.assertEqual(final_response["loading"]["percent"], 100)
-        self.assertEqual(self.store.ttl_for(RELOAD_STATE_KEY), RELOAD_STATE_TTL_SECONDS)
-        self.assertEqual(len(snapshots), 2)
-        self.assertLess(snapshots[0]["loading"]["percent"], snapshots[1]["loading"]["percent"])
-        self.assertLess(snapshots[1]["loading"]["percent"], 100)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert response.status_code == 200
+        assert response.json()["digest"]["id"] == digest_id

@@ -264,6 +264,26 @@ def extract_arxiv_id(*values: Any) -> str | None:
     return None
 
 
+_ARXIV_RSS_ABSTRACT_PREFIX_PATTERNS = (
+    re.compile(
+        r"^\s*(?:arXiv:\s*[0-9]{4}\.[0-9]{4,5}(?:v\d+)?\s+)?Announce Type:\s*[^\n]*?\s+Abstract:\s*",
+        re.I,
+    ),
+    re.compile(r"^\s*Abstract:\s*", re.I),
+)
+
+
+def strip_arxiv_rss_abstract_boilerplate(value: str | None) -> str | None:
+    text = normalize_text_value(value)
+    if not text:
+        return None
+    cleaned = text
+    for pattern in _ARXIV_RSS_ABSTRACT_PREFIX_PATTERNS:
+        cleaned = pattern.sub("", cleaned, count=1)
+    cleaned = cleaned.strip()
+    return cleaned or None
+
+
 def prefixed_tag_values(tags: list[str], prefix: str) -> list[str]:
     values: list[str] = []
     for tag in tags:
@@ -862,6 +882,9 @@ def fetch_rss_source(client: httpx.Client, config: SourceConfig, run_id: str, li
                 media_urls.append(detail_fields["hero_image_url"])
             if detail_fields.get("canonical_url"):
                 url = detail_fields["canonical_url"]
+        if config.name.startswith("arxiv_rss_"):
+            description = strip_arxiv_rss_abstract_boilerplate(description)
+            body_text = strip_arxiv_rss_abstract_boilerplate(body_text) or description
         result.documents.append(
             make_document(
                 run_id=run_id,

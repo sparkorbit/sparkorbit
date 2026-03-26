@@ -19,9 +19,9 @@ import type { DigestItem } from "./content/dashboardContent";
 import {
   EMPTY_ARENA_BOARDS,
   EMPTY_DASHBOARD,
-  buildLeaderboardEntries,
   buildPanelSessionLabel,
   compactText,
+  formatReadableSourceTitle,
 } from "./features/dashboard/display";
 import {
   DigestDetailPanel,
@@ -109,10 +109,50 @@ function buildFeedSourceSummary(feed: DashboardResponse["feeds"][number]) {
   return `${visibleSources}${extraCount}`;
 }
 
+function DetailErrorPanel({
+  message,
+  onClose,
+}: {
+  message: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-orbit-bg">
+      <div className="min-h-0 flex-1 overflow-auto bg-orbit-bg p-1">
+        <section className="border border-orbit-border bg-orbit-bg-elevated p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orbit-border pb-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
+                detail error
+              </p>
+              <h3 className="mt-2 font-display text-[0.98rem] font-semibold leading-[1.45] text-orbit-text">
+                Could not load this item
+              </h3>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 border border-orbit-border-strong bg-orbit-bg px-3 py-1.5 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-text transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
+              onClick={onClose}
+            >
+              back to list
+            </button>
+          </div>
+          <div className="mt-3 border border-orbit-border bg-orbit-bg px-3 py-3">
+            <p className="orbit-wrap-anywhere text-[0.76rem] leading-[1.7] text-orbit-text">
+              {message}
+            </p>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [dashboard, setDashboard] =
     useState<DashboardResponse>(EMPTY_DASHBOARD);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [detailState, setDetailState] = useState<DetailState>(null);
   const [selectedDigestId, setSelectedDigestId] = useState<string | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
@@ -129,9 +169,6 @@ function App() {
     useState<SessionArenaOverview | null>(null);
   const [isLoadingLeaderboards, setIsLoadingLeaderboards] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
-  const [selectedLeaderboardId, setSelectedLeaderboardId] = useState<
-    string | null
-  >(null);
   const [payloadSnapshots, setPayloadSnapshots] = useState<
     PayloadDebugSnapshot[]
   >([]);
@@ -195,7 +232,7 @@ function App() {
         setDashboardError(
           error instanceof Error
             ? compactText(error.message, 180)
-            : "Failed to connect to BFF API.",
+            : "Failed to connect to the dashboard API.",
         );
         return EMPTY_DASHBOARD;
       } finally {
@@ -342,7 +379,7 @@ function App() {
           isTerminal = true;
           setDashboardError(
             compactText(
-              payload.error ?? "Fault occurred during probe cycle.",
+              payload.error ?? "An error occurred during refresh.",
               180,
             ),
           );
@@ -445,6 +482,7 @@ function App() {
   function resetWorkspaceLayout() {
     resetPanelWorkspaceStorage();
     setDetailState(null);
+    setDetailError(null);
     setSelectedDigestId(null);
     setSelectedDocumentId(null);
     setWorkspaceVersion((current) => current + 1);
@@ -459,6 +497,7 @@ function App() {
   async function handleSelectDigest(digest: DigestItem) {
     setSelectedDigestId(digest.id);
     setSelectedDocumentId(null);
+    setDetailError(null);
 
     try {
       const payload = await fetchDigestDetail(digest.id);
@@ -470,9 +509,9 @@ function App() {
         payload,
       });
       setDetailState({ kind: "digest", payload });
-      setDashboardError(null);
+      setDetailError(null);
     } catch (error) {
-      setDashboardError(
+      setDetailError(
         error instanceof Error
           ? compactText(error.message, 180)
           : "Failed to fetch digest detail.",
@@ -480,16 +519,10 @@ function App() {
     }
   }
 
-  async function handleSelectDocument(
-    documentId: string,
-    referenceUrl: string,
-  ) {
+  async function handleSelectDocument(documentId: string) {
     setSelectedDocumentId(documentId);
     setSelectedDigestId(null);
-
-    if (referenceUrl) {
-      window.open(referenceUrl, "_blank", "noopener,noreferrer");
-    }
+    setDetailError(null);
 
     try {
       const payload = await fetchDocument(documentId);
@@ -501,9 +534,9 @@ function App() {
         payload,
       });
       setDetailState({ kind: "document", payload });
-      setDashboardError(null);
+      setDetailError(null);
     } catch (error) {
-      setDashboardError(
+      setDetailError(
         error instanceof Error
           ? compactText(error.message, 180)
           : "Failed to fetch document detail.",
@@ -516,6 +549,7 @@ function App() {
     setBlockingLoadingState(null);
     setDashboardError(null);
     setDetailState(null);
+    setDetailError(null);
     setSelectedDigestId(null);
     setSelectedDocumentId(null);
     try {
@@ -559,34 +593,10 @@ function App() {
   const resolvedArenaOverview =
     leaderboardOverview ?? dashboard.session.arenaOverview;
   const arenaBoards = resolvedArenaOverview?.boards ?? EMPTY_ARENA_BOARDS;
-  const arenaBoardIdsKey = arenaBoards.map((board) => board.id).join("::");
-  const selectedArenaBoard =
-    arenaBoards.find((board) => board.id === selectedLeaderboardId) ??
-    arenaBoards[0] ??
-    null;
-  const leaderboardEntries = buildLeaderboardEntries(selectedArenaBoard);
-
-  useEffect(() => {
-    if (arenaBoards.length === 0) {
-      if (selectedLeaderboardId !== null) {
-        setSelectedLeaderboardId(null);
-      }
-      return;
-    }
-
-    if (
-      selectedLeaderboardId &&
-      arenaBoards.some((board) => board.id === selectedLeaderboardId)
-    ) {
-      return;
-    }
-
-    setSelectedLeaderboardId(arenaBoards[0].id);
-  }, [arenaBoardIdsKey, selectedLeaderboardId, arenaBoards]);
 
   const infoItems = dashboard.feeds.map((feed) => ({
     id: feed.id,
-    label: feed.eyebrow,
+    label: undefined,
     title: feed.title,
     meta: `${feed.items.length} items`,
     detail: buildFeedSourceSummary(feed) ?? undefined,
@@ -615,12 +625,13 @@ function App() {
   const infoPanelOverride =
     detailState?.kind === "digest"
       ? {
-          title: `${detailState.payload.digest.domain} Sweep`,
+          title: `${detailState.payload.digest.domain} Overview`,
           node: (
             <DigestDetailPanel
               payload={detailState.payload}
               onClose={() => {
                 setDetailState(null);
+                setDetailError(null);
                 setSelectedDigestId(null);
               }}
               onOpenDocument={handleSelectDocument}
@@ -629,17 +640,36 @@ function App() {
         }
       : detailState?.kind === "document"
         ? {
-            title: `${detailState.payload.source} Trace`,
+            title: formatReadableSourceTitle(
+              detailState.payload.source_category,
+              detailState.payload.source,
+            ),
             node: (
               <DocumentDetailPanel
                 document={detailState.payload}
                 onClose={() => {
                   setDetailState(null);
+                  setDetailError(null);
                   setSelectedDocumentId(null);
                 }}
               />
             ),
           }
+        : detailError
+          ? {
+              title: "Details",
+              node: (
+                <DetailErrorPanel
+                  message={detailError}
+                  onClose={() => {
+                    setDetailError(null);
+                    setDetailState(null);
+                    setSelectedDigestId(null);
+                    setSelectedDocumentId(null);
+                  }}
+                />
+              ),
+            }
         : undefined;
 
   const mainPanel = (
@@ -647,14 +677,10 @@ function App() {
       sessionLabel={sessionLabel}
       isReloading={isReloading}
       onReload={() => void handleReloadSession()}
-      resolvedArenaOverview={resolvedArenaOverview}
-      selectedArenaBoard={selectedArenaBoard}
       arenaBoards={arenaBoards}
-      leaderboardEntries={leaderboardEntries}
       isLoadingLeaderboards={isLoadingLeaderboards}
       leaderboardError={leaderboardError}
       dashboardError={dashboardError}
-      onSelectBoard={setSelectedLeaderboardId}
     />
   );
 
