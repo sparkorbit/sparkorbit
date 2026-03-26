@@ -24,7 +24,7 @@ if [[ -z "${USE_LLM}" ]]; then
     echo "  Requires: NVIDIA GPU with ~4GB VRAM (6-8GB recommended for full context)"
     echo "  Model: qwen3.5:4b (~3.4GB download)"
     echo ""
-    printf "Use local LLM bundle? [Y/n] "
+    printf "\n\033[1;33m⚠️  Use local LLM bundle? [Y/n] \033[0m"
     read -r reply
     case "${reply}" in
       n|N|no|NO) USE_LLM="no"  ;;

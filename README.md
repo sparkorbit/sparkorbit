@@ -45,22 +45,6 @@
 
 ***
 
-## With GPU vs Without GPU
-
-> **GPU available** — full experience with AI-generated summaries, paper domain grouping, and daily briefing.
-
-<p align="center">
-  <img src="./docs/images/AIorbits_comp.png" alt="SparkOrbit with GPU — full AI features" width="100%"/>
-</p>
-
-> **No GPU** — you still get the complete dashboard with 30+ sources, leaderboards, and engagement rankings. LLM features are simply skipped.
-
-<p align="center">
-  <img src="./docs/images/AIOribits_NoGPU.png" alt="SparkOrbit without GPU — source curation only" width="100%"/>
-</p>
-
-***
-
 ## Quick Start (Linux/macOS)
 
 Windows is not officially supported yet.
@@ -71,16 +55,32 @@ cd sparkorbit
 bash scripts/docker-up.sh
 ```
 
-The script asks one question:
+The script asks one question — **don't just hit Enter without reading it!**
 
-```
-Use local LLM bundle? [Y/n]
-```
+> **⚠️ `Use local LLM bundle? [Y/n]`**
+>
+> This decides whether AI summarization runs on your machine. Choose carefully.
 
 | Answer | What you get | Requirements |
 |--------|-------------|--------------|
 | **Y** (default) | Full experience — AI summary, paper topics, daily briefing | NVIDIA GPU, ~13GB VRAM |
 | **N** | Source curation only, no AI summarization | Docker only |
+
+<details>
+<summary><b>Screenshot: With GPU (full AI features)</b></summary>
+<br/>
+<p align="center">
+  <img src="./docs/images/AIorbits_comp.png" alt="SparkOrbit with GPU — full AI features" width="100%"/>
+</p>
+</details>
+
+<details>
+<summary><b>Screenshot: Without GPU (source curation only)</b></summary>
+<br/>
+<p align="center">
+  <img src="./docs/images/AIOribits_NoGPU.png" alt="SparkOrbit without GPU — source curation only" width="100%"/>
+</p>
+</details>
 
 Then open **http://localhost:3000** — the loading screen shows live progress.
 If you're running on a remote server, use `http://<server-ip>:3000` instead.
@@ -165,6 +165,12 @@ If you searched for any of these, you're in the right place:
 `ai dashboard` · `ai monitor` · `ai news aggregator` · `arxiv paper tracker` · `huggingface trending` · `llm leaderboard` · `ai research feed` · `machine learning news` · `deep learning dashboard` · `ai info dashboard` · `paper summarizer` · `model ranking` · `ai tool` · `open source ai dashboard` · `ollama dashboard` · `lmarena` · `ai benchmark tracker` · `nlp news` · `computer vision papers` · `ai community feed`
 
 </details>
+
+***
+
+## Acknowledgments
+
+- [**WorldMonitor**](https://github.com/koala73/worldmonitor) — the original inspiration for building an all-in-one monitoring dashboard. SparkOrbit started from the idea of bringing that concept into the AI space.
 
 ***
 
