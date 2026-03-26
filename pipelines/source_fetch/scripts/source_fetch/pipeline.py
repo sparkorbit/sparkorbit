@@ -3,7 +3,9 @@ from __future__ import annotations
 import copy
 import json
 import subprocess
+import threading
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -540,6 +542,62 @@ def summarize_request_traces(request_traces: list[dict[str, Any]]) -> dict[str, 
     }
 
 
+MAX_WORKERS = 6
+
+
+def _fetch_one_source(
+    source: Any,
+    run_id: str,
+    applied_limit: int,
+    timeout: float,
+) -> dict[str, Any]:
+    """Fetch, normalize, and filter a single source. Thread-safe (no shared state)."""
+    client = make_client(timeout=timeout)
+    source_started_at = perf_counter()
+    try:
+        fetch_started_at = perf_counter()
+        result = fetch_source(client, source, run_id, applied_limit)
+        fetch_duration_ms = int((perf_counter() - fetch_started_at) * 1000)
+
+        normalize_started_at = perf_counter()
+        result.documents = [normalize_document_contract(doc) for doc in result.documents]
+        result.metrics = [normalize_metric_contract(m) for m in result.metrics]
+        normalize_duration_ms = int((perf_counter() - normalize_started_at) * 1000)
+
+        filter_started_at = perf_counter()
+        filtered_docs, filtered_metrics, excluded_count = filter_displayable_documents(
+            result.documents, result.metrics,
+        )
+        result.documents = filtered_docs
+        result.metrics = filtered_metrics
+        filter_duration_ms = int((perf_counter() - filter_started_at) * 1000)
+        if excluded_count:
+            result.notes.append(f"Excluded {excluded_count} document(s) without a displayable URL/reference.")
+
+        duration_ms = int((perf_counter() - source_started_at) * 1000)
+        return {
+            "ok": True,
+            "source": source,
+            "result": result,
+            "duration_ms": duration_ms,
+            "fetch_duration_ms": fetch_duration_ms,
+            "normalize_duration_ms": normalize_duration_ms,
+            "filter_duration_ms": filter_duration_ms,
+            "excluded_count": excluded_count,
+        }
+    except Exception as exc:
+        duration_ms = int((perf_counter() - source_started_at) * 1000)
+        return {
+            "ok": False,
+            "source": source,
+            "duration_ms": duration_ms,
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+        }
+    finally:
+        client.close()
+
+
 def run_collection(
     *,
     sources: list[str],
@@ -549,10 +607,13 @@ def run_collection(
     timeout: float,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], Path]:
+    progress_lock = threading.Lock()
+
     def emit_progress(**payload: Any) -> None:
         if progress_callback is None:
             return
-        progress_callback(payload)
+        with progress_lock:
+            progress_callback(payload)
 
     run_id = utc_run_id(run_label)
     run_dir = Path(output_dir) / run_id
@@ -579,182 +640,157 @@ def run_collection(
     request_log_rows: list[dict[str, Any]] = []
     error_rows: list[dict[str, Any]] = []
 
-    client = make_client(timeout=timeout)
-    try:
-        emit_progress(
-            stage="starting",
-            run_id=run_id,
-            total_sources=total_sources,
-            completed_sources=0,
-            current_source=None,
-            detail=f"Preparing {total_sources} source(s) for collection.",
-        )
-        for source in selected_sources:
-            source_started_at = perf_counter()
+    emit_progress(
+        stage="starting",
+        run_id=run_id,
+        total_sources=total_sources,
+        completed_sources=0,
+        current_source=None,
+        detail=f"Preparing {total_sources} source(s) for parallel collection.",
+    )
+
+    # --- parallel fetch phase ---
+    completed_count = 0
+    fetch_results: dict[str, dict[str, Any]] = {}
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        future_to_source = {
+            executor.submit(
+                _fetch_one_source, source, run_id, applied_limit, timeout,
+            ): source
+            for source in selected_sources
+        }
+        for future in as_completed(future_to_source):
+            outcome = future.result()
+            source = outcome["source"]
+            fetch_results[source.name] = outcome
+            completed_count += 1
+            status_tag = "ok" if outcome["ok"] else "fail"
             emit_progress(
                 stage="fetching_sources",
                 run_id=run_id,
                 total_sources=total_sources,
-                completed_sources=len(source_manifest_entries),
-                current_source=source.name,
-                source_index=len(source_manifest_entries) + 1,
-                detail=f"Fetching {source.name} ({len(source_manifest_entries) + 1}/{total_sources}).",
+                completed_sources=completed_count,
+                current_source=None,
+                source_index=completed_count,
+                detail=f"Done {completed_count}/{total_sources} sources (latest: {source.name} {status_tag})",
             )
-            try:
-                fetch_started_at = perf_counter()
-                result = fetch_source(client, source, run_id, applied_limit)
-                fetch_duration_ms = int((perf_counter() - fetch_started_at) * 1000)
 
-                normalize_started_at = perf_counter()
-                result.documents = [normalize_document_contract(document) for document in result.documents]
-                result.metrics = [normalize_metric_contract(metric) for metric in result.metrics]
-                normalize_duration_ms = int((perf_counter() - normalize_started_at) * 1000)
+    # --- sequential persist phase (maintains source order) ---
+    for source in selected_sources:
+        outcome = fetch_results[source.name]
+        if outcome["ok"]:
+            result = outcome["result"]
+            persist_started_at = perf_counter()
+            raw_dir = paths["raw_responses"] / source.name
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            raw_response_paths: list[str] = []
+            for raw in result.raw_responses:
+                raw_path = raw_dir / raw.filename
+                raw_path.write_bytes(raw.body)
+                raw_response_paths.append(str(raw_path.relative_to(run_dir)))
 
-                filter_started_at = perf_counter()
-                filtered_documents, filtered_metrics, excluded_documents = filter_displayable_documents(result.documents, result.metrics)
-                result.documents = filtered_documents
-                result.metrics = filtered_metrics
-                filter_duration_ms = int((perf_counter() - filter_started_at) * 1000)
-                if excluded_documents:
-                    result.notes.append(f"Excluded {excluded_documents} document(s) without a displayable URL/reference.")
+            raw_items_path = paths["raw_items"] / f"{source.name}.ndjson"
+            append_ndjson(raw_items_path, result.raw_items)
+            documents_path = paths["normalized"] / "documents.ndjson"
+            metrics_path = paths["normalized"] / "metrics.ndjson"
+            append_ndjson(documents_path, result.documents)
+            append_ndjson(metrics_path, result.metrics)
 
-                persist_started_at = perf_counter()
-                raw_dir = paths["raw_responses"] / source.name
-                raw_dir.mkdir(parents=True, exist_ok=True)
-                raw_response_paths: list[str] = []
-                for raw in result.raw_responses:
-                    raw_path = raw_dir / raw.filename
-                    raw_path.write_bytes(raw.body)
-                    raw_response_paths.append(str(raw_path.relative_to(run_dir)))
-
-                raw_items_path = paths["raw_items"] / f"{source.name}.ndjson"
-                append_ndjson(raw_items_path, result.raw_items)
-                documents_path = paths["normalized"] / "documents.ndjson"
-                metrics_path = paths["normalized"] / "metrics.ndjson"
-                append_ndjson(documents_path, result.documents)
-                append_ndjson(metrics_path, result.metrics)
-
-                persist_duration_ms = int((perf_counter() - persist_started_at) * 1000)
-
-                duration_ms = int((perf_counter() - source_started_at) * 1000)
-                request_summary = summarize_request_traces(result.request_traces)
-                notes_text = " ".join(result.notes).lower()
-                if "rate limit" in notes_text and not result.raw_items:
-                    status = "skipped"
-                elif result.documents:
-                    status = "ok"
-                elif result.raw_items:
-                    status = "excluded"
-                else:
-                    status = "ok"
-                manifest_entry = {
+            persist_duration_ms = int((perf_counter() - persist_started_at) * 1000)
+            request_summary = summarize_request_traces(result.request_traces)
+            notes_text = " ".join(result.notes).lower()
+            if "rate limit" in notes_text and not result.raw_items:
+                status = "skipped"
+            elif result.documents:
+                status = "ok"
+            elif result.raw_items:
+                status = "excluded"
+            else:
+                status = "ok"
+            manifest_entry = {
+                "source": source.name,
+                "endpoint": source.endpoint,
+                "status": status,
+                "item_count": len(result.raw_items),
+                "normalized_count": len(result.documents),
+                "metric_count": len(result.metrics),
+                "excluded_document_count": outcome["excluded_count"],
+                "notes": result.notes,
+                "duration_ms": outcome["duration_ms"],
+                "fetch_duration_ms": outcome["fetch_duration_ms"],
+                "normalize_duration_ms": outcome["normalize_duration_ms"],
+                "filter_duration_ms": outcome["filter_duration_ms"],
+                "persist_duration_ms": persist_duration_ms,
+                "raw_response_paths": raw_response_paths,
+                "raw_items_path": str(raw_items_path.relative_to(run_dir)),
+                **request_summary,
+            }
+            source_manifest_entries.append(manifest_entry)
+            fetch_log_rows.append(
+                {
+                    "timestamp": now_utc_iso(),
                     "source": source.name,
-                    "endpoint": source.endpoint,
+                    "phase": "fetch",
                     "status": status,
                     "item_count": len(result.raw_items),
                     "normalized_count": len(result.documents),
                     "metric_count": len(result.metrics),
-                    "excluded_document_count": excluded_documents,
-                    "notes": result.notes,
-                    "duration_ms": duration_ms,
-                    "fetch_duration_ms": fetch_duration_ms,
-                    "normalize_duration_ms": normalize_duration_ms,
-                    "filter_duration_ms": filter_duration_ms,
+                    "duration_ms": outcome["duration_ms"],
+                    "fetch_duration_ms": outcome["fetch_duration_ms"],
+                    "normalize_duration_ms": outcome["normalize_duration_ms"],
+                    "filter_duration_ms": outcome["filter_duration_ms"],
                     "persist_duration_ms": persist_duration_ms,
-                    "raw_response_paths": raw_response_paths,
-                    "raw_items_path": str(raw_items_path.relative_to(run_dir)),
                     **request_summary,
                 }
-                source_manifest_entries.append(manifest_entry)
-                fetch_log_rows.append(
-                    {
-                        "timestamp": now_utc_iso(),
-                        "source": source.name,
-                        "phase": "fetch",
-                        "status": status,
-                        "item_count": len(result.raw_items),
-                        "normalized_count": len(result.documents),
-                        "metric_count": len(result.metrics),
-                        "duration_ms": duration_ms,
-                        "fetch_duration_ms": fetch_duration_ms,
-                        "normalize_duration_ms": normalize_duration_ms,
-                        "filter_duration_ms": filter_duration_ms,
-                        "persist_duration_ms": persist_duration_ms,
-                        **request_summary,
-                    }
+            )
+            for trace in result.request_traces:
+                request_log_rows.append(
+                    {"timestamp": now_utc_iso(), "source": source.name, **trace}
                 )
-                for trace in result.request_traces:
-                    request_log_rows.append(
-                        {
-                            "timestamp": now_utc_iso(),
-                            "source": source.name,
-                            **trace,
-                        }
-                    )
-                if status == "skipped":
-                    run_manifest["skipped_count"] += 1
-                elif status == "excluded":
-                    run_manifest["excluded_count"] += 1
-                else:
-                    run_manifest["success_count"] += 1
-                emit_progress(
-                    stage="fetching_sources",
-                    run_id=run_id,
-                    total_sources=total_sources,
-                    completed_sources=len(source_manifest_entries),
-                    current_source=source.name,
-                    source_index=len(source_manifest_entries),
-                    detail=f"Completed {source.name} with status {status}.",
-                )
-            except Exception as exc:
-                duration_ms = int((perf_counter() - source_started_at) * 1000)
-                error_entry = {
+            if status == "skipped":
+                run_manifest["skipped_count"] += 1
+            elif status == "excluded":
+                run_manifest["excluded_count"] += 1
+            else:
+                run_manifest["success_count"] += 1
+        else:
+            error_entry = {
+                "timestamp": now_utc_iso(),
+                "source": source.name,
+                "phase": "fetch",
+                "endpoint": source.endpoint,
+                "error_type": outcome.get("error_type", "UnknownError"),
+                "message": outcome.get("message", ""),
+                "retryable": True,
+            }
+            error_rows.append(error_entry)
+            source_manifest_entries.append(
+                {
+                    "source": source.name,
+                    "endpoint": source.endpoint,
+                    "status": "error",
+                    "item_count": 0,
+                    "normalized_count": 0,
+                    "metric_count": 0,
+                    "excluded_document_count": 0,
+                    "duration_ms": outcome["duration_ms"],
+                    "raw_response_paths": [],
+                    "raw_items_path": None,
+                    "error_type": outcome.get("error_type", "UnknownError"),
+                    "message": outcome.get("message", ""),
+                }
+            )
+            fetch_log_rows.append(
+                {
                     "timestamp": now_utc_iso(),
                     "source": source.name,
                     "phase": "fetch",
-                    "endpoint": source.endpoint,
-                    "error_type": type(exc).__name__,
-                    "message": str(exc),
-                    "retryable": True,
+                    "status": "error",
+                    "duration_ms": outcome["duration_ms"],
                 }
-                error_rows.append(error_entry)
-                source_manifest_entries.append(
-                    {
-                        "source": source.name,
-                        "endpoint": source.endpoint,
-                        "status": "error",
-                        "item_count": 0,
-                        "normalized_count": 0,
-                        "metric_count": 0,
-                        "excluded_document_count": 0,
-                        "duration_ms": duration_ms,
-                        "raw_response_paths": [],
-                        "raw_items_path": None,
-                        "error_type": type(exc).__name__,
-                        "message": str(exc),
-                    }
-                )
-                fetch_log_rows.append(
-                    {
-                        "timestamp": now_utc_iso(),
-                        "source": source.name,
-                        "phase": "fetch",
-                        "status": "error",
-                        "duration_ms": duration_ms,
-                    }
-                )
-                run_manifest["error_count"] += 1
-                emit_progress(
-                    stage="fetching_sources",
-                    run_id=run_id,
-                    total_sources=total_sources,
-                    completed_sources=len(source_manifest_entries),
-                    current_source=source.name,
-                    source_index=len(source_manifest_entries),
-                    detail=f"{source.name} failed with {type(exc).__name__}.",
-                )
-    finally:
-        client.close()
+            )
+            run_manifest["error_count"] += 1
 
     emit_progress(
         stage="writing_artifacts",

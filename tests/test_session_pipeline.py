@@ -23,6 +23,7 @@ from backend.app.core.constants import (
 )
 from backend.app.core.store import MemoryStore
 from backend.app.services.session_service import (
+    begin_homepage_bootstrap,
     build_briefing_input,
     document_sort_key,
     get_dashboard_response,
@@ -1203,6 +1204,29 @@ class SessionPipelineTests(unittest.TestCase):
         bootstrap_state = get_json(self.store, BOOTSTRAP_STATE_KEY)
         self.assertIsNotNone(bootstrap_state)
         self.assertEqual(bootstrap_state["status"], "collecting")
+
+    def test_homepage_dashboard_does_not_schedule_duplicate_bootstrap_after_eager_claim(self) -> None:
+        scheduled: list[str] = []
+
+        initial_state, should_start = begin_homepage_bootstrap(self.store)
+        dashboard = get_or_bootstrap_dashboard_response(
+            self.store,
+            schedule_bootstrap=lambda: scheduled.append("queued"),
+        )
+
+        self.assertTrue(should_start)
+        self.assertEqual(initial_state["status"], "collecting")
+        self.assertEqual(dashboard["status"], "collecting")
+        self.assertEqual(scheduled, [])
+
+    def test_begin_homepage_bootstrap_claims_run_only_once(self) -> None:
+        first_state, first_should_start = begin_homepage_bootstrap(self.store)
+        second_state, second_should_start = begin_homepage_bootstrap(self.store)
+
+        self.assertTrue(first_should_start)
+        self.assertFalse(second_should_start)
+        self.assertEqual(first_state["status"], "collecting")
+        self.assertEqual(second_state["status"], "collecting")
 
     def test_loading_percent_tracks_overall_pipeline_without_resetting_to_zero(self) -> None:
         fetching_mid = loading_percent(

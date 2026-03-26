@@ -88,7 +88,7 @@ export function FullscreenLoading({
     : "Link Handshake";
   const resolvedDetail = hasServerLoading
     ? loading.detail
-    : "relay에서 active cache 상태를 확인하고 있습니다.";
+    : "Checking active cache status on relay.";
   const currentSource =
     hasServerLoading && loading.currentSource ? loading.currentSource : null;
   const steps = hasServerLoading ? loading.steps : [];
@@ -321,7 +321,7 @@ export function SettingsModal({
                 Operator Console
               </h2>
               <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                표시 설정은 로컬 cache에 저장되고, 현재 grid에 즉시 반영됩니다.
+                Display settings are saved to local cache and applied to the grid immediately.
               </p>
             </div>
 
@@ -343,13 +343,13 @@ export function SettingsModal({
                   Signal Mask
                 </p>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  화면 잡음과 밀도를 조절합니다.
+                  Control visual noise and density.
                 </p>
               </div>
 
               <SettingsToggle
                 label="Motion Layer"
-                description="trace 카드 reveal과 boot motion을 켜거나 끕니다."
+                description="Toggle trace card reveal and boot motion."
                 enabled={settings.motionEnabled}
                 onToggle={() =>
                   onUpdateSettings({
@@ -361,7 +361,7 @@ export function SettingsModal({
 
               <SettingsToggle
                 label="Grid Veil"
-                description="배경 grid와 scanline veil을 표시합니다. 밀도는 유지하고 장식만 줄일 때 유용합니다."
+                description="Show background grid and scanline veil. Useful for reducing decoration while keeping density."
                 enabled={settings.overlaysEnabled}
                 onToggle={() =>
                   onUpdateSettings({
@@ -373,7 +373,7 @@ export function SettingsModal({
 
               <SettingsToggle
                 label="Payload Tap"
-                description="BFF에서 받은 dashboard, reload, detail payload 원문을 화면 우하단 trace panel에서 바로 확인합니다."
+                description="Inspect raw dashboard, reload, and detail payloads from BFF in the bottom-right trace panel."
                 enabled={settings.payloadDebugEnabled}
                 onToggle={() =>
                   onUpdateSettings({
@@ -388,7 +388,7 @@ export function SettingsModal({
                   Row Span
                 </p>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  row span을 바꿔 밀도와 drag response를 조정합니다.
+                  Adjust density and drag response by changing row span.
                 </p>
 
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -427,7 +427,7 @@ export function SettingsModal({
                   Grid Tools
                 </p>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  저장된 slot map을 비우거나 기준 loadout으로 되돌립니다.
+                  Clear saved slot map or revert to baseline loadout.
                 </p>
               </div>
 
@@ -436,7 +436,7 @@ export function SettingsModal({
                   Slot Reset
                 </p>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  drag 순서와 가로/세로 span cache를 지우고 추천 배치로 다시 정렬합니다.
+                  Clear drag order and column/row span cache, then re-sort to recommended layout.
                 </p>
                 <button
                   type="button"
@@ -452,7 +452,7 @@ export function SettingsModal({
                   Baseline Loadout
                 </p>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  motion on, grid veil on, row span stock 설정으로 되돌리고 저장된 slot map도 비웁니다.
+                  Restore motion on, grid veil on, row span stock defaults and clear saved slot map.
                 </p>
                 <button
                   type="button"

@@ -7,12 +7,19 @@ from .core.store import RedisStore
 
 
 def create_app(store: Any | None = None):
+    import threading
+
     from fastapi import APIRouter, FastAPI
     from fastapi.middleware.cors import CORSMiddleware
 
     from .api.routes.dashboard import router as dashboard_router
     from .api.routes.leaderboards import router as leaderboards_router
     from .api.routes.sessions import router as sessions_router
+    from .core.constants import ACTIVE_SESSION_KEY
+    from .services.session_service import (
+        begin_homepage_bootstrap,
+        run_homepage_bootstrap,
+    )
 
     resolved_store = store or RedisStore()
     app = FastAPI(title="SparkOrbit Backend", version="0.1.0")
@@ -34,6 +41,18 @@ def create_app(store: Any | None = None):
         return {"ok": True, "backend": "fastapi"}
 
     app.include_router(api_router)
+
+    # Eagerly start data collection on boot if no active session exists
+    def _eager_bootstrap() -> None:
+        if resolved_store.get(ACTIVE_SESSION_KEY):
+            return
+        _bootstrap_state, should_start = begin_homepage_bootstrap(resolved_store)
+        if not should_start:
+            return
+        run_homepage_bootstrap(resolved_store)
+
+    threading.Thread(target=_eager_bootstrap, daemon=True).start()
+
     return app
 
 

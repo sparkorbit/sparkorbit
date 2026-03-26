@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import subprocess
+import sys
 import threading
 from collections import Counter
 from copy import deepcopy
@@ -16,8 +18,10 @@ from ..core.constants import (
     BOOTSTRAP_STATE_TTL_SECONDS,
     DEFAULT_RUN_LABEL,
     HOMEPAGE_BOOTSTRAP_RUN_LABEL,
+    OLLAMA_BASE_URL,
     ORDERED_SOURCE_CATEGORIES,
     QUEUE_SESSION_ENRICH_KEY,
+    ROOT_DIR,
     RECENT_SESSIONS_KEY,
     RELOAD_STATE_KEY,
     RELOAD_STATE_TTL_SECONDS,
@@ -587,7 +591,7 @@ def loading_stage_label(stage: str, status: str) -> str:
     }
     if status == "partial_error":
         return labels["partial_error"]
-    return labels.get(stage, labels.get(status, "진행 중"))
+    return labels.get(stage, labels.get(status, "In Progress"))
 
 
 def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
@@ -595,42 +599,42 @@ def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
         {
             "id": "prepare",
             "label": "Handshake",
-            "detail": "요청을 받고 scan 범위와 실행 파라미터를 고정합니다.",
+            "detail": "Accepting request and locking scan scope and run parameters.",
         },
         {
             "id": "collect",
             "label": "Sweep",
-            "detail": "collector가 source별 원문 신호를 훑습니다.",
+            "detail": "Collector is scanning raw signals from each source.",
         },
         {
             "id": "normalize",
             "label": "Trace Write",
-            "detail": "manifest와 normalized 산출물을 trace 디렉터리에 기록합니다.",
+            "detail": "Writing manifest and normalized artifacts to the trace directory.",
         },
         {
             "id": "publish-docs",
             "label": "Cache Docs",
-            "detail": "표시 가능한 문서를 cache key로 밀어 넣습니다.",
+            "detail": "Pushing displayable documents into cache keys.",
         },
         {
             "id": "publish-views",
             "label": "Relay Views",
-            "detail": "feed와 live view를 갱신합니다.",
+            "detail": "Refreshing feeds and live views.",
         },
         {
             "id": "summarize",
             "label": "Pattern Pass",
-            "detail": "선택된 문서에서 핵심 라인을 추출합니다.",
+            "detail": "Extracting key lines from selected documents.",
         },
         {
             "id": "digest",
             "label": "Sweep Build",
-            "detail": "sweep를 묶고 마지막 상태를 기록합니다.",
+            "detail": "Bundling sweeps and recording final state.",
         },
         {
             "id": "briefing",
             "label": "Briefing",
-            "detail": "하루치 흐름을 엮은 daily briefing을 생성합니다.",
+            "detail": "Generating a daily briefing from the collected signals.",
         },
     ]
 
@@ -765,22 +769,22 @@ def build_runtime_items(status: str, *, stage: str | None = None) -> list[dict[s
     return [
         {
             "name": "collector",
-            "role": "collector가 원문 trace를 기준 아티팩트로 유지합니다.",
+            "role": "Collector maintains raw traces as canonical artifacts.",
             "status": collector_status,
         },
         {
             "name": "enricher",
-            "role": "핵심 라인을 뽑고 signal sweep를 생성합니다.",
+            "role": "Extracts key lines and generates signal sweeps.",
             "status": enricher_status,
         },
         {
             "name": "redis",
-            "role": "relay cache가 문서, feed, sweep, live view를 보관합니다.",
+            "role": "Relay cache stores documents, feeds, sweeps, and live views.",
             "status": redis_status,
         },
         {
             "name": "ui",
-            "role": "화면은 relay 응답과 trace detail만 읽습니다.",
+            "role": "UI reads only relay responses and trace details.",
             "status": "live",
         },
     ]
@@ -804,30 +808,30 @@ def build_bootstrap_runtime_items(status: str, stage: str) -> list[dict[str, str
     return [
         {
             "name": "collector",
-            "role": "첫 진입 시 collector가 전체 scan을 돌립니다.",
+            "role": "Collector runs a full scan on first visit.",
             "status": collector_status,
         },
         {
             "name": "enricher",
-            "role": "publish 이후 핵심 라인과 sweep를 채웁니다.",
+            "role": "Populates key lines and sweeps after publish.",
             "status": enricher_status,
         },
         {
             "name": "redis",
-            "role": "collector 결과가 나오면 active cache를 교체합니다.",
+            "role": "Replaces the active cache once collector results arrive.",
             "status": redis_status,
         },
         {
             "name": "ui",
-            "role": "stream으로 cold boot 상태를 감시합니다.",
+            "role": "Monitors cold boot status via stream.",
             "status": ui_status,
         },
     ]
 
 
 def build_bootstrap_digest_items(status: str) -> list[dict[str, str]]:
-    collecting_summary = "scan이 끝나면 signal sweep가 채워집니다."
-    error_summary = "cold boot가 실패했습니다. 링크를 다시 열거나 probe를 다시 돌려 주세요."
+    collecting_summary = "Signal sweeps will be populated once the scan completes."
+    error_summary = "Cold boot failed. Please reopen the link or re-run the probe."
     summary = collecting_summary if status == "collecting" else error_summary
     evidence = "pending" if status == "collecting" else "error"
     return [
@@ -849,7 +853,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
     stage = str(state.get("stage") or "starting")
     detail = str(
         state.get("detail")
-        or "실제 데이터를 수집해 relay cache를 준비 중입니다."
+        or "Collecting live data and preparing the relay cache."
     )
     progress_current = int(state.get("progress_current") or 0)
     progress_total = int(state.get("progress_total") or 0)
@@ -870,7 +874,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
                 if progress_total > 0
                 else "all"
             ),
-            "note": "첫 진입 시 전체 scan을 시작합니다.",
+            "note": "Full scan starts on first visit.",
         },
         {
             "label": "docs",
@@ -881,7 +885,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "label": "sweeps",
             "value": "pending" if status == "collecting" else "error",
             "note": error_message
-            or "collector가 끝나면 요약 단계로 넘어갑니다.",
+            or "Will proceed to summarization once the collector finishes.",
         },
     ]
     return {
@@ -895,13 +899,13 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "sessionId": "bootstrapping",
             "sessionDate": started_at[:10] or "unknown",
             "window": "live scan",
-            "reloadRule": "active cache가 없으면 collector가 자동으로 새 scan을 시작합니다.",
+            "reloadRule": "If no active cache exists, the collector automatically starts a new scan.",
             "metrics": metrics,
             "runtime": build_bootstrap_runtime_items(status, stage),
             "rules": [
-                "실제 scan이 끝날 때까지 collecting 상태를 유지합니다.",
-                "run output는 디스크에 그대로 남습니다.",
-                "publish가 끝나면 active cache가 교체되고 화면 stream이 즉시 전환됩니다.",
+                "Stays in collecting state until the actual scan completes.",
+                "Run output is persisted to disk as-is.",
+                "Once publish completes, the active cache is swapped and the UI stream switches immediately.",
             ],
             "arenaOverview": None,
             "loading": loading,
@@ -929,7 +933,7 @@ def build_session_block(
     loading_stage = str(meta.get("loading_stage") or meta.get("status") or "published")
     loading_detail = str(
         meta.get("loading_detail")
-        or f"현재 relay 상태는 {meta.get('status') or 'published'} 입니다."
+        or f"Current relay state is {meta.get('status') or 'published'}."
     )
     loading = build_loading_block(
         status=str(meta.get("status") or "published"),
@@ -949,7 +953,7 @@ def build_session_block(
         "sessionId": session_id,
         "sessionDate": session_date or "unknown",
         "window": "live scan",
-        "reloadRule": "POST /api/sessions/reload가 새 scan을 돌리고 active cache를 교체합니다.",
+        "reloadRule": "POST /api/sessions/reload triggers a new scan and swaps the active cache.",
         "metrics": [
             {
                 "label": "sources",
@@ -962,12 +966,12 @@ def build_session_block(
                         ]
                     )
                 ),
-                "note": "현재 cache에 연결된 source 수",
+                "note": "Number of sources linked to the current cache",
             },
             {
                 "label": "docs",
                 "value": str(meta.get("docs_total", 0)),
-                "note": "reference가 살아 있는 문서 수",
+                "note": "Number of documents with live references",
             },
             {
                 "label": "sweeps",
@@ -980,9 +984,9 @@ def build_session_block(
             stage=loading_stage,
         ),
         "rules": [
-            "run output가 최종 기준 데이터입니다.",
-            "cache는 source별 feed와 화면 view만 보관합니다.",
-            "교차 source mixing은 sweep에서만 수행합니다.",
+            "Run output is the canonical reference data.",
+            "Cache only holds per-source feeds and UI views.",
+            "Cross-source mixing is performed only in sweeps.",
         ],
         "arenaOverview": arena_overview,
         "loading": loading,
@@ -1097,11 +1101,11 @@ def build_placeholder_digest(
     return {
         "id": category,
         "domain": label,
-        "headline": top_document.get("title") if top_document else "대표 문서 없음",
+        "headline": top_document.get("title") if top_document else "No representative document",
         "summary": (
             build_document_note(top_document)
             if top_document
-            else "아직 category 문서가 없습니다."
+            else "No documents in this category yet."
         ),
         "evidence": (
             f"{len(documents)} docs · {prettify_doc_type(top_document.get('doc_type'))}"
@@ -1726,21 +1730,29 @@ def begin_homepage_bootstrap(
     store: RedisLike,
     *,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], bool]:
     global _HOMEPAGE_BOOTSTRAP_RUNNING
+    should_start = False
+    should_persist_state = False
     with _HOMEPAGE_BOOTSTRAP_LOCK:
+        existing_state = get_bootstrap_state(store)
         if _HOMEPAGE_BOOTSTRAP_RUNNING:
-            return get_bootstrap_state(store) or build_homepage_bootstrap_state(
+            state = existing_state or build_homepage_bootstrap_state(
                 status="collecting",
                 run_label=run_label,
             )
-        _HOMEPAGE_BOOTSTRAP_RUNNING = True
-        state = build_homepage_bootstrap_state(
-            status="collecting",
+            should_persist_state = existing_state is None
+        else:
+            _HOMEPAGE_BOOTSTRAP_RUNNING = True
+            state = build_homepage_bootstrap_state(
+                status="collecting",
                 run_label=run_label,
-        )
-    set_bootstrap_state(store, state)
-    return state
+            )
+            should_start = True
+            should_persist_state = True
+    if should_persist_state:
+        set_bootstrap_state(store, state)
+    return state, should_start
 
 
 def build_homepage_bootstrap_state(
@@ -1760,9 +1772,9 @@ def build_homepage_bootstrap_state(
         "stage": stage,
         "detail": detail
         or (
-            "홈페이지 요청을 받아 실제 데이터를 수집하기 시작합니다."
+            "Received homepage request; starting live data collection."
             if status != "error"
-            else "자동 수집 중 오류가 발생했습니다."
+            else "An error occurred during automatic collection."
         ),
         "progress_current": progress_current,
         "progress_total": progress_total,
@@ -1812,9 +1824,9 @@ def build_session_reload_state(
         "stage": stage,
         "detail": detail
         or (
-            "probe 요청을 받아 실제 scan을 다시 시작합니다."
+            "Received probe request; restarting the scan."
             if status != "error"
-            else "probe cycle 중 fault가 발생했습니다."
+            else "A fault occurred during the probe cycle."
         ),
         "progress_current": progress_current,
         "progress_total": progress_total,
@@ -1869,9 +1881,9 @@ def build_session_reload_response(state: dict[str, Any] | None) -> dict[str, Any
     detail = str(
         state.get("detail")
         or (
-            "새 probe cycle을 준비 중입니다."
+            "Preparing a new probe cycle."
             if status != "error"
-            else "probe cycle 중 fault가 발생했습니다."
+            else "A fault occurred during the probe cycle."
         )
     )
     loading = build_loading_block(
@@ -2010,7 +2022,7 @@ def publish_run(
         "summary_candidates": len(candidate_ids),
         "source_ids": source_ids,
         "loading_stage": "publishing_documents",
-        "loading_detail": "표시 가능한 문서를 cache key로 밀어 넣고 있습니다.",
+        "loading_detail": "Pushing displayable documents into cache keys.",
         "loading_progress_current": 0,
         "loading_progress_total": max(len(documents), 1),
         "loading_current_source": None,
@@ -2040,9 +2052,9 @@ def publish_run(
         if index == len(documents) or index == 1 or index % 10 == 0:
             meta["loading_stage"] = "publishing_documents"
             meta["loading_detail"] = (
-                f"cache write 진행 중 ({index}/{len(documents)})."
+                f"Cache write in progress ({index}/{len(documents)})."
                 if documents
-                else "cache에 올릴 문서가 없습니다."
+                else "No documents to write to cache."
             )
             meta["loading_progress_current"] = index if documents else 1
             meta["loading_progress_total"] = docs_total
@@ -2065,7 +2077,7 @@ def publish_run(
     }
     feed_total = 2
     meta["loading_stage"] = "publishing_views"
-    meta["loading_detail"] = "feed index를 cache에 기록하고 있습니다."
+    meta["loading_detail"] = "Writing feed index to cache."
     meta["loading_progress_current"] = 0
     meta["loading_progress_total"] = feed_total
     meta["loading_current_source"] = None
@@ -2084,7 +2096,7 @@ def publish_run(
     for source, document_ids in feed_lists.items():
         set_list_with_ttl(store, feed_key(session_id, source), document_ids)
     meta["loading_stage"] = "publishing_views"
-    meta["loading_detail"] = "feed write를 마치고 live view를 조립하고 있습니다."
+    meta["loading_detail"] = "Feed write complete; assembling live views."
     meta["loading_progress_current"] = 1
     meta["loading_progress_total"] = feed_total
     meta["loading_current_source"] = None
@@ -2101,7 +2113,7 @@ def publish_run(
     )
 
     meta["loading_stage"] = "published"
-    meta["loading_detail"] = "cache relay가 arm됐고 pattern pass로 넘어갈 준비가 됐습니다."
+    meta["loading_detail"] = "Cache relay armed; ready to proceed to pattern pass."
     meta["loading_progress_current"] = feed_total
     meta["loading_progress_total"] = feed_total
     meta["loading_current_source"] = None
@@ -2154,6 +2166,120 @@ def dequeue_session_for_enrichment(store: RedisLike) -> str | None:
     return str(session_id) if session_id else None
 
 
+LLM_ENRICH_DIR = ROOT_DIR / "pipelines" / "llm_enrich" / "scripts"
+
+
+def _ollama_reachable() -> bool:
+    """Quick check whether Ollama API is up."""
+    try:
+        import httpx
+
+        resp = httpx.get(f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags", timeout=3.0)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+def _run_llm_enrich_script(script_name: str, run_dir: Path) -> bool:
+    """Run an offline LLM enrichment script against a run directory.
+
+    Returns True on success, False on any failure (non-blocking).
+    """
+    script_path = LLM_ENRICH_DIR / script_name
+    if not script_path.exists():
+        return False
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script_path), "--run-dir", str(run_dir)],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "LLM enrich %s failed (exit %d): %s",
+                script_name,
+                result.returncode,
+                result.stderr[:500],
+            )
+            return False
+        return True
+    except Exception as exc:
+        logger.warning("LLM enrich %s error: %s", script_name, exc)
+        return False
+
+
+def run_offline_llm_enrichment(
+    store: RedisLike,
+    session_id: str,
+    run_dir: Path,
+) -> bool:
+    """Run company filter + paper domain classifier, then re-merge labels
+    into Redis documents. Returns True if any labels were produced."""
+    if not _ollama_reachable():
+        return False
+
+    logger.info("Running offline LLM enrichment for session %s", session_id)
+    company_ok = _run_llm_enrich_script("llm_enrich.py", run_dir)
+    paper_ok = _run_llm_enrich_script("paper_enrich.py", run_dir)
+    if not company_ok and not paper_ok:
+        return False
+
+    # Re-read labels and merge into Redis documents
+    labels_dir = run_dir / "labels"
+    company_decisions = read_ndjson(labels_dir / "company_decisions.ndjson")
+    paper_domains = read_ndjson(labels_dir / "paper_domains.ndjson")
+    if not company_decisions and not paper_domains:
+        return False
+
+    company_lookup: dict[str, dict[str, Any]] = {
+        row["document_id"]: row
+        for row in company_decisions
+        if row.get("document_id")
+    }
+    paper_lookup: dict[str, str] = {
+        row["document_id"]: row.get("paper_domain", "others")
+        for row in paper_domains
+        if row.get("document_id")
+    }
+
+    source_ids = (get_json(store, session_key(session_id, "meta")) or {}).get(
+        "source_ids", []
+    )
+    feed_lists = get_feed_lists(store, session_id, source_ids)
+    updated = 0
+    for source in source_ids:
+        for doc_id in feed_lists.get(source, []):
+            doc = get_json(store, doc_key(session_id, doc_id))
+            if doc is None:
+                continue
+            labels: dict[str, Any] = doc.get("labels") or {}
+            changed = False
+            if doc_id in company_lookup:
+                cd = company_lookup[doc_id]
+                labels["company"] = {
+                    "decision": cd.get("decision"),
+                    "company_domain": cd.get("company_domain"),
+                    "reason_code": cd.get("reason_code"),
+                }
+                changed = True
+            if doc_id in paper_lookup:
+                labels["paper_domain"] = paper_lookup[doc_id]
+                changed = True
+            if changed:
+                doc["labels"] = labels
+                set_json_with_ttl(store, doc_key(session_id, doc_id), doc)
+                updated += 1
+
+    logger.info(
+        "LLM enrichment merged: %d company, %d paper, %d docs updated",
+        len(company_decisions),
+        len(paper_domains),
+        updated,
+    )
+    return True
+
+
 def run_session_enrichment(
     store: RedisLike,
     session_id: str,
@@ -2199,9 +2325,9 @@ def run_session_enrichment(
         "summarizing_documents" if summary_generation_enabled else "building_digests"
     )
     meta["loading_detail"] = (
-        f"선택된 문서 {pending_total}건에서 핵심 라인을 추출하고 있습니다."
+        f"Extracting key lines from {pending_total} selected document(s)."
         if pending_total
-        else "패턴 추출 대상이 없어 바로 sweep build로 넘어갑니다."
+        else "No documents for pattern extraction; skipping to sweep build."
     )
     meta["loading_progress_current"] = 0
     meta["loading_progress_total"] = pending_total if summary_generation_enabled else len(ORDERED_SOURCE_CATEGORIES)
@@ -2263,9 +2389,9 @@ def run_session_enrichment(
             set_json_with_ttl(store, doc_key(session_id, document_id), document)
             meta["loading_stage"] = "summarizing_documents"
             meta["loading_detail"] = (
-                f"pattern pass 진행 중 ({processed_summaries}/{pending_total})."
+                f"Pattern pass in progress ({processed_summaries}/{pending_total})."
                 if pending_total
-                else "pattern pass 대상이 없습니다."
+                else "No candidates for pattern pass."
             )
             meta["loading_progress_current"] = processed_summaries
             meta["loading_progress_total"] = pending_total
@@ -2284,7 +2410,7 @@ def run_session_enrichment(
 
     digests_by_category: dict[str, dict[str, Any]] = {}
     meta["loading_stage"] = "building_digests"
-    meta["loading_detail"] = "signal sweep를 묶고 있습니다."
+    meta["loading_detail"] = "Bundling signal sweeps."
     meta["loading_progress_current"] = 0
     meta["loading_progress_total"] = len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_current_source"] = None
@@ -2306,7 +2432,7 @@ def run_session_enrichment(
         set_json_with_ttl(store, digest_key(session_id, category), digest)
         meta["loading_progress_current"] = len(digests_by_category)
         meta["loading_detail"] = (
-            f"sweep build 진행 중 ({len(digests_by_category)}/{len(ORDERED_SOURCE_CATEGORIES)})."
+            f"Sweep build in progress ({len(digests_by_category)}/{len(ORDERED_SOURCE_CATEGORIES)})."
         )
         meta["updated_at"] = now_utc_iso()
         set_json_with_ttl(store, session_key(session_id, "meta"), meta)
@@ -2320,10 +2446,18 @@ def run_session_enrichment(
             session_id=session_id,
         )
 
+    # --- offline LLM enrichment (company filter + paper domain) ---
+    run_dir_str = store.get(artifact_root_key(session_id))
+    if run_dir_str:
+        enriched = run_offline_llm_enrichment(store, session_id, Path(run_dir_str))
+        if enriched:
+            # Reload documents after label merge so briefing sees domains
+            documents_by_id = get_documents_by_id(store, session_id, feed_lists)
+
     briefing: dict[str, Any] | None = None
     if briefing_generator is not None:
         meta["loading_stage"] = "generating_briefing"
-        meta["loading_detail"] = "수집 결과를 종합하여 daily briefing을 생성하고 있습니다."
+        meta["loading_detail"] = "Aggregating collection results to generate the daily briefing."
         meta["loading_progress_current"] = 0
         meta["loading_progress_total"] = 1
         meta["loading_current_source"] = None
@@ -2343,9 +2477,9 @@ def run_session_enrichment(
         set_json_with_ttl(store, session_key(session_id, "briefing"), briefing)
         meta["loading_progress_current"] = 1
         meta["loading_detail"] = (
-            "daily briefing 생성을 마쳤습니다."
+            "Daily briefing generation complete."
             if not briefing.get("error")
-            else f"briefing 생성 중 오류: {briefing.get('error', '')}"
+            else f"Briefing generation error: {briefing.get('error', '')}"
         )
         meta["updated_at"] = now_utc_iso()
         set_json_with_ttl(store, session_key(session_id, "meta"), meta)
@@ -2367,21 +2501,21 @@ def run_session_enrichment(
     briefing_error = briefing.get("error") if briefing else None
     if summary_errors:
         meta["loading_detail"] = (
-            f"pattern pass {summaries_ready}건 완료, fault {summary_errors}건이 남았습니다."
+            f"Pattern pass completed {summaries_ready} item(s), {summary_errors} fault(s) remaining."
         )
     elif briefing_error:
         meta["loading_detail"] = (
-            "문서 요약과 category digest 생성은 마쳤지만 "
-            "daily briefing은 생성하지 못했습니다."
+            "Document summaries and category digests are ready, "
+            "but daily briefing generation failed."
         )
     elif summaries_ready == 0 and pending_total > 0:
         meta["loading_detail"] = (
-            "LLM provider가 아직 연결되지 않아 pattern pass는 건너뛰고 "
-            f"signal sweep {len(ORDERED_SOURCE_CATEGORIES)}개만 생성했습니다."
+            "LLM provider not connected; skipped pattern pass and "
+            f"generated {len(ORDERED_SOURCE_CATEGORIES)} signal sweep(s) only."
         )
     else:
         meta["loading_detail"] = (
-            f"pattern pass와 signal sweep {len(ORDERED_SOURCE_CATEGORIES)}개 생성을 마쳤습니다."
+            f"Pattern pass and {len(ORDERED_SOURCE_CATEGORIES)} signal sweep(s) generation complete."
         )
     meta["loading_progress_current"] = len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_progress_total"] = len(ORDERED_SOURCE_CATEGORIES)
@@ -2495,7 +2629,7 @@ def run_homepage_bootstrap(
                 stage=str(event.get("stage") or "fetching_sources"),
                 detail=str(
                     event.get("detail")
-                    or "실제 데이터를 scan 중입니다."
+                    or "Scanning live data."
                 ),
                 progress_current=resolve_collect_progress_current(event),
                 progress_total=int(event.get("total_sources") or 0),
@@ -2514,7 +2648,7 @@ def run_homepage_bootstrap(
                 stage=str(event.get("stage") or "publishing_documents"),
                 detail=str(
                     event.get("detail")
-                    or "cache write를 진행하고 있습니다."
+                    or "Cache write in progress."
                 ),
                 progress_current=int(event.get("progress_current") or 0),
                 progress_total=int(event.get("progress_total") or 0),
@@ -2546,7 +2680,7 @@ def run_homepage_bootstrap(
                 status="error",
                 run_label=run_label,
                 stage=str(current_state.get("stage") or "error"),
-                detail="cold boot 중 fault가 발생했습니다.",
+                detail="A fault occurred during cold boot.",
                 progress_current=int(current_state.get("progress_current") or 0),
                 progress_total=int(current_state.get("progress_total") or 0),
                 current_source=(
@@ -2579,7 +2713,7 @@ def run_session_reload(
                 stage=str(event.get("stage") or "fetching_sources"),
                 detail=str(
                     event.get("detail")
-                    or "실제 데이터를 다시 sweep 중입니다."
+                    or "Re-sweeping live data."
                 ),
                 progress_current=resolve_collect_progress_current(event),
                 progress_total=int(event.get("total_sources") or 0),
@@ -2603,7 +2737,7 @@ def run_session_reload(
                 stage=str(event.get("stage") or "summarizing_documents"),
                 detail=str(
                     event.get("detail")
-                    or "pattern pass와 sweep를 갱신하고 있습니다."
+                    or "Updating pattern pass and sweeps."
                 ),
                 progress_current=int(event.get("progress_current") or 0),
                 progress_total=int(event.get("progress_total") or 0),
@@ -2627,7 +2761,7 @@ def run_session_reload(
                 stage=str(event.get("stage") or "publishing_documents"),
                 detail=str(
                     event.get("detail")
-                    or "cache write를 진행하고 있습니다."
+                    or "Cache write in progress."
                 ),
                 progress_current=int(event.get("progress_current") or 0),
                 progress_total=int(event.get("progress_total") or 0),
@@ -2670,7 +2804,7 @@ def run_session_reload(
             stage=str(meta.get("loading_stage") or meta.get("status") or "ready"),
             detail=str(
                 meta.get("loading_detail")
-                or "probe cycle이 완료되었습니다."
+                or "Probe cycle complete."
             ),
             progress_current=int(meta.get("loading_progress_current") or 0),
             progress_total=int(meta.get("loading_progress_total") or 0),
@@ -2689,7 +2823,7 @@ def run_session_reload(
                 status="error",
                 run_label=run_label,
                 stage=str(current_state.get("stage") or "error"),
-                detail="probe cycle 중 fault가 발생했습니다.",
+                detail="A fault occurred during the probe cycle.",
                 progress_current=int(current_state.get("progress_current") or 0),
                 progress_total=int(current_state.get("progress_total") or 0),
                 current_source=(
@@ -2751,15 +2885,16 @@ def get_or_bootstrap_dashboard_response(
         elif bootstrap_state and bootstrap_state.get("status") == "error":
             return build_bootstrap_dashboard(bootstrap_state)
 
-        bootstrap_state = begin_homepage_bootstrap(
+        bootstrap_state, should_start = begin_homepage_bootstrap(
             store,
-                run_label=run_label,
+            run_label=run_label,
         )
-        try:
-            schedule_bootstrap()
-        except Exception:
-            reset_homepage_bootstrap_state(store)
-            raise
+        if should_start:
+            try:
+                schedule_bootstrap()
+            except Exception:
+                reset_homepage_bootstrap_state(store)
+                raise
         return build_bootstrap_dashboard(bootstrap_state)
 
 
