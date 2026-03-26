@@ -1,6 +1,9 @@
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
-import { buildLeaderboardEntries, formatLeaderboardValue } from "../../features/dashboard/display";
+import {
+  buildLeaderboardEntries,
+  formatLeaderboardValue,
+} from "../../features/dashboard/display";
 import type {
   SessionArenaBoard,
   SessionArenaBoardEntry,
@@ -9,13 +12,11 @@ import type {
 
 type LeaderboardPanelProps = {
   sessionLabel: string;
-  isReloading: boolean;
   onReload: () => void;
   resolvedArenaOverview: SessionArenaOverview | null;
   selectedArenaBoard: SessionArenaBoard | null;
   arenaBoards: readonly SessionArenaBoard[];
   leaderboardEntries: SessionArenaBoardEntry[];
-  isLoadingLeaderboards: boolean;
   leaderboardError: string | null;
   dashboardError: string | null;
   onSelectBoard: (boardId: string) => void;
@@ -28,28 +29,30 @@ const MAX_ENTRIES = 10;
 type GroupKey = "arena" | "capability" | "multimodal";
 
 const GROUP_META: Record<GroupKey, { label: string; sublabel: string }> = {
-  arena:      { label: "Arena",      sublabel: "chat battles"        },
-  capability: { label: "Capability", sublabel: "task benchmarks"     },
+  arena: { label: "Arena", sublabel: "chat battles" },
+  capability: { label: "Capability", sublabel: "task benchmarks" },
   multimodal: { label: "Multimodal", sublabel: "vision & cross-modal" },
 };
 
 function classifyBoard(label: string): GroupKey {
   const l = label.toLowerCase();
   if (/vision|image|video|audio|multimodal/.test(l)) return "multimodal";
-  if (/cod|math|reason|hard|instruct|longer|creative|writing/.test(l)) return "capability";
+  if (/cod|math|reason|hard|instruct|longer|creative|writing/.test(l))
+    return "capability";
   return "arena";
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function toFiniteNumber(value: number | string | null | undefined): number | null {
+function toFiniteNumber(
+  value: number | string | null | undefined,
+): number | null {
   if (value == null) return null;
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
 // ─── entry card ──────────────────────────────────────────────────────────────
-
 
 function EntryCard({
   entry,
@@ -65,45 +68,45 @@ function EntryCard({
       className="orbit-leaderboard-entry orbit-hacker-reveal"
       style={{ "--hacker-delay": `${delayMs}ms` } as CSSProperties}
     >
-        <div className="orbit-hacker-reveal__content flex min-w-0 items-center gap-0">
-          {/* rank */}
-          <div className="flex w-6 shrink-0 items-center justify-center self-stretch">
-            <span className="font-mono text-[0.56rem] tabular-nums text-orbit-muted">
-              {entry.rank ?? "—"}
-            </span>
-          </div>
+      <div className="orbit-hacker-reveal__content flex min-w-0 items-center gap-0">
+        {/* rank */}
+        <div className="flex w-6 shrink-0 items-center justify-center self-stretch">
+          <span className="font-mono text-[0.56rem] tabular-nums text-orbit-muted">
+            {entry.rank ?? "—"}
+          </span>
+        </div>
 
-          {/* body */}
-          <div className="orbit-leaderboard-entry__body min-w-0 flex-1 border-l border-orbit-border px-2 py-2">
-            <div className="flex min-w-0 items-baseline justify-between gap-2">
-              {entry.url ? (
-                <a
-                  href={entry.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.76rem] font-semibold leading-snug text-orbit-text hover:text-orbit-accent"
-                >
-                  {entry.modelName ?? "—"}
-                </a>
-              ) : (
-                <h3 className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.76rem] font-semibold leading-snug text-orbit-text">
-                  {entry.modelName ?? "—"}
-                </h3>
-              )}
-              {rating != null ? (
-                <span className="shrink-0 font-mono text-[0.58rem] tabular-nums text-orbit-accent">
-                  {formatLeaderboardValue(rating)}
-                </span>
-              ) : null}
-            </div>
-
-            {entry.organization ? (
-              <p className="mt-0.5 font-mono text-[0.52rem] uppercase tracking-widest text-orbit-muted">
-                {entry.organization}
-              </p>
+        {/* body */}
+        <div className="orbit-leaderboard-entry__body min-w-0 flex-1 border-l border-orbit-border px-2 py-2">
+          <div className="flex min-w-0 items-baseline justify-between gap-2">
+            {entry.url ? (
+              <a
+                href={entry.url}
+                target="_blank"
+                rel="noreferrer"
+                className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.76rem] font-semibold leading-snug text-orbit-text hover:text-orbit-accent"
+              >
+                {entry.modelName ?? "—"}
+              </a>
+            ) : (
+              <h3 className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.76rem] font-semibold leading-snug text-orbit-text">
+                {entry.modelName ?? "—"}
+              </h3>
+            )}
+            {rating != null ? (
+              <span className="shrink-0 font-mono text-[0.58rem] tabular-nums text-orbit-accent">
+                {formatLeaderboardValue(rating)}
+              </span>
             ) : null}
           </div>
+
+          {entry.organization ? (
+            <p className="mt-0.5 font-mono text-[0.52rem] uppercase tracking-widest text-orbit-muted">
+              {entry.organization}
+            </p>
+          ) : null}
         </div>
+      </div>
     </article>
   );
 }
@@ -113,12 +116,10 @@ function EntryCard({
 function BoardColumn({
   groupKey,
   boards,
-  isLoadingLeaderboards,
   errorMessage,
 }: {
   groupKey: GroupKey;
   boards: SessionArenaBoard[];
-  isLoadingLeaderboards: boolean;
   errorMessage: string | null;
 }) {
   const meta = GROUP_META[groupKey];
@@ -133,7 +134,6 @@ function BoardColumn({
     () => buildLeaderboardEntries(activeBoard).slice(0, MAX_ENTRIES),
     [activeBoard],
   );
-
 
   return (
     <div className="flex min-w-0 flex-1 flex-col border border-orbit-border bg-orbit-bg">
@@ -173,14 +173,18 @@ function BoardColumn({
 
       {/* entries */}
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {isLoadingLeaderboards ? (
-          <p className="px-2 py-3 font-mono text-[0.58rem] text-orbit-muted">syncing…</p>
-        ) : errorMessage ? (
-          <p className="px-2 py-3 text-[0.6rem] text-orbit-muted">{errorMessage}</p>
+        {errorMessage ? (
+          <p className="px-2 py-3 text-[0.6rem] text-orbit-muted">
+            {errorMessage}
+          </p>
         ) : boards.length === 0 ? (
-          <p className="px-2 py-3 font-mono text-[0.58rem] text-orbit-muted">no boards</p>
+          <p className="px-2 py-3 font-mono text-[0.58rem] text-orbit-muted">
+            no boards
+          </p>
         ) : entries.length === 0 ? (
-          <p className="px-2 py-3 font-mono text-[0.58rem] text-orbit-muted">no entries</p>
+          <p className="px-2 py-3 font-mono text-[0.58rem] text-orbit-muted">
+            no entries
+          </p>
         ) : (
           <div className="grid gap-1">
             {entries.map((entry, index) => (
@@ -201,11 +205,9 @@ function BoardColumn({
 
 export function LeaderboardPanel({
   sessionLabel,
-  isReloading,
   onReload,
   resolvedArenaOverview,
   arenaBoards,
-  isLoadingLeaderboards,
   leaderboardError,
   dashboardError,
 }: LeaderboardPanelProps) {
@@ -247,11 +249,10 @@ export function LeaderboardPanel({
           </span>
           <button
             type="button"
-            className="border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isReloading}
+            className="border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg"
             onClick={onReload}
           >
-            {isReloading ? "probing" : "rerun probe"}
+            rerun probe
           </button>
         </div>
       </div>
@@ -263,7 +264,6 @@ export function LeaderboardPanel({
             key={key}
             groupKey={key}
             boards={groups[key]}
-            isLoadingLeaderboards={isLoadingLeaderboards}
             errorMessage={errorMessage}
           />
         ))}

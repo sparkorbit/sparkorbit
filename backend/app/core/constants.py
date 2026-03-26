@@ -10,13 +10,9 @@ DEFAULT_RUNS_DIR = ROOT_DIR / "pipelines" / "source_fetch" / "data" / "runs"
 
 SESSION_PREFIX = "sparkorbit:session"
 ACTIVE_SESSION_KEY = f"{SESSION_PREFIX}:active"
-BOOTSTRAP_STATE_KEY = f"{SESSION_PREFIX}:bootstrap_state"
-RELOAD_STATE_KEY = f"{SESSION_PREFIX}:reload_state"
 RECENT_SESSIONS_KEY = f"{SESSION_PREFIX}:recent"
 QUEUE_SESSION_ENRICH_KEY = "sparkorbit:queue:session_enrich"
 SESSION_TTL_SECONDS = 72 * 60 * 60
-BOOTSTRAP_STATE_TTL_SECONDS = 15 * 60
-RELOAD_STATE_TTL_SECONDS = 15 * 60
 
 
 

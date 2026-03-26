@@ -3,13 +3,12 @@ from __future__ import annotations
 import copy
 import json
 import subprocess
-import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any
 
 from source_fetch.adapters import (
     build_summary_input,
@@ -605,24 +604,13 @@ def run_collection(
     output_dir: str,
     run_label: str,
     timeout: float,
-    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], Path]:
-    progress_lock = threading.Lock()
-
-    def emit_progress(**payload: Any) -> None:
-        if progress_callback is None:
-            return
-        with progress_lock:
-            progress_callback(payload)
-
     run_id = utc_run_id(run_label)
     run_dir = Path(output_dir) / run_id
     paths = ensure_dirs(run_dir)
     selected_sources = resolve_sources(sources)
     applied_limit = effective_limit(limit)
     started_at = now_utc_iso()
-    total_sources = len(selected_sources)
-
     run_manifest: dict[str, Any] = {
         "run_id": run_id,
         "limit": applied_limit,
@@ -640,18 +628,12 @@ def run_collection(
     request_log_rows: list[dict[str, Any]] = []
     error_rows: list[dict[str, Any]] = []
 
-    emit_progress(
-        stage="starting",
-        run_id=run_id,
-        total_sources=total_sources,
-        completed_sources=0,
-        current_source=None,
-        detail=f"Preparing {total_sources} source(s) for parallel collection.",
-    )
+    total_sources = len(selected_sources)
+    print(f"[collect] run={run_id}  sources={total_sources}  limit={applied_limit}")
 
     # --- parallel fetch phase ---
-    completed_count = 0
     fetch_results: dict[str, dict[str, Any]] = {}
+    completed_count = 0
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_source = {
@@ -665,16 +647,8 @@ def run_collection(
             source = outcome["source"]
             fetch_results[source.name] = outcome
             completed_count += 1
-            status_tag = "ok" if outcome["ok"] else "fail"
-            emit_progress(
-                stage="fetching_sources",
-                run_id=run_id,
-                total_sources=total_sources,
-                completed_sources=completed_count,
-                current_source=None,
-                source_index=completed_count,
-                detail=f"Done {completed_count}/{total_sources} sources (latest: {source.name} {status_tag})",
-            )
+            tag = "ok" if outcome["ok"] else "err"
+            print(f"[collect] {completed_count}/{total_sources}  {source.name}  {tag}  {outcome['duration_ms']}ms")
 
     # --- sequential persist phase (maintains source order) ---
     for source in selected_sources:
@@ -792,14 +766,6 @@ def run_collection(
             )
             run_manifest["error_count"] += 1
 
-    emit_progress(
-        stage="writing_artifacts",
-        run_id=run_id,
-        total_sources=total_sources,
-        completed_sources=len(source_manifest_entries),
-        current_source=None,
-        detail="Writing manifests, normalized outputs, and contract report.",
-    )
     append_ndjson(paths["root"] / "source_manifest.ndjson", source_manifest_entries)
     append_ndjson(paths["logs"] / "fetch.ndjson", fetch_log_rows)
     append_ndjson(paths["logs"] / "requests.ndjson", request_log_rows)
@@ -820,4 +786,10 @@ def run_collection(
         if line.strip()
     ] if metrics_path.exists() else []
     write_json(paths["normalized"] / "contract_report.json", build_contract_report(documents, metrics))
+    print(
+        f"[collect] done  ok={run_manifest['success_count']}"
+        f"  skip={run_manifest['skipped_count']}"
+        f"  err={run_manifest['error_count']}"
+        f"  docs={len(documents)}"
+    )
     return run_manifest, run_dir

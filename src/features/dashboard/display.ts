@@ -1,5 +1,4 @@
 import type {
-  DashboardLoading,
   DashboardResponse,
   SessionArenaBoard,
   SessionArenaBoardEntry,
@@ -120,7 +119,6 @@ export const EMPTY_DASHBOARD: DashboardResponse = {
       "Cold boot starts automatically when no active cache exists.",
     ],
     arenaOverview: null,
-    loading: null,
   },
   summary: {
     title: "Signal Sweep",
@@ -130,10 +128,14 @@ export const EMPTY_DASHBOARD: DashboardResponse = {
   feeds: [],
 };
 
-export function buildPanelSessionLabel(sessionDate: string, windowLabel: string) {
+export function buildPanelSessionLabel(
+  sessionDate: string,
+  windowLabel: string,
+) {
   const compactDate =
     sessionDate.length >= 10
-      ? sessionDate.slice(5).replace("-", ".")
+      ? sessionDate.slice(5, 10).replace("-", ".") +
+        (sessionDate.length >= 16 ? " " + sessionDate.slice(11, 16) : "")
       : sessionDate;
   return `${compactDate} / ${windowLabel}`;
 }
@@ -341,20 +343,4 @@ export function buildLeaderboardEntries(
   }
 
   return board.topModel.modelName ? [board.topModel] : [];
-}
-
-export function loadingStepClasses(
-  status: DashboardLoading["steps"][number]["status"],
-) {
-  switch (status) {
-    case "active":
-      return "border-orbit-accent bg-orbit-panel text-orbit-text";
-    case "complete":
-      return "border-orbit-border-strong bg-orbit-bg text-orbit-accent";
-    case "error":
-      return "border-red-500/40 bg-red-950/20 text-red-200";
-    case "pending":
-    default:
-      return "border-orbit-border bg-orbit-bg text-orbit-muted";
-  }
 }

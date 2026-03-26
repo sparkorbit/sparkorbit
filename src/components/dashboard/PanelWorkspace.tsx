@@ -1237,7 +1237,9 @@ export function PanelWorkspace({
                 orderStorageKey={PANEL_WORKSPACE_STORAGE.infoOrder}
                 sizeStorageKey={PANEL_WORKSPACE_STORAGE.infoSize}
                 emptyTitle={
-                  hiddenInfoItems.length > 0 ? "Only hidden cards remain" : "No traces"
+                  hiddenInfoItems.length > 0
+                    ? "Only hidden cards remain"
+                    : "No traces"
                 }
                 emptyDescription={
                   hiddenInfoItems.length > 0

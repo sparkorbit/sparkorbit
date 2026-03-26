@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
-
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from ..core.constants import DEFAULT_RUN_LABEL
 
@@ -17,18 +15,6 @@ class ReloadSessionPayload(BaseModel):
 
 
 class SessionReloadResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     session_id: str | None
     status: str
-    loading: dict[str, Any] | None = None
-    error: str | None = None
-
-
-class SessionReloadStateResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    session_id: str | None
-    status: str
-    loading: dict[str, Any] | None = None
     error: str | None = None

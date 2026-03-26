@@ -4,38 +4,28 @@ import json
 import shutil
 import sys
 import tempfile
-import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from backend.app.core.constants import (
     ACTIVE_SESSION_KEY,
-    BOOTSTRAP_STATE_KEY,
     ORDERED_SOURCE_CATEGORIES,
     QUEUE_SESSION_ENRICH_KEY,
     RECENT_SESSIONS_KEY,
-    RELOAD_STATE_KEY,
-    RELOAD_STATE_TTL_SECONDS,
     SCHEMA_VERSION,
     SESSION_RETAIN_COUNT,
     SESSION_TTL_SECONDS,
 )
 from backend.app.core.store import MemoryStore
 from backend.app.services.session_service import (
-    begin_homepage_bootstrap,
     build_briefing_input,
     document_sort_key,
     get_dashboard_response,
     get_document_response,
     get_json,
     get_leaderboard_response,
-    get_or_bootstrap_dashboard_response,
-    get_session_reload_response,
-    loading_percent,
     publish_run,
-    reset_homepage_bootstrap_state,
-    reset_session_reload_state,
     run_session_enrichment,
     run_session_reload,
     session_key,
@@ -372,12 +362,8 @@ class SessionPipelineTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store = MemoryStore()
         self._temp_roots: list[Path] = []
-        reset_homepage_bootstrap_state(self.store)
-        reset_session_reload_state(self.store)
 
     def tearDown(self) -> None:
-        reset_homepage_bootstrap_state(self.store)
-        reset_session_reload_state(self.store)
         for path in self._temp_roots:
             shutil.rmtree(path, ignore_errors=True)
 
@@ -402,9 +388,6 @@ class SessionPipelineTests(unittest.TestCase):
         dashboard = get_json(self.store, session_key(session_id, "dashboard"))
         self.assertEqual(dashboard["status"], "published")
         self.assertGreater(len(dashboard["feeds"]), 0)
-        self.assertEqual(dashboard["session"]["loading"]["stage"], "published")
-        self.assertLess(dashboard["session"]["loading"]["percent"], 100)
-
         doc_keys = [
             key
             for key in self.store.values
@@ -419,39 +402,6 @@ class SessionPipelineTests(unittest.TestCase):
             self.store.ttl_for(session_key(session_id, "dashboard")),
             SESSION_TTL_SECONDS,
         )
-
-    def test_collect_run_keeps_progress_callback_compatibility(self) -> None:
-        calls: list[dict] = []
-        callback = lambda payload: None
-        fake_package = types.ModuleType("source_fetch")
-        fake_package.__path__ = []
-        fake_pipeline = types.ModuleType("source_fetch.pipeline")
-
-        def fake_run_collection(**kwargs):
-            calls.append(kwargs)
-            return {"run_id": "synthetic"}, Path("/tmp/synthetic-run")
-
-        fake_pipeline.run_collection = fake_run_collection
-
-        with patch.dict(
-            sys.modules,
-            {
-                "source_fetch": fake_package,
-                "source_fetch.pipeline": fake_pipeline,
-            },
-        ):
-            from backend.app.services.collector import collect_run
-
-            manifest, run_dir = collect_run(
-                sources=["all"],
-                run_label="compat",
-                progress_callback=callback,
-            )
-
-        self.assertEqual(manifest["run_id"], "synthetic")
-        self.assertEqual(run_dir, Path("/tmp/synthetic-run"))
-        self.assertEqual(len(calls), 1)
-        self.assertIs(calls[0]["progress_callback"], callback)
 
     def test_feed_lists_are_sorted_by_feed_score_then_sort_at(self) -> None:
         run_dir = self._make_run("2026-03-24T000102Z_sorted")
@@ -1183,168 +1133,6 @@ class SessionPipelineTests(unittest.TestCase):
         self.assertEqual(rebuilt["brand"]["tagline"], "Signal Relay")
         refreshed_meta = get_json(self.store, session_key(session_id, "meta"))
         self.assertEqual(refreshed_meta["schema_version"], SCHEMA_VERSION)
-
-    def test_homepage_dashboard_bootstraps_collection_when_active_session_is_missing(self) -> None:
-        scheduled: list[str] = []
-
-        dashboard = get_or_bootstrap_dashboard_response(
-            self.store,
-            schedule_bootstrap=lambda: scheduled.append("queued"),
-        )
-        second_dashboard = get_or_bootstrap_dashboard_response(
-            self.store,
-            schedule_bootstrap=lambda: scheduled.append("queued-again"),
-        )
-
-        self.assertEqual(dashboard["status"], "collecting")
-        self.assertEqual(second_dashboard["status"], "collecting")
-        self.assertEqual(scheduled, ["queued"])
-        self.assertEqual(dashboard["session"]["loading"]["stage"], "starting")
-
-        bootstrap_state = get_json(self.store, BOOTSTRAP_STATE_KEY)
-        self.assertIsNotNone(bootstrap_state)
-        self.assertEqual(bootstrap_state["status"], "collecting")
-
-    def test_homepage_dashboard_does_not_schedule_duplicate_bootstrap_after_eager_claim(self) -> None:
-        scheduled: list[str] = []
-
-        initial_state, should_start = begin_homepage_bootstrap(self.store)
-        dashboard = get_or_bootstrap_dashboard_response(
-            self.store,
-            schedule_bootstrap=lambda: scheduled.append("queued"),
-        )
-
-        self.assertTrue(should_start)
-        self.assertEqual(initial_state["status"], "collecting")
-        self.assertEqual(dashboard["status"], "collecting")
-        self.assertEqual(scheduled, [])
-
-    def test_begin_homepage_bootstrap_claims_run_only_once(self) -> None:
-        first_state, first_should_start = begin_homepage_bootstrap(self.store)
-        second_state, second_should_start = begin_homepage_bootstrap(self.store)
-
-        self.assertTrue(first_should_start)
-        self.assertFalse(second_should_start)
-        self.assertEqual(first_state["status"], "collecting")
-        self.assertEqual(second_state["status"], "collecting")
-
-    def test_loading_percent_tracks_overall_pipeline_without_resetting_to_zero(self) -> None:
-        fetching_mid = loading_percent(
-            3,
-            10,
-            status="collecting",
-            stage="fetching_sources",
-        )
-        published = loading_percent(
-            1,
-            1,
-            status="published",
-            stage="published",
-        )
-        summarizing_start = loading_percent(
-            0,
-            8,
-            status="summarizing",
-            stage="summarizing_documents",
-        )
-        digests_mid = loading_percent(
-            3,
-            6,
-            status="summarizing",
-            stage="building_digests",
-        )
-        briefing = loading_percent(
-            0,
-            1,
-            status="summarizing",
-            stage="generating_briefing",
-        )
-        ready = loading_percent(
-            6,
-            6,
-            status="ready",
-            stage="ready",
-        )
-
-        self.assertGreater(fetching_mid, 0)
-        self.assertLess(fetching_mid, published)
-        self.assertLess(published, 100)
-        self.assertGreaterEqual(summarizing_start, published)
-        self.assertLess(summarizing_start, digests_mid)
-        self.assertLess(digests_mid, briefing)
-        self.assertLess(briefing, ready)
-        self.assertEqual(ready, 100)
-
-    def test_session_reload_state_tracks_real_progress_until_ready(self) -> None:
-        run_id = "2026-03-24T030303Z_reload"
-        run_dir = self._make_run(run_id)
-        run_manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
-        snapshots: list[dict] = []
-
-        def fake_collect_run(**kwargs):
-            progress_callback = kwargs.get("progress_callback")
-            if progress_callback:
-                progress_callback(
-                    {
-                        "stage": "starting",
-                        "run_id": run_id,
-                        "total_sources": 3,
-                        "completed_sources": 0,
-                        "current_source": None,
-                        "detail": "Preparing 3 source(s) for collection.",
-                    }
-                )
-                progress_callback(
-                    {
-                        "stage": "fetching_sources",
-                        "run_id": run_id,
-                        "total_sources": 3,
-                        "completed_sources": 1,
-                        "current_source": "openai_news_rss",
-                        "detail": "Completed openai_news_rss with status ok.",
-                    }
-                )
-                snapshots.append(get_session_reload_response(self.store))
-                progress_callback(
-                    {
-                        "stage": "fetching_sources",
-                        "run_id": run_id,
-                        "total_sources": 3,
-                        "completed_sources": 3,
-                        "current_source": "arxiv_rss_cs_ai",
-                        "detail": "Completed arxiv_rss_cs_ai with status ok.",
-                    }
-                )
-                snapshots.append(get_session_reload_response(self.store))
-            return run_manifest, run_dir
-
-        start_response = start_session_reload(
-            self.store,
-            schedule_reload=lambda: None,
-            run_label="redis-session",
-        )
-        self.assertEqual(start_response["status"], "collecting")
-        self.assertEqual(start_response["loading"]["stage"], "starting")
-
-        with patch(
-            "backend.app.services.session_service.collect_run",
-            side_effect=fake_collect_run,
-        ):
-            run_session_reload(
-                self.store,
-                run_label="redis-session",
-            )
-
-        final_response = get_session_reload_response(self.store)
-        self.assertEqual(final_response["status"], "ready")
-        self.assertEqual(final_response["session_id"], run_id)
-        self.assertEqual(final_response["loading"]["stage"], "ready")
-        self.assertEqual(final_response["loading"]["percent"], 100)
-        self.assertEqual(self.store.ttl_for(RELOAD_STATE_KEY), RELOAD_STATE_TTL_SECONDS)
-        self.assertEqual(len(snapshots), 2)
-        self.assertLess(snapshots[0]["loading"]["percent"], snapshots[1]["loading"]["percent"])
-        self.assertLess(snapshots[1]["loading"]["percent"], 100)
-
 
 if __name__ == "__main__":
     unittest.main()
