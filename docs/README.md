@@ -1,34 +1,43 @@
 # SparkOrbit Docs
 
-이 폴더가 현재 canonical 문서 루트다.
+Technical documentation root for the SparkOrbit project.
 
-## Order
+***
 
-- [01. Overall Flow](./01_overall_flow.md) — 제품 목표와 현재 구현 범위
-- [02. Sections](./02_sections/README.md) — 화면/섹션 관점 정리
-- [02.1 Sources](./02_sections/02_1_sources.md) — source 선정과 수집 방법
-- [02.2 Fields](./02_sections/02_2_fields.md) — normalized document 필드 레퍼런스
-- [03. Runtime Flow](./03_runtime_flow_draft.md) — backend, Redis session, SSE serving 흐름
-- [04. LLM Usage](./04_llm_usage.md) — offline enrichment와 session summary provider
-- [05. Data Collection Pipeline](./05_data_collection_pipeline.md) — 구현된 수집 파이프라인
-- [06. UI Design Guide](./06_ui_design_guide.md) — 현재 프론트엔드의 시각, 로딩, workspace 규칙
-- [06. Operational Playbook](./06_operational_playbook.md) — setup / run / verification 절차
-- [07. Panel Instruction Packs](./07_panel_instruction_packs.md) — panel별 prompt pack 관리 정책
-- [08. Data Schema & Links](./08_data_schema_and_links.md) — 수집~LLM~세션 전체 데이터 스키마, 조인 키, 링크 관계
+## Tech Stack
+
+| Category | Technologies |
+|----------|-------------|
+| Frontend | React 19, Vite, Tailwind CSS, Inter + Pretendard + JetBrains Mono |
+| Backend | FastAPI, Redis, Server-Sent Events |
+| Collection | Python 3.13 async pipeline (httpx, feedparser, BeautifulSoup) |
+| LLM | Ollama + Qwen 3.5 4B (local, optional) |
+| Deployment | Docker Compose (frontend, backend, worker, redis, ollama) |
+
+***
+
+## Documentation Index
+
+| Doc | Description |
+|-----|-------------|
+| [Overall Flow](./01_overall_flow.md) | Product flow, user journey, implementation scope |
+| [Sources](./02_sections/02_1_sources.md) | Complete source list and adapters |
+| [Fields](./02_sections/02_2_fields.md) | Normalized data contract |
+| [Runtime Flow](./03_runtime_flow_draft.md) | Backend, Redis session, SSE serving |
+| [LLM Usage](./04_llm_usage.md) | Summary provider, paper classifier, company filter |
+| [Collection Pipeline](./05_data_collection_pipeline.md) | Pipeline architecture and run artifacts |
+| [UI Design Guide](./06_ui_design_guide.md) | Visual tokens, loading states, workspace layout |
+| [Operational Playbook](./06_operational_playbook.md) | Setup, run, and verification runbook |
+| [Panel Instruction Packs](./07_panel_instruction_packs.md) | Panel-level prompt pack management |
+| [Data Schema & Links](./08_data_schema_and_links.md) | Data schema, join keys, merge rules |
+
+***
 
 ## Reading Guide
 
-1. 먼저 `01`에서 제품 목표와 **현재 구현 범위**를 함께 본다.
-2. source 선정과 수집 범위는 `02.1`, field contract는 `02.2`에서 본다.
-3. backend, Redis session, SSE flow는 `03`에서 본다.
-4. 현재 구현된 collection flow는 `05`에서, frontend 시각과 로딩 규칙은 `06 UI Design Guide`에서 본다.
-5. offline enrichment와 backend summary provider 범위는 `04`에서 본다.
-6. 실제 setup / run / verification 절차는 항상 `06 Operational Playbook`에서 canonical하게 관리한다.
-7. panel별 prompt/instruction 설계는 `07`과 `docs/prompt_packs/` 아래에서 관리한다.
-8. 데이터 스키마, 조인 키, 머지 규칙, 변경 체크리스트는 `08`에서 관리한다.
-
-## Reality Check
-
-- 현재 저장소에는 `pipelines/source_fetch`뿐 아니라 `backend/app` FastAPI runtime과 `src` React frontend도 구현되어 있다.
-- canonical source of truth는 여전히 `pipelines/source_fetch/data/runs/<run_id>/` 산출물이다.
-- Redis는 세션 serving layer이고, frontend는 backend API/BFF만 사용한다.
+1. Start with [Overall Flow](./01_overall_flow.md) for the product goal and current scope.
+2. Source list and collection: [Sources](./02_sections/02_1_sources.md), field contract: [Fields](./02_sections/02_2_fields.md).
+3. Backend, Redis session, SSE: [Runtime Flow](./03_runtime_flow_draft.md).
+4. Collection pipeline: [Data Collection](./05_data_collection_pipeline.md), frontend rules: [UI Design Guide](./06_ui_design_guide.md).
+5. LLM enrichment and summary: [LLM Usage](./04_llm_usage.md).
+6. Setup and run procedures: [Operational Playbook](./06_operational_playbook.md).

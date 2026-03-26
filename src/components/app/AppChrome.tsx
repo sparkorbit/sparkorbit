@@ -485,7 +485,7 @@ export function ReloadConfirmModal({
             </h2>
             <p className="mt-2 text-[0.76rem] leading-[1.62] text-orbit-muted">
               This will re-collect all sources and run the LLM pipeline
-              (summaries and classification). Expect around 3 minutes to
+              (summaries and classification). Expect around 5 minutes to
               complete.
             </p>
           </div>

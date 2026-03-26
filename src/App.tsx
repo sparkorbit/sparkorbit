@@ -92,6 +92,10 @@ const INITIAL_CONNECTION_LOADING: JobProgressSnapshot = {
     status: index === 0 ? "active" : "pending",
   })),
 };
+const RELOAD_COLLECTION_LOADING: JobProgressSnapshot = {
+  ...INITIAL_CONNECTION_LOADING,
+  detail: "Starting a fresh collection run.",
+};
 
 function readGitHubStarPromptState() {
   if (typeof window === "undefined") {
@@ -541,6 +545,7 @@ function App() {
         };
         setJobProgress(null);
         setActiveJob(job);
+        setDashboardError(null);
         startJobStream(job);
       }
     } catch (error) {
@@ -1096,18 +1101,30 @@ function App() {
   }
   const hasUsableDashboard =
     dashboard.session.sessionId !== EMPTY_DASHBOARD.session.sessionId;
+  const isCollectionJobActive =
+    activeJob !== null &&
+    (jobProgress === null ||
+      !jobProgress.stage ||
+      COLLECTION_ONLY_JOB_STAGES.has(jobProgress.stage));
+  const shouldShowReloadLoading =
+    hasUsableDashboard && isCollectionJobActive;
   const loadingSnapshot =
     isInitialConnectionPending && !hasUsableDashboard && jobProgress === null
       ? INITIAL_CONNECTION_LOADING
+      : shouldShowReloadLoading && jobProgress === null
+        ? RELOAD_COLLECTION_LOADING
       : normalizeLoadingSnapshot(jobProgress ?? dashboard.session.loading);
   const shouldShowFullscreenLoading =
     (isInitialConnectionPending && !hasUsableDashboard) ||
+    shouldShowReloadLoading ||
     (!hasUsableDashboard &&
       (activeJob !== null || dashboard.status === "collecting")) ||
     dashboard.status === "collecting" ||
     (!hasUsableDashboard && jobProgress?.status === "error");
   const hasFinishedCollecting =
-    hasUsableDashboard && dashboard.status !== "collecting";
+    hasUsableDashboard &&
+    dashboard.status !== "collecting" &&
+    !isCollectionJobActive;
 
   useEffect(() => {
     if (
