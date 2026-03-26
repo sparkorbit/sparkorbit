@@ -91,6 +91,36 @@ export type DashboardBriefing = {
 
 export type BriefingStatus = "ready" | "processing" | "disabled" | "error";
 
+export type DashboardSummaryLlmState = {
+  enabled: boolean;
+  status: BriefingStatus;
+  modelName?: string | null;
+  summaryReady: boolean;
+  filteringReady: boolean;
+  labeledPaperCount: number;
+  totalPaperCount: number;
+  message: string;
+  stageLabel?: string | null;
+  stageDetail?: string | null;
+  stageProgressCurrent?: number;
+  stageProgressTotal?: number;
+  stageProgressPercent?: number | null;
+};
+
+export type DashboardPaperDomainSummary = {
+  key: string;
+  label: string;
+  count: number;
+  isUngrouped?: boolean;
+};
+
+export type DashboardSourceCountSummary = {
+  category: string;
+  label: string;
+  panelCount: number;
+  documentCount: number;
+};
+
 export type DashboardResponse = {
   brand: {
     name: string;
@@ -103,6 +133,9 @@ export type DashboardResponse = {
     headline: string;
     briefing?: DashboardBriefing | null;
     briefing_status?: BriefingStatus;
+    llm: DashboardSummaryLlmState;
+    paperDomains: DashboardPaperDomainSummary[];
+    sourceCounts: DashboardSourceCountSummary[];
     digests: DigestItem[];
   };
   feeds: FeedPanel[];

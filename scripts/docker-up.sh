@@ -19,18 +19,19 @@ done
 if [[ -z "${USE_LLM}" ]]; then
   if [[ -t 0 ]]; then
     echo ""
-    echo "  LLM bundle adds company filter, paper classifier, and daily briefing."
+    echo "  Local LLM bundle is recommended and enabled by default."
+    echo "  It adds company filter, paper classifier, and daily briefing."
     echo "  Requires: NVIDIA GPU with ~4GB VRAM (6-8GB recommended for full context)"
     echo "  Model: qwen3.5:4b (~3.4GB download)"
     echo ""
-    printf "Include local LLM bundle? [y/N] "
+    printf "Use local LLM bundle? [Y/n] "
     read -r reply
     case "${reply}" in
-      y|Y|yes|YES) USE_LLM="yes" ;;
-      *)           USE_LLM="no"  ;;
+      n|N|no|NO) USE_LLM="no"  ;;
+      *)         USE_LLM="yes" ;;
     esac
   else
-    USE_LLM="no"
+    USE_LLM="yes"
   fi
 fi
 
@@ -53,4 +54,6 @@ echo ""
 echo "  Data collection starts immediately."
 if [[ "${USE_LLM}" == "yes" ]]; then
   echo "  LLM enrichment + briefing will run automatically once the model is ready."
+else
+  echo "  Started without the local LLM bundle."
 fi

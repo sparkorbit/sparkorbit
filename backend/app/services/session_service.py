@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from collections import Counter
 from copy import deepcopy
@@ -22,7 +23,10 @@ from ..core.constants import (
     DEFAULT_BRIEFING_PROVIDER,
     DEFAULT_RUN_LABEL,
     HOMEPAGE_BOOTSTRAP_RUN_LABEL,
+    LLM_PAPER_CHUNK_SIZE,
     OLLAMA_BASE_URL,
+    OLLAMA_KEEP_ALIVE,
+    OLLAMA_MODEL,
     ORDERED_SOURCE_CATEGORIES,
     QUEUE_SESSION_ENRICH_KEY,
     ROOT_DIR,
@@ -38,7 +42,7 @@ from ..core.constants import (
 )
 from ..core.store import RedisLike
 from .collector import collect_run
-from .job_progress import get_or_create_job_tracker
+from .job_progress import build_poll_path, get_or_create_job_tracker
 from .summary_provider import (
     BriefingGenerator,
     SummaryGenerator,
@@ -63,6 +67,7 @@ SESSION_DOCUMENT_SUMMARIES_FILENAME = "session_document_summaries.ndjson"
 SESSION_CATEGORY_DIGESTS_FILENAME = "session_category_digests.ndjson"
 SESSION_BRIEFINGS_FILENAME = "session_briefings.ndjson"
 OPEN_LLM_LEADERBOARD_REFERENCE_URL = "https://huggingface.co/datasets/open-llm-leaderboard/contents"
+LLM_DISABLED_PROVIDER_VALUES = frozenset({"", "off", "none", "disabled", "false", "0"})
 
 _HOMEPAGE_BOOTSTRAP_LOCK = threading.Lock()
 _HOMEPAGE_BOOTSTRAP_RUNNING = False
@@ -1114,19 +1119,6 @@ PAPER_DOMAIN_DISPLAY_NAMES = {
     "vlm": "VLM",
 }
 
-COMPANY_DOMAIN_DISPLAY_NAMES = {
-    "benchmark_eval": "Benchmark",
-    "model_release": "Model Release",
-    "open_source": "Open Source",
-    "others": "Other Updates",
-    "partnership_ecosystem": "Partnership",
-    "policy_safety": "Policy & Safety",
-    "product_update": "Product Update",
-    "technical_research": "Technical Research",
-    "unknown": "Company Update",
-}
-
-
 def _format_curated_label(
     value: Any, mapping: dict[str, str], *, fallback: str | None = None
 ) -> str | None:
@@ -1240,15 +1232,8 @@ def _build_community_feed_meta(document: dict[str, Any]) -> str:
 
 
 def _build_company_feed_meta(document: dict[str, Any]) -> str:
-    labels = document.get("labels") or {}
-    company = labels.get("company") or {}
-    domain = _format_curated_label(
-        company.get("company_domain"),
-        COMPANY_DOMAIN_DISPLAY_NAMES,
-        fallback=None,
-    )
-    # Panel title already shows the company name; only show domain label if available
-    return domain or ""
+    del document
+    return ""
 
 
 def build_feed_meta(document: dict[str, Any]) -> str:
@@ -1382,16 +1367,6 @@ def build_feed_panel_summary(
             )
 
     if category in {"company", "company_kr", "company_cn"}:
-        top_domains = _top_display_labels(
-            _format_curated_label(
-                ((doc.get("labels") or {}).get("company") or {}).get("company_domain"),
-                COMPANY_DOMAIN_DISPLAY_NAMES,
-            )
-            for doc in documents
-        )
-        if top_domains:
-            return f"{len(documents)} updates · {' / '.join(top_domains)}"
-
         repo_count = sum(1 for doc in documents if str(doc.get("doc_type") or "") == "repo")
         release_count = sum(
             1 for doc in documents if str(doc.get("doc_type") or "") == "release"
@@ -1418,27 +1393,27 @@ def _build_engagement_label(document: dict[str, Any]) -> str:
         if source == "hf_trending_models":
             score = engagement.get("trending_score")
             if score is not None:
-                return f"trending {int(to_number(score))}"
+                return f"🔥 {int(to_number(score))}"
             if likes:
-                return f"liked {likes:,}"
+                return f"♥ {likes:,}"
         elif source == "hf_models_new":
             downloads = int(to_number(engagement.get("downloads")))
             if downloads:
-                return f"downloads {downloads:,}"
+                return f"↓ {downloads:,}"
             if likes:
-                return f"liked {likes:,}"
+                return f"♥ {likes:,}"
         elif likes:
-            return f"liked {likes:,}"
+            return f"♥ {likes:,}"
 
     if doc_type == "repo":
         stars = int(to_number(engagement.get("stars")))
         if stars:
-            return f"stars {stars:,}"
+            return f"★ {stars:,}"
 
     if doc_type in {"story", "post"}:
         score = int(to_number(engagement.get("score") or engagement.get("ups")))
         if score:
-            return f"score {score:,}"
+            return f"▲ {score:,}"
 
     return ""
 
@@ -1481,6 +1456,22 @@ def sort_documents_for_feed(
     return sort_documents(documents)
 
 
+def build_visible_feed_documents(
+    documents: Iterable[dict[str, Any]],
+    *,
+    source: str,
+) -> list[dict[str, Any]]:
+    visible_documents = [
+        document
+        for document in documents
+        if not _is_generic_title(document.get("title"))
+    ]
+    if not visible_documents:
+        return []
+
+    return sort_documents_for_feed(visible_documents, source=source)
+
+
 def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
     display_document = sanitize_document_for_monitor(document)
     display_time = display_document.get("display_time") or {}
@@ -1491,6 +1482,7 @@ def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
         or display_document.get("canonical_url")
         or display_document.get("url")
         or "",
+        "paperDomain": ((display_document.get("labels") or {}).get("paper_domain")),
         "timestamp": display_time.get("value") or None,
         "timestampLabel": display_time.get("label") or None,
         "source": build_document_badge(display_document),
@@ -1514,6 +1506,7 @@ def loading_stage_label(stage: str, status: str) -> str:
         "published": "Data Ready",
         "summarizing_documents": "Writing Summaries",
         "building_digests": "Building Overview",
+        "offline_labeling": "Grouping Papers",
         "generating_briefing": "Writing Briefing",
         "ready": "Ready",
         "partial_error": "Ready with Issues",
@@ -1562,6 +1555,11 @@ def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
             "detail": "Building category overviews and recording final state.",
         },
         {
+            "id": "labels",
+            "label": "Paper Topics",
+            "detail": "Applying paper grouping.",
+        },
+        {
             "id": "briefing",
             "label": "Briefing",
             "detail": "Generating a daily briefing from the collected documents.",
@@ -1578,9 +1576,10 @@ def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
         "published": 4,
         "summarizing_documents": 5,
         "building_digests": 6,
-        "generating_briefing": 7,
-        "ready": 7,
-        "partial_error": 7,
+        "offline_labeling": 7,
+        "generating_briefing": 8,
+        "ready": 8,
+        "partial_error": 8,
         "error": 0,
     }.get(stage, 0)
 
@@ -1595,9 +1594,10 @@ def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
         "published": 4,
         "summarizing_documents": 4,
         "building_digests": 5,
-        "generating_briefing": 6,
-        "ready": 7,
-        "partial_error": 7,
+        "offline_labeling": 6,
+        "generating_briefing": 7,
+        "ready": 8,
+        "partial_error": 8,
         "error": -1,
     }.get(stage, -1)
 
@@ -1625,8 +1625,9 @@ def loading_percent(current: int, total: int, *, status: str, stage: str) -> int
         "publishing_documents": (65, 72),
         "publishing_views": (73, 84),
         "published": (84, 84),
-        "summarizing_documents": (85, 94),
-        "building_digests": (95, 98),
+        "summarizing_documents": (85, 92),
+        "building_digests": (93, 95),
+        "offline_labeling": (96, 98),
         "generating_briefing": (99, 99),
         "ready": (100, 100),
         "partial_error": (100, 100),
@@ -1843,6 +1844,22 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
         "summary": {
             "title": "Today in AI",
             "headline": error_message or detail,
+            "llm": {
+                "enabled": _briefing_provider_enabled(),
+                "status": "processing" if _briefing_provider_enabled() else "disabled",
+                "modelName": OLLAMA_MODEL if _briefing_provider_enabled() else None,
+                "summaryReady": False,
+                "filteringReady": False,
+                "labeledPaperCount": 0,
+                "totalPaperCount": 0,
+                "message": (
+                    "LLM summarization and paper grouping will continue after collection."
+                    if _briefing_provider_enabled()
+                    else "LLM summarization and paper grouping are off. The overview will use source data only."
+                ),
+            },
+            "paperDomains": [],
+            "sourceCounts": [],
             "digests": build_bootstrap_digest_items(status),
         },
         "feeds": [],
@@ -2416,16 +2433,7 @@ def build_briefing_input(
 ) -> dict[str, Any]:
     from datetime import datetime, timedelta, timezone
 
-    issue_domains = {
-        "model_release",
-        "product_update",
-        "open_source",
-        "benchmark_eval",
-        "partnership_ecosystem",
-        "policy_safety",
-    }
     max_papers = 16
-    max_company = 8
     max_models = 6
     max_community = 8
     today = datetime.now(timezone.utc)
@@ -2541,24 +2549,6 @@ def build_briefing_input(
         _append_paper_doc(papers, paper_ids, doc)
 
     company: list[dict[str, str]] = []
-    company_ids: set[str] = set()
-    for cat in ("company", "company_kr", "company_cn"):
-        for doc in category_docs.get(cat, []):
-            cl = (doc.get("labels") or {}).get("company", {})
-            if cl.get("decision") != "keep":
-                continue
-            company.append(
-                {
-                    "title": _title(doc),
-                    "domain": cl.get("company_domain") or "others",
-                    "source": str(doc.get("source") or ""),
-                }
-            )
-            company_ids.add(str(doc.get("document_id") or ""))
-            if len(company) >= max_company:
-                break
-        if len(company) >= max_company:
-            break
 
     community: list[dict[str, str]] = []
     community_ids: set[str] = set()
@@ -2634,24 +2624,22 @@ def build_briefing_input(
         )
         model_ids.add(document_id)
 
-    total_selected_ids = paper_ids | company_ids | model_ids | community_ids
+    total_selected_ids = paper_ids | model_ids | community_ids
 
     session = {
         "window": "today",
         "total_items": len(total_selected_ids),
         "category_counts": {
             "papers": len(papers),
-            "company": len(company),
+            "company": 0,
             "models": len(models),
             "community": len(community),
         },
         "dominant_paper_domains": _top_values(papers, "domain"),
         "paper_source_groups": _top_values(papers, "source_group"),
-        "dominant_company_domains": _top_values(company, "domain"),
-        "company_issue_domains": _top_values(
-            [row for row in company if str(row.get("domain") or "") in issue_domains],
-            "domain",
-        ),
+        "dominant_company_domains": [],
+        "company_issue_domains": [],
+        "company_filtering_enabled": False,
         "top_model_names": [row["title"] for row in models[:2]],
         "active_model_sources": _top_values(models, "source", limit=3),
         "hf_model_sources": _top_values(
@@ -2688,19 +2676,276 @@ def _resolve_briefing_status(
     - ``"error"``       – LLM enabled but generation failed
     - ``"disabled"``    – LLM provider is turned off
     """
-    provider = (
-        os.environ.get(BRIEFING_PROVIDER_ENV_VAR) or DEFAULT_BRIEFING_PROVIDER
-    ).strip().lower()
-    if provider in {"", "off", "none", "disabled", "false", "0"}:
+    if not _briefing_provider_enabled():
         return "disabled"
     if briefing is not None and briefing.get("body_en") and not briefing.get("error"):
         return "ready"
     if briefing is not None and briefing.get("error"):
         return "error"
     loading_stage = str(meta.get("loading_stage") or "")
-    if loading_stage in {"generating_briefing", "collecting", "summarizing", "building_digests"}:
+    if loading_stage in {
+        "generating_briefing",
+        "collecting",
+        "summarizing",
+        "building_digests",
+        "offline_labeling",
+    }:
         return "processing"
     return "disabled"
+
+
+def _briefing_provider_name() -> str:
+    return (
+        os.environ.get(BRIEFING_PROVIDER_ENV_VAR) or DEFAULT_BRIEFING_PROVIDER
+    ).strip().lower()
+
+
+def _briefing_provider_enabled() -> bool:
+    return _briefing_provider_name() not in LLM_DISABLED_PROVIDER_VALUES
+
+
+def _ollama_model_ready(model_name: str | None = None) -> bool:
+    target = str(model_name or OLLAMA_MODEL).strip()
+    if not target:
+        return False
+
+    try:
+        import httpx
+
+        response = httpx.get(f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags", timeout=5.0)
+        response.raise_for_status()
+        payload = response.json()
+        models = payload.get("models") if isinstance(payload, dict) else []
+        if not isinstance(models, list):
+            return False
+
+        target_base = target.split(":", 1)[0]
+        for entry in models:
+            if not isinstance(entry, dict):
+                continue
+            for key in ("model", "name"):
+                candidate = str(entry.get(key) or "").strip()
+                if not candidate:
+                    continue
+                candidate_base = candidate.split(":", 1)[0]
+                if candidate == target or candidate_base == target_base:
+                    return True
+    except Exception:
+        return False
+
+    return False
+
+
+def _wait_for_ollama_model_ready() -> bool:
+    timeout_seconds = max(
+        0.0,
+        float(os.getenv("SPARKORBIT_LLM_READY_TIMEOUT", "900")),
+    )
+    poll_interval_seconds = max(
+        1.0,
+        float(os.getenv("SPARKORBIT_LLM_READY_POLL_INTERVAL", "5")),
+    )
+    deadline = time.monotonic() + timeout_seconds
+
+    while True:
+        if _ollama_model_ready():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(min(poll_interval_seconds, max(0.0, deadline - time.monotonic())))
+
+
+def build_paper_domain_overview(
+    documents: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    domain_counts: Counter[str] = Counter()
+    for document in documents:
+        domain = str((document.get("labels") or {}).get("paper_domain") or "others").strip() or "others"
+        domain_counts[domain] += 1
+
+    overview: list[dict[str, Any]] = []
+    for domain, count in domain_counts.most_common(8):
+        if domain == "others":
+            label = "Not Grouped Yet"
+        else:
+            label = PAPER_DOMAIN_DISPLAY.get(domain, prettify_source_name(domain))
+        overview.append(
+            {
+                "key": domain,
+                "label": label,
+                "count": count,
+                "isUngrouped": domain == "others",
+            }
+        )
+    return overview
+
+
+def build_source_count_overview(
+    panel_counts: Counter[str],
+    document_counts: Counter[str],
+) -> list[dict[str, Any]]:
+    overview: list[dict[str, Any]] = []
+    for category in ORDERED_SOURCE_CATEGORIES:
+        if category == "benchmark":
+            continue
+        panels = int(panel_counts.get(category, 0))
+        documents = int(document_counts.get(category, 0))
+        if panels <= 0 and documents <= 0:
+            continue
+        overview.append(
+            {
+                "category": category,
+                "label": SOURCE_CATEGORY_LABELS.get(category, category),
+                "panelCount": panels,
+                "documentCount": documents,
+            }
+        )
+    return overview
+
+
+def build_summary_llm_state(
+    meta: dict[str, Any],
+    briefing: dict[str, Any] | None,
+    paper_documents: list[dict[str, Any]],
+) -> dict[str, Any]:
+    briefing_status = _resolve_briefing_status(meta, briefing)
+    enabled = _briefing_provider_enabled()
+    total_paper_count = len(paper_documents)
+    labeled_paper_count = sum(
+        1
+        for document in paper_documents
+        if "paper_domain" in (document.get("labels") or {})
+    )
+    filtering_ready = total_paper_count == 0 or labeled_paper_count >= total_paper_count
+    summary_ready = briefing_status == "ready"
+    loading_stage = str(meta.get("loading_stage") or "")
+    loading_status = str(meta.get("status") or "published")
+    stage_progress_current = int(meta.get("loading_progress_current") or 0)
+    stage_progress_total = int(meta.get("loading_progress_total") or 0)
+    stage_progress_percent = (
+        int(round((stage_progress_current / stage_progress_total) * 100))
+        if stage_progress_total > 0
+        else None
+    )
+
+    if not enabled:
+        status = "disabled"
+        message = "LLM summarization and paper grouping are off. The overview is based on collected source data."
+    elif briefing_status == "error":
+        status = "error"
+        message = "LLM summarization failed. Source data is still available while the monitor stays live."
+    elif summary_ready and filtering_ready:
+        status = "ready"
+        message = "LLM summarization and paper grouping are ready."
+    else:
+        status = "processing"
+        message = (
+            "LLM summarization and paper grouping are still processing. "
+            "This step can take up to 3 minutes. "
+            "The monitor is showing original source curation until they finish."
+        )
+
+    run_meta = (briefing or {}).get("run_meta") or {}
+    model_name = run_meta.get("model_name") or (OLLAMA_MODEL if enabled else None)
+
+    return {
+        "enabled": enabled,
+        "status": status,
+        "modelName": model_name,
+        "summaryReady": summary_ready,
+        "filteringReady": filtering_ready,
+        "labeledPaperCount": labeled_paper_count,
+        "totalPaperCount": total_paper_count,
+        "message": message,
+        "stageLabel": (
+            loading_stage_label(loading_stage, loading_status)
+            if status == "processing" and loading_stage
+            else None
+        ),
+        "stageDetail": (
+            str(meta.get("loading_detail") or message)
+            if status == "processing"
+            else None
+        ),
+        "stageProgressCurrent": stage_progress_current,
+        "stageProgressTotal": stage_progress_total,
+        "stageProgressPercent": stage_progress_percent,
+    }
+
+
+_FEED_CATEGORY_ORDER = {
+    "models": 0,
+    "community": 1,
+    "company": 2,
+    "company_kr": 3,
+    "company_cn": 4,
+    "papers": 5,
+    "benchmark": 6,
+}
+
+
+def build_dashboard_feed_collections(
+    documents_by_id: dict[str, dict[str, Any]],
+    feed_lists: dict[str, list[str]],
+) -> tuple[
+    list[tuple[str, list[dict[str, Any]]]],
+    dict[str, list[dict[str, Any]]],
+    Counter[str],
+    Counter[str],
+]:
+    category_documents: dict[str, list[dict[str, Any]]] = {
+        category: [] for category in ORDERED_SOURCE_CATEGORIES
+    }
+    feed_panel_counts: Counter[str] = Counter()
+    feed_document_counts: Counter[str] = Counter()
+
+    def _feed_sort_key(item: tuple[str, list[str]]) -> tuple[int, str]:
+        source = item[0]
+        doc_ids = item[1]
+        first_doc = documents_by_id.get(doc_ids[0]) if doc_ids else None
+        cat = str((first_doc or {}).get("source_category") or "community")
+        return (_FEED_CATEGORY_ORDER.get(cat, 99), source)
+
+    ordered_feeds: list[tuple[str, list[dict[str, Any]]]] = []
+    for source, document_ids in sorted(feed_lists.items(), key=_feed_sort_key):
+        documents = build_visible_feed_documents(
+            (
+                document
+                for document_id in document_ids
+                if (document := documents_by_id.get(document_id)) is not None
+            ),
+            source=source,
+        )
+        if not documents:
+            continue
+        top_document = documents[0]
+        category = str(top_document.get("source_category") or "community")
+        if category == "benchmark":
+            continue
+        category_documents.setdefault(category, []).extend(documents)
+        feed_panel_counts[category] += 1
+        feed_document_counts[category] += len(documents)
+        ordered_feeds.append((source, documents))
+
+    return ordered_feeds, category_documents, feed_panel_counts, feed_document_counts
+
+
+def rebuild_session_category_digests(
+    store: RedisLike,
+    session_id: str,
+    documents_by_id: dict[str, dict[str, Any]],
+    feed_lists: dict[str, list[str]],
+) -> dict[str, dict[str, Any]]:
+    _ordered_feeds, category_documents, _panel_counts, _document_counts = (
+        build_dashboard_feed_collections(documents_by_id, feed_lists)
+    )
+    digests_by_category: dict[str, dict[str, Any]] = {}
+    for category in ORDERED_SOURCE_CATEGORIES:
+        documents = sort_documents(category_documents.get(category, []))
+        digest = build_digest_from_documents(category, documents)
+        digests_by_category[category] = digest
+        set_json_with_ttl(store, digest_key(session_id, category), digest)
+    return digests_by_category
 
 
 def build_dashboard_payload(
@@ -2719,45 +2964,14 @@ def build_dashboard_payload(
         entry["source"]: entry for entry in source_manifest if entry.get("source")
     }
 
-    _FEED_CATEGORY_ORDER = {
-        "models": 0,
-        "community": 1,
-        "company": 2,
-        "company_kr": 3,
-        "company_cn": 4,
-        "papers": 5,
-        "benchmark": 6,
-    }
-
     feeds: list[dict[str, Any]] = []
-    category_documents: dict[str, list[dict[str, Any]]] = {
-        category: [] for category in ORDERED_SOURCE_CATEGORIES
-    }
+    ordered_feeds, category_documents, feed_panel_counts, feed_document_counts = (
+        build_dashboard_feed_collections(documents_by_id, feed_lists)
+    )
 
-    def _feed_sort_key(item: tuple[str, list[str]]) -> tuple[int, str]:
-        source = item[0]
-        doc_ids = item[1]
-        first_doc = documents_by_id.get(doc_ids[0]) if doc_ids else None
-        cat = str((first_doc or {}).get("source_category") or "community")
-        return (_FEED_CATEGORY_ORDER.get(cat, 99), source)
-
-    for source, document_ids in sorted(feed_lists.items(), key=_feed_sort_key):
-        documents = sort_documents_for_feed(
-            (
-                document
-                for document_id in document_ids
-                if (document := documents_by_id.get(document_id)) is not None
-                and not _is_generic_title(document.get("title"))
-            ),
-            source=source,
-        )
-        if not documents:
-            continue
+    for source, documents in ordered_feeds:
         top_document = documents[0]
         category = str(top_document.get("source_category") or "community")
-        if category == "benchmark":
-            continue
-        category_documents.setdefault(category, []).extend(documents)
         manifest_entry = source_manifest_lookup.get(source, {})
         panel_summary = build_feed_panel_summary(category, source, documents)
         feeds.append(
@@ -2801,6 +3015,13 @@ def build_dashboard_payload(
         hottest_category,
         sort_documents(category_documents.get(hottest_category, [])),
     )
+    paper_documents = sort_documents(category_documents.get("papers", []))
+    summary_llm = build_summary_llm_state(meta, briefing, paper_documents)
+    paper_domain_overview = (
+        build_paper_domain_overview(paper_documents)
+        if summary_llm.get("enabled")
+        else []
+    )
 
     return {
         "brand": {
@@ -2816,6 +3037,16 @@ def build_dashboard_payload(
             "headline": f"{hottest_digest['domain']} / {hottest_digest['headline']}",
             "briefing": briefing if briefing and not briefing.get("error") else None,
             "briefing_status": _resolve_briefing_status(meta, briefing),
+            "llm": summary_llm,
+            "paperDomains": paper_domain_overview,
+            "sourceCounts": (
+                build_source_count_overview(
+                    feed_panel_counts,
+                    feed_document_counts,
+                )
+                if not summary_llm.get("enabled")
+                else []
+            ),
             "digests": digests,
         },
         "feeds": feeds,
@@ -2860,7 +3091,38 @@ def needs_dashboard_rebuild(
         return True
     if not isinstance(meta, dict):
         return False
-    return int(meta.get("schema_version") or 0) != SCHEMA_VERSION
+    if int(meta.get("schema_version") or 0) != SCHEMA_VERSION:
+        return True
+
+    dashboard_status = str(dashboard.get("status") or "")
+    meta_status = str(meta.get("status") or "published")
+    if dashboard_status != meta_status:
+        return True
+
+    session_block = dashboard.get("session") if isinstance(dashboard, dict) else None
+    session_block = session_block if isinstance(session_block, dict) else {}
+    loading_block = session_block.get("loading")
+    loading_block = loading_block if isinstance(loading_block, dict) else {}
+    summary_block = dashboard.get("summary") if isinstance(dashboard, dict) else None
+    summary_block = summary_block if isinstance(summary_block, dict) else {}
+    llm_block = summary_block.get("llm")
+    llm_block = llm_block if isinstance(llm_block, dict) else {}
+
+    expected_stage = str(meta.get("loading_stage") or meta_status)
+    expected_detail = str(
+        meta.get("loading_detail") or f"Current relay state is {meta_status}."
+    )
+    expected_current = int(meta.get("loading_progress_current") or 0)
+    expected_total = int(meta.get("loading_progress_total") or 0)
+    expected_llm_enabled = _briefing_provider_enabled()
+
+    return (
+        str(loading_block.get("stage") or "") != expected_stage
+        or str(loading_block.get("detail") or "") != expected_detail
+        or int(loading_block.get("progressCurrent") or 0) != expected_current
+        or int(loading_block.get("progressTotal") or 0) != expected_total
+        or bool(llm_block.get("enabled")) != expected_llm_enabled
+    )
 
 
 def rebuild_dashboard(store: RedisLike, session_id: str) -> dict[str, Any]:
@@ -2878,7 +3140,12 @@ def rebuild_dashboard(store: RedisLike, session_id: str) -> dict[str, Any]:
     ]
     feed_lists = get_feed_lists(store, session_id, source_ids)
     documents_by_id = get_documents_by_id(store, session_id, feed_lists)
-    digests_by_category = get_digest_map(store, session_id)
+    digests_by_category = rebuild_session_category_digests(
+        store,
+        session_id,
+        documents_by_id,
+        feed_lists,
+    )
     dashboard = build_dashboard_payload(
         session_id=session_id,
         meta=meta,
@@ -2974,6 +3241,7 @@ def begin_session_reload(
     store: RedisLike,
     *,
     run_label: str = DEFAULT_RUN_LABEL,
+    job_id: str | None = None,
 ) -> dict[str, Any]:
     global _SESSION_RELOAD_RUNNING
     with _SESSION_RELOAD_LOCK:
@@ -2985,7 +3253,8 @@ def begin_session_reload(
         _SESSION_RELOAD_RUNNING = True
         state = build_session_reload_state(
             status="collecting",
-                run_label=run_label,
+            run_label=run_label,
+            job_id=job_id,
         )
     set_reload_state(store, state)
     return state
@@ -3001,6 +3270,7 @@ def build_session_reload_state(
     progress_total: int = 0,
     current_source: str | None = None,
     session_id: str | None = None,
+    job_id: str | None = None,
     error: str | None = None,
 ) -> dict[str, Any]:
     return {
@@ -3017,6 +3287,7 @@ def build_session_reload_state(
         "progress_total": progress_total,
         "current_source": current_source,
         "session_id": session_id,
+        "job_id": job_id,
         "started_at": now_utc_iso(),
         "updated_at": now_utc_iso(),
         "error": compact_text(error, 180) or None,
@@ -3034,6 +3305,7 @@ def update_session_reload_state(
     progress_total: int,
     current_source: str | None = None,
     session_id: str | None = None,
+    job_id: str | None = None,
     error: str | None = None,
 ) -> None:
     existing = get_reload_state(store) or {}
@@ -3046,6 +3318,7 @@ def update_session_reload_state(
         progress_total=progress_total,
         current_source=current_source,
         session_id=session_id or existing.get("session_id"),
+        job_id=job_id or existing.get("job_id"),
         error=error,
     )
     payload["started_at"] = existing.get("started_at") or payload["started_at"]
@@ -3088,6 +3361,12 @@ def build_session_reload_response(state: dict[str, Any] | None) -> dict[str, Any
         "session_id": state.get("session_id"),
         "loading": loading,
         "error": state.get("error"),
+        "job_id": state.get("job_id"),
+        "poll_path": (
+            build_poll_path(str(state.get("job_id")))
+            if state.get("job_id")
+            else None
+        ),
     }
 
 
@@ -3125,17 +3404,40 @@ def select_summary_candidate_ids(
     }
 
 
-def ensure_llm_status(
+def reset_document_llm_state(
     document: dict[str, Any], candidate_ids: set[str]
 ) -> dict[str, Any]:
     normalized = deepcopy(document)
-    llm = default_llm_state()
-    llm.update(normalized.get("llm") or {})
-    llm["status"] = (
-        "pending" if normalized["document_id"] in candidate_ids else "not_selected"
-    )
-    normalized["llm"] = llm
+    normalized["llm"] = {
+        **default_llm_state(),
+        "status": (
+            "pending"
+            if normalized["document_id"] in candidate_ids
+            else "not_selected"
+        ),
+    }
     return normalized
+
+
+def ensure_llm_status(
+    document: dict[str, Any], candidate_ids: set[str]
+) -> dict[str, Any]:
+    return reset_document_llm_state(document, candidate_ids)
+
+
+def reset_session_llm_outputs(
+    store: RedisLike,
+    session_id: str,
+    documents_by_id: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    candidate_ids = select_summary_candidate_ids(list(documents_by_id.values()))
+    refreshed_documents: dict[str, dict[str, Any]] = {}
+    for document_id, document in documents_by_id.items():
+        refreshed = reset_document_llm_state(document, candidate_ids)
+        refreshed_documents[document_id] = refreshed
+        set_json_with_ttl(store, doc_key(session_id, document_id), refreshed)
+    store.delete(session_key(session_id, "briefing"))
+    return refreshed_documents
 
 
 def publish_run(
@@ -3153,11 +3455,6 @@ def publish_run(
     artifacts = load_run_artifacts(run_dir)
     session_id = str(artifacts.run_manifest["run_id"])
 
-    company_lookup: dict[str, dict[str, Any]] = {
-        row["document_id"]: row
-        for row in artifacts.company_decisions
-        if row.get("document_id")
-    }
     paper_lookup: dict[str, str] = {
         row["document_id"]: row.get("paper_domain", "others")
         for row in artifacts.paper_domains
@@ -3166,13 +3463,6 @@ def publish_run(
     for document in artifacts.documents:
         doc_id = document.get("document_id", "")
         labels: dict[str, Any] = {}
-        if doc_id in company_lookup:
-            cd = company_lookup[doc_id]
-            labels["company"] = {
-                "decision": cd.get("decision"),
-                "company_domain": cd.get("company_domain"),
-                "reason_code": cd.get("reason_code"),
-            }
         if doc_id in paper_lookup:
             labels["paper_domain"] = paper_lookup[doc_id]
         if labels:
@@ -3205,6 +3495,9 @@ def publish_run(
         "digests_ready": False,
         "summaries_ready": 0,
         "summary_candidates": len(candidate_ids),
+        "llm_refresh_required": True,
+        "llm_refresh_requested_at": now_utc_iso(),
+        "llm_refresh_completed_at": None,
         "source_ids": source_ids,
         "loading_stage": "publishing_documents",
         "loading_detail": "Pushing displayable documents into cache keys.",
@@ -3352,6 +3645,11 @@ def dequeue_session_for_enrichment(store: RedisLike) -> str | None:
 
 
 LLM_ENRICH_DIR = ROOT_DIR / "pipelines" / "llm_enrich" / "scripts"
+_LLM_CHUNK_START_RE = re.compile(
+    r"Classifying chunk\s+(\d+)/(\d+)\s+\((\d+)\s+(?:papers|docs)\)\.\.\.",
+    re.I,
+)
+_LLM_CHUNK_DONE_RE = re.compile(r"done in\s+([0-9.]+)s", re.I)
 
 
 def _ollama_reachable() -> bool:
@@ -3365,7 +3663,26 @@ def _ollama_reachable() -> bool:
         return False
 
 
-def _run_llm_enrich_script(script_name: str, run_dir: Path) -> bool:
+def _format_eta_hint(seconds: float | None) -> str | None:
+    if seconds is None or seconds <= 0:
+        return None
+    rounded = int(round(seconds))
+    minutes, secs = divmod(rounded, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours > 0:
+        return f"about {hours}h {minutes}m left"
+    if minutes > 0:
+        return f"about {minutes}m {secs}s left"
+    return f"about {secs}s left"
+
+
+def _run_llm_enrich_script(
+    script_name: str,
+    run_dir: Path,
+    *,
+    phase_label: str,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> bool:
     """Run an offline LLM enrichment script against a run directory.
 
     Returns True on success, False on any failure (non-blocking).
@@ -3374,20 +3691,138 @@ def _run_llm_enrich_script(script_name: str, run_dir: Path) -> bool:
     if not script_path.exists():
         return False
     try:
-        result = subprocess.run(
-            [sys.executable, str(script_path), "--run-dir", str(run_dir)],
-            capture_output=True,
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "phase": phase_label,
+                    "detail": f"{phase_label} is starting.",
+                    "progress_current": 0,
+                    "progress_total": 0,
+                    "progress_percent": None,
+                    "eta_seconds": None,
+                }
+            )
+
+        command = [sys.executable, str(script_path), "--run-dir", str(run_dir)]
+        if script_name == "paper_enrich.py":
+            command.extend(
+                [
+                    "--chunk-size",
+                    str(LLM_PAPER_CHUNK_SIZE),
+                    "--keep-alive",
+                    OLLAMA_KEEP_ALIVE,
+                ]
+            )
+
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=600,
+            bufsize=1,
         )
-        if result.returncode != 0:
+        assert process.stdout is not None
+
+        active_chunk = 0
+        total_chunks = 0
+        completed_chunks = 0
+        chunk_durations: list[float] = []
+        output_lines: list[str] = []
+
+        for raw_line in process.stdout:
+            line = raw_line.strip()
+            if not line:
+                continue
+            output_lines.append(line)
+
+            start_match = _LLM_CHUNK_START_RE.search(line)
+            if start_match:
+                active_chunk = int(start_match.group(1))
+                total_chunks = int(start_match.group(2))
+                average_chunk_seconds = (
+                    sum(chunk_durations) / len(chunk_durations)
+                    if chunk_durations
+                    else None
+                )
+                eta_seconds = (
+                    average_chunk_seconds * max(total_chunks - completed_chunks, 0)
+                    if average_chunk_seconds is not None
+                    else None
+                )
+                if progress_callback is not None:
+                    detail = (
+                        f"{phase_label} batch {active_chunk}/{total_chunks} in progress."
+                    )
+                    eta_hint = _format_eta_hint(eta_seconds)
+                    if eta_hint:
+                        detail = f"{detail} {eta_hint}."
+                    progress_callback(
+                        {
+                            "phase": phase_label,
+                            "detail": detail,
+                            "progress_current": completed_chunks,
+                            "progress_total": total_chunks,
+                            "progress_percent": int(
+                                round((completed_chunks / total_chunks) * 100)
+                            )
+                            if total_chunks > 0
+                            else None,
+                            "eta_seconds": eta_seconds,
+                        }
+                    )
+                continue
+
+            done_match = _LLM_CHUNK_DONE_RE.search(line)
+            if done_match and total_chunks > 0:
+                chunk_durations.append(float(done_match.group(1)))
+                completed_chunks = min(max(active_chunk, completed_chunks), total_chunks)
+                average_chunk_seconds = sum(chunk_durations) / len(chunk_durations)
+                eta_seconds = average_chunk_seconds * max(
+                    total_chunks - completed_chunks,
+                    0,
+                )
+                if progress_callback is not None:
+                    detail = (
+                        f"{phase_label} batch {completed_chunks}/{total_chunks} completed."
+                    )
+                    eta_hint = _format_eta_hint(eta_seconds)
+                    if eta_hint:
+                        detail = f"{detail} {eta_hint}."
+                    progress_callback(
+                        {
+                            "phase": phase_label,
+                            "detail": detail,
+                            "progress_current": completed_chunks,
+                            "progress_total": total_chunks,
+                            "progress_percent": int(
+                                round((completed_chunks / total_chunks) * 100)
+                            )
+                            if total_chunks > 0
+                            else None,
+                            "eta_seconds": eta_seconds,
+                        }
+                    )
+
+        returncode = process.wait(timeout=600)
+        if returncode != 0:
             logger.warning(
                 "LLM enrich %s failed (exit %d): %s",
                 script_name,
-                result.returncode,
-                result.stderr[:500],
+                returncode,
+                "\n".join(output_lines)[-500:],
             )
             return False
+        if progress_callback is not None and total_chunks > 0:
+            progress_callback(
+                {
+                    "phase": phase_label,
+                    "detail": f"{phase_label} completed.",
+                    "progress_current": total_chunks,
+                    "progress_total": total_chunks,
+                    "progress_percent": 100,
+                    "eta_seconds": 0,
+                }
+            )
         return True
     except Exception as exc:
         logger.warning("LLM enrich %s error: %s", script_name, exc)
@@ -3398,30 +3833,31 @@ def run_offline_llm_enrichment(
     store: RedisLike,
     session_id: str,
     run_dir: Path,
+    *,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> bool:
-    """Run company filter + paper domain classifier, then re-merge labels
-    into Redis documents. Returns True if any labels were produced."""
-    if not _ollama_reachable():
+    """Run the paper domain classifier and re-merge labels into Redis documents."""
+    if not _briefing_provider_enabled():
+        return False
+    if not _ollama_reachable() or not _ollama_model_ready():
         return False
 
     logger.info("Running offline LLM enrichment for session %s", session_id)
-    company_ok = _run_llm_enrich_script("llm_enrich.py", run_dir)
-    paper_ok = _run_llm_enrich_script("paper_enrich.py", run_dir)
-    if not company_ok and not paper_ok:
+    paper_ok = _run_llm_enrich_script(
+        "paper_enrich.py",
+        run_dir,
+        phase_label="Paper grouping",
+        progress_callback=progress_callback,
+    )
+    if not paper_ok:
         return False
 
     # Re-read labels and merge into Redis documents
     labels_dir = run_dir / "labels"
-    company_decisions = read_ndjson(labels_dir / "company_decisions.ndjson")
     paper_domains = read_ndjson(labels_dir / "paper_domains.ndjson")
-    if not company_decisions and not paper_domains:
+    if not paper_domains:
         return False
 
-    company_lookup: dict[str, dict[str, Any]] = {
-        row["document_id"]: row
-        for row in company_decisions
-        if row.get("document_id")
-    }
     paper_lookup: dict[str, str] = {
         row["document_id"]: row.get("paper_domain", "others")
         for row in paper_domains
@@ -3440,14 +3876,6 @@ def run_offline_llm_enrichment(
                 continue
             labels: dict[str, Any] = doc.get("labels") or {}
             changed = False
-            if doc_id in company_lookup:
-                cd = company_lookup[doc_id]
-                labels["company"] = {
-                    "decision": cd.get("decision"),
-                    "company_domain": cd.get("company_domain"),
-                    "reason_code": cd.get("reason_code"),
-                }
-                changed = True
             if doc_id in paper_lookup:
                 labels["paper_domain"] = paper_lookup[doc_id]
                 changed = True
@@ -3457,8 +3885,7 @@ def run_offline_llm_enrichment(
                 updated += 1
 
     logger.info(
-        "LLM enrichment merged: %d company, %d paper, %d docs updated",
-        len(company_decisions),
+        "LLM enrichment merged: %d paper, %d docs updated",
         len(paper_domains),
         updated,
     )
@@ -3472,6 +3899,7 @@ def run_session_enrichment(
     generator: SummaryGenerator | None = None,
     briefing_generator: BriefingGenerator | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
     def emit_progress(**payload: Any) -> None:
         if progress_callback is None:
@@ -3480,8 +3908,6 @@ def run_session_enrichment(
 
     generator = generator or build_summary_generator()
     owns_briefing_generator = briefing_generator is None
-    if briefing_generator is None:
-        briefing_generator = build_briefing_generator()
     meta = get_json(store, session_key(session_id, "meta"))
     run_manifest = get_json(store, session_key(session_id, "run_manifest"))
     source_manifest = get_json(store, session_key(session_id, "source_manifest")) or []
@@ -3493,6 +3919,12 @@ def run_session_enrichment(
     ]
     feed_lists = get_feed_lists(store, session_id, source_ids)
     documents_by_id = get_documents_by_id(store, session_id, feed_lists)
+    force_refresh = force_refresh or bool(meta.get("llm_refresh_required"))
+    if force_refresh:
+        meta["llm_refresh_required"] = True
+        meta["llm_refresh_requested_at"] = now_utc_iso()
+        meta["llm_refresh_completed_at"] = None
+        documents_by_id = reset_session_llm_outputs(store, session_id, documents_by_id)
     pending_document_ids = [
         document_id
         for source in source_ids
@@ -3632,15 +4064,83 @@ def run_session_enrichment(
         )
 
     # --- offline LLM enrichment (company filter + paper domain) ---
+    llm_model_available = True
+    if _briefing_provider_enabled():
+        meta["loading_stage"] = "offline_labeling"
+        meta["loading_detail"] = "Waiting for the local LLM model to finish loading."
+        meta["loading_progress_current"] = 0
+        meta["loading_progress_total"] = 1
+        meta["loading_current_source"] = None
+        meta["updated_at"] = now_utc_iso()
+        set_json_with_ttl(store, session_key(session_id, "meta"), meta)
+        emit_progress(
+            status="summarizing",
+            stage="offline_labeling",
+            detail=meta["loading_detail"],
+            progress_current=0,
+            progress_total=1,
+            current_source=None,
+            session_id=session_id,
+        )
+        llm_model_available = _wait_for_ollama_model_ready()
+
+    def handle_offline_labeling_progress(event: dict[str, Any]) -> None:
+        progress_total = int(event.get("progress_total") or 0)
+        progress_current = int(event.get("progress_current") or 0)
+        meta["loading_stage"] = "offline_labeling"
+        meta["loading_detail"] = str(
+            event.get("detail")
+            or meta.get("loading_detail")
+            or "Applying LLM filters."
+        )
+        meta["loading_progress_current"] = progress_current
+        meta["loading_progress_total"] = progress_total if progress_total > 0 else 1
+        meta["loading_current_source"] = str(event.get("phase") or "") or None
+        meta["updated_at"] = now_utc_iso()
+        set_json_with_ttl(store, session_key(session_id, "meta"), meta)
+        emit_progress(
+            status="summarizing",
+            stage="offline_labeling",
+            detail=meta["loading_detail"],
+            progress_current=meta["loading_progress_current"],
+            progress_total=meta["loading_progress_total"],
+            current_source=meta["loading_current_source"],
+            session_id=session_id,
+        )
+
     run_dir_str = get_json(store, artifact_root_key(session_id))
-    if run_dir_str:
-        enriched = run_offline_llm_enrichment(store, session_id, Path(run_dir_str))
+    if llm_model_available and run_dir_str:
+        enriched = run_offline_llm_enrichment(
+            store,
+            session_id,
+            Path(run_dir_str),
+            progress_callback=handle_offline_labeling_progress,
+        )
         if enriched:
             # Reload documents after label merge so briefing sees domains
             documents_by_id = get_documents_by_id(store, session_id, feed_lists)
+            digests_by_category = rebuild_session_category_digests(
+                store,
+                session_id,
+                documents_by_id,
+                feed_lists,
+            )
 
     briefing: dict[str, Any] | None = None
-    if briefing_generator is not None:
+    if not llm_model_available and _briefing_provider_enabled():
+        briefing = {
+            "body_en": None,
+            "category_summaries": {},
+            "error": f"Local model {OLLAMA_MODEL} is not ready yet.",
+            "run_meta": {
+                "model_name": OLLAMA_MODEL,
+                "prompt_version": None,
+                "generated_at": now_utc_iso(),
+            },
+        }
+    if briefing_generator is None and llm_model_available and _briefing_provider_enabled():
+        briefing_generator = build_briefing_generator()
+    if briefing_generator is not None and briefing is None:
         meta["loading_stage"] = "generating_briefing"
         meta["loading_detail"] = "Aggregating collection results to generate the daily briefing."
         meta["loading_progress_current"] = 0
@@ -3690,6 +4190,8 @@ def run_session_enrichment(
 
     meta["digests_ready"] = True
     meta["summaries_ready"] = summaries_ready
+    meta["llm_refresh_required"] = False
+    meta["llm_refresh_completed_at"] = now_utc_iso()
     meta["updated_at"] = now_utc_iso()
     meta["status"] = "partial_error" if summary_errors else "ready"
     meta["loading_stage"] = meta["status"]
@@ -3883,13 +4385,12 @@ def run_homepage_bootstrap(
             timeout=timeout,
             progress_callback=handle_collect_progress,
         )
-        result = publish_run(
+        publish_run(
             store,
             run_dir,
-            queue=False,
+            queue=True,
             progress_callback=handle_publish_progress,
         )
-        run_session_enrichment(store, result["session_id"], progress_callback=handle_flat_progress)
         tracker.handle_event({"type": "terminal", "status": "ready"})
         store.delete(BOOTSTRAP_STATE_KEY)
     except Exception as exc:
@@ -3928,9 +4429,18 @@ def run_session_reload(
     output_dir: str | Path | None = None,
     run_label: str = DEFAULT_RUN_LABEL,
     timeout: float = 30.0,
+    job_id: str | None = None,
 ) -> None:
+    resolved_job_id = job_id or str(uuid.uuid4())
+    tracker = get_or_create_job_tracker(
+        store,
+        job_id=resolved_job_id,
+        surface="dashboard",
+        job_type="session_loading",
+    )
     try:
         def handle_collect_progress(event: dict[str, Any]) -> None:
+            tracker.handle_event(event)
             update_session_reload_state(
                 store,
                 status="collecting",
@@ -3952,33 +4462,27 @@ def run_session_reload(
                     if event.get("run_id")
                     else None
                 ),
+                job_id=resolved_job_id,
             )
 
-        def handle_enrichment_progress(event: dict[str, Any]) -> None:
-            update_session_reload_state(
-                store,
-                status=str(event.get("status") or "summarizing"),
-                run_label=run_label,
-                stage=str(event.get("stage") or "summarizing_documents"),
-                detail=str(
-                    event.get("detail")
-                    or "Updating summaries and overviews."
-                ),
-                progress_current=int(event.get("progress_current") or 0),
-                progress_total=int(event.get("progress_total") or 0),
-                current_source=(
-                    str(event.get("current_source"))
-                    if event.get("current_source")
-                    else None
-                ),
-                session_id=(
-                    str(event.get("session_id"))
-                    if event.get("session_id")
-                    else None
-                ),
-            )
+        def handle_flat_progress(event: dict[str, Any]) -> None:
+            session_id = event.get("session_id")
+            if session_id:
+                tracker.handle_event({"type": "identity", "session_id": str(session_id)})
+            stage = str(event.get("stage") or "").strip()
+            if stage:
+                tracker.handle_event({
+                    "type": "stage",
+                    "stage": stage,
+                    "detail": event.get("detail"),
+                    "progress_current": event.get("progress_current"),
+                    "progress_total": event.get("progress_total"),
+                    "status": event.get("status"),
+                    "force": True,
+                })
 
         def handle_publish_progress(event: dict[str, Any]) -> None:
+            handle_flat_progress(event)
             update_session_reload_state(
                 store,
                 status=str(event.get("status") or "collecting"),
@@ -4000,11 +4504,12 @@ def run_session_reload(
                     if event.get("session_id")
                     else None
                 ),
+                job_id=resolved_job_id,
             )
 
         run_manifest, run_dir = collect_run(
             sources=sources,
-                limit=limit,
+            limit=limit,
             output_dir=output_dir,
             run_label=run_label,
             timeout=timeout,
@@ -4013,34 +4518,28 @@ def run_session_reload(
         result = publish_run(
             store,
             run_dir,
-            queue=False,
+            queue=True,
             progress_callback=handle_publish_progress,
         )
-        enrichment_result = run_session_enrichment(
-            store,
-            result["session_id"],
-            progress_callback=handle_enrichment_progress,
-        )
-        meta = enrichment_result["meta"]
         update_session_reload_state(
             store,
-            status=str(meta.get("status") or "ready"),
-                run_label=run_label,
-            stage=str(meta.get("loading_stage") or meta.get("status") or "ready"),
-            detail=str(
-                meta.get("loading_detail")
-                or "Probe cycle complete."
-            ),
-            progress_current=int(meta.get("loading_progress_current") or 0),
-            progress_total=int(meta.get("loading_progress_total") or 0),
-            current_source=(
-                str(meta.get("loading_current_source"))
-                if meta.get("loading_current_source")
-                else None
-            ),
+            status="published",
+            run_label=run_label,
+            stage="published",
+            detail="Original source curation is ready. LLM paper grouping and summary will continue in the background.",
+            progress_current=1,
+            progress_total=1,
+            current_source=None,
             session_id=result["session_id"],
+            job_id=resolved_job_id,
         )
+        tracker.handle_event({"type": "terminal", "status": "ready"})
     except Exception as exc:
+        tracker.handle_event({
+            "type": "terminal",
+            "status": "error",
+            "error": {"message": str(exc)},
+        })
         current_state = get_reload_state(store) or {}
         set_reload_state(
             store,
@@ -4061,6 +4560,11 @@ def run_session_reload(
                     if current_state.get("session_id")
                     else None
                 ),
+                job_id=(
+                    str(current_state.get("job_id"))
+                    if current_state.get("job_id")
+                    else resolved_job_id
+                ),
                 error=str(exc),
             ),
         )
@@ -4071,7 +4575,7 @@ def run_session_reload(
 def start_session_reload(
     store: RedisLike,
     *,
-    schedule_reload: Callable[[], None],
+    schedule_reload: Callable[[str], None],
     sources: list[str] | None = None,
     limit: int | None = None,
     output_dir: str | Path | None = None,
@@ -4082,12 +4586,14 @@ def start_session_reload(
     if current_state and is_session_reload_running():
         return build_session_reload_response(current_state)
 
+    resolved_job_id = str(uuid.uuid4())
     state = begin_session_reload(
         store,
         run_label=run_label,
+        job_id=resolved_job_id,
     )
     try:
-        schedule_reload()
+        schedule_reload(resolved_job_id)
     except Exception:
         reset_session_reload_state(store)
         raise

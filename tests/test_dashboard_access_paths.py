@@ -13,7 +13,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.app.core.store import MemoryStore
 from backend.app.main import create_app
-from backend.app.services.session_service import publish_run
+from backend.app.services.session_service import (
+    build_briefing_input,
+    build_visible_feed_documents,
+    get_documents_by_id,
+    get_json,
+    get_feed_lists,
+    publish_run,
+    rebuild_dashboard,
+    rebuild_session_category_digests,
+    session_key,
+)
 
 
 RUN_FIXTURE_DIR = (
@@ -47,6 +57,10 @@ def test_all_dashboard_feed_items_and_digests_resolve() -> None:
 
     dashboard = dashboard_response.json()
     assert dashboard.get("summary", {}).get("title") == "Today in AI"
+    assert dashboard.get("summary", {}).get("llm", {}).get("status") == "disabled"
+    assert dashboard.get("summary", {}).get("llm", {}).get("enabled") is False
+    assert dashboard.get("summary", {}).get("paperDomains") == []
+    assert isinstance(dashboard.get("summary", {}).get("sourceCounts"), list)
     failures: list[str] = []
 
     for feed in dashboard.get("feeds", []):
@@ -139,3 +153,107 @@ def test_community_feeds_expose_and_sort_by_feed_score() -> None:
             feed.get("id"),
             scores,
         )
+
+
+def test_company_feed_display_ignores_company_labels_and_keeps_all_items() -> None:
+    documents = [
+        {
+            "document_id": "drop-doc",
+            "source": "company_feed",
+            "source_category": "company",
+            "title": "Recruiting Update",
+            "sort_at": "2026-03-26T08:00:00Z",
+            "ranking": {"feed_score": 90},
+            "labels": {"company": {"decision": "drop"}},
+        },
+        {
+            "document_id": "keep-doc",
+            "source": "company_feed",
+            "source_category": "company",
+            "title": "New model release",
+            "sort_at": "2026-03-26T07:00:00Z",
+            "ranking": {"feed_score": 80},
+            "labels": {"company": {"decision": "keep"}},
+        },
+        {
+            "document_id": "unlabeled-doc",
+            "source": "company_feed",
+            "source_category": "company",
+            "title": "API update",
+            "sort_at": "2026-03-26T09:00:00Z",
+            "ranking": {"feed_score": 100},
+            "labels": {},
+        },
+    ]
+
+    visible = build_visible_feed_documents(documents, source="company_feed")
+
+    assert [document["document_id"] for document in visible] == [
+        "unlabeled-doc",
+        "drop-doc",
+        "keep-doc",
+    ]
+
+
+def test_briefing_input_skips_company_filtering_outputs() -> None:
+    documents_by_id = {
+        "paper-doc": {
+            "document_id": "paper-doc",
+            "source": "arxiv_rss_cs_ai",
+            "source_category": "papers",
+            "title": "Paper title",
+            "published_at": "2026-03-26T08:00:00Z",
+            "sort_at": "2026-03-26T08:00:00Z",
+            "labels": {"paper_domain": "agents"},
+        },
+        "company-doc": {
+            "document_id": "company-doc",
+            "source": "deepmind_blog",
+            "source_category": "company",
+            "title": "Company title",
+            "published_at": "2026-03-26T08:00:00Z",
+            "sort_at": "2026-03-26T08:00:00Z",
+            "labels": {
+                "company": {
+                    "decision": "keep",
+                    "company_domain": "technical_research",
+                }
+            },
+        },
+    }
+    feed_lists = {
+        "arxiv_rss_cs_ai": ["paper-doc"],
+        "deepmind_blog": ["company-doc"],
+    }
+
+    briefing_input = build_briefing_input(documents_by_id, feed_lists)
+
+    assert briefing_input["company"] == []
+    assert briefing_input["session"]["category_counts"]["company"] == 0
+    assert briefing_input["session"]["dominant_company_domains"] == []
+    assert briefing_input["session"]["company_issue_domains"] == []
+    assert briefing_input["session"]["company_filtering_enabled"] is False
+
+
+def test_rebuilt_category_digests_reflect_labeled_paper_domains() -> None:
+    store = MemoryStore()
+    publish_run(store, RUN_FIXTURE_DIR, queue=False)
+    session_id = RUN_FIXTURE_DIR.name
+    meta = get_json(store, session_key(session_id, "meta"))
+    assert isinstance(meta, dict)
+
+    feed_lists = get_feed_lists(store, session_id, meta.get("source_ids") or [])
+    documents_by_id = get_documents_by_id(store, session_id, feed_lists)
+    digests = rebuild_session_category_digests(store, session_id, documents_by_id, feed_lists)
+
+    paper_digest = digests["papers"]
+    assert paper_digest["headline"].startswith("Today's Papers: ")
+    assert paper_digest["headline"] != "Today's Papers: Not grouped by domain yet"
+
+    dashboard = rebuild_dashboard(store, session_id)
+    dashboard_paper_digest = next(
+        digest
+        for digest in dashboard.get("summary", {}).get("digests", [])
+        if digest.get("id") == "papers"
+    )
+    assert dashboard_paper_digest["headline"] == paper_digest["headline"]

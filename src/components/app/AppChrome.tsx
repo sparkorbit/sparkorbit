@@ -35,14 +35,19 @@ export function ConsoleHeader({
                 {subtitle}
               </span>
               {repoUrl ? (
-                <a
-                  href={repoUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="hidden items-center gap-1 border border-orbit-accent/40 px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-accent transition-colors duration-150 hover:border-orbit-accent hover:bg-orbit-accent/10 sm:inline-flex"
-                >
-                  open source
-                </a>
+                <div className="hidden items-center gap-2 sm:flex">
+                  <a
+                    href={repoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 border border-orbit-accent/40 px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-accent transition-colors duration-150 hover:border-orbit-accent hover:bg-orbit-accent/10"
+                  >
+                    open source
+                  </a>
+                  <span className="font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                    join us
+                  </span>
+                </div>
               ) : null}
             </div>
           </div>
@@ -64,12 +69,14 @@ export function ConsoleHeader({
 
 export function SettingsModal({
   isOpen,
-  briefingStatus,
+  llmStatus,
+  llmModelName,
   onClose,
   onRestoreDefaults,
 }: {
   isOpen: boolean;
-  briefingStatus?: string | null;
+  llmStatus?: string | null;
+  llmModelName?: string | null;
   onClose: () => void;
   onRestoreDefaults: () => void;
 }) {
@@ -157,47 +164,54 @@ export function SettingsModal({
                   <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
                     Status
                   </p>
-                  <span
-                    className={[
-                      "inline-flex border px-2 py-0.5 font-mono text-[0.56rem] uppercase tracking-[0.14em]",
-                      briefingStatus === "ready"
-                        ? "border-orbit-accent bg-orbit-panel text-orbit-accent"
-                        : briefingStatus === "processing"
-                          ? "border-orbit-accent/40 bg-orbit-panel text-orbit-accent-dim"
-                          : briefingStatus === "error"
-                            ? "border-red-600/40 bg-orbit-panel text-red-400"
-                            : "border-orbit-border bg-orbit-bg-elevated text-orbit-muted",
-                    ].join(" ")}
-                  >
-                    {briefingStatus === "ready"
+                  <div className="flex items-center gap-2">
+                    {llmModelName ? (
+                      <span className="inline-flex border border-orbit-border bg-orbit-bg-elevated px-2 py-0.5 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-orbit-muted">
+                        {llmModelName}
+                      </span>
+                    ) : null}
+                    <span
+                      className={[
+                        "inline-flex border px-2 py-0.5 font-mono text-[0.56rem] uppercase tracking-[0.14em]",
+                        llmStatus === "ready"
+                          ? "border-orbit-accent bg-orbit-panel text-orbit-accent"
+                          : llmStatus === "processing"
+                            ? "border-orbit-accent/40 bg-orbit-panel text-orbit-accent-dim"
+                            : llmStatus === "error"
+                              ? "border-red-600/40 bg-orbit-panel text-red-400"
+                              : "border-orbit-border bg-orbit-bg-elevated text-orbit-muted",
+                      ].join(" ")}
+                    >
+                      {llmStatus === "ready"
                       ? "active"
-                      : briefingStatus === "processing"
+                      : llmStatus === "processing"
                         ? "processing"
-                        : briefingStatus === "error"
+                        : llmStatus === "error"
                           ? "error"
                           : "off"}
-                  </span>
+                    </span>
+                  </div>
                 </div>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  {briefingStatus === "ready"
-                    ? "Ollama is connected and generating AI briefings for each session."
-                    : briefingStatus === "processing"
-                      ? "LLM briefing is being generated. This may take a moment."
-                      : briefingStatus === "error"
-                        ? "Briefing generation failed. Verify Ollama is running and the model is pulled."
-                        : "LLM is not enabled. Category digests use source metadata only."}
+                  {llmStatus === "ready"
+                    ? "Local LLM summary and paper grouping are active for this session."
+                    : llmStatus === "processing"
+                      ? "The local LLM is still preparing the summary and paper grouping. Original source curation stays visible until it finishes."
+                      : llmStatus === "error"
+                        ? "The local LLM did not finish cleanly. Check Ollama and confirm the model download completed."
+                        : "Local LLM is off. The monitor is using original source data only."}
                 </p>
-                {briefingStatus === "disabled" || !briefingStatus ? (
+                {llmStatus === "disabled" || !llmStatus ? (
                   <div className="mt-3 border border-orbit-border bg-orbit-bg-elevated px-3 py-2">
                     <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
                       to enable
                     </p>
                     <p className="mt-1 font-mono text-[0.64rem] leading-[1.6] text-orbit-text">
-                      SPARKORBIT_BRIEFING_PROVIDER=ollama
+                      npm run docker:up:llm
                     </p>
                     <p className="mt-1 text-[0.68rem] leading-[1.6] text-orbit-muted">
-                      Set this environment variable before starting the backend.
-                      Requires Ollama running locally with a pulled model.
+                      Start the stack with the local LLM bundle so Ollama, paper grouping,
+                      and briefing generation run together.
                     </p>
                   </div>
                 ) : null}
@@ -239,11 +253,13 @@ export function SettingsModal({
 
 export function GitHubStarPrompt({
   isOpen,
+  signalLevel,
   onAccept,
   onLater,
   onDismissForever,
 }: {
   isOpen: boolean;
+  signalLevel: number;
   onAccept: () => void;
   onLater: () => void;
   onDismissForever: () => void;
@@ -268,7 +284,7 @@ export function GitHubStarPrompt({
           <div className="border-b border-orbit-border-strong bg-orbit-bg px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex border border-orbit-accent/50 bg-orbit-panel px-2 py-0.5 font-mono text-[0.54rem] uppercase tracking-[0.16em] text-orbit-accent">
-                1m online
+                3m online
               </span>
               <span className="font-mono text-[0.54rem] uppercase tracking-[0.16em] text-orbit-accent-dim">
                 repo ping / 저장소 알림
@@ -279,10 +295,10 @@ export function GitHubStarPrompt({
             </p>
 
             <h2 className="mt-2 font-display text-[0.98rem] font-semibold text-orbit-text">
-              You&apos;ve been orbiting for a minute.
+              You&apos;ve been orbiting for three minutes.
             </h2>
             <p className="mt-1 font-display text-[0.84rem] font-medium text-orbit-accent-dim">
-              1분 정도 둘러보셨네요.
+              3분 정도 둘러보셨네요.
             </p>
             <p className="mt-2 text-[0.76rem] leading-[1.62] text-orbit-muted">
               Bring more observers into the orbit.
@@ -296,7 +312,12 @@ export function GitHubStarPrompt({
                 signal
               </span>
               <div className="h-1.5 flex-1 overflow-hidden border border-orbit-border bg-orbit-panel">
-                <div className="h-full w-[78%] bg-[linear-gradient(90deg,var(--color-orbit-accent),rgba(141,252,84,0.35))]" />
+                <div
+                  className="h-full bg-[linear-gradient(90deg,var(--color-orbit-accent),rgba(141,252,84,0.35))] transition-[width] duration-100 linear"
+                  style={{
+                    width: `${Math.max(0, Math.min(signalLevel, 1)) * 100}%`,
+                  }}
+                />
               </div>
             </div>
           </div>
@@ -322,6 +343,66 @@ export function GitHubStarPrompt({
               onClick={onDismissForever}
             >
               mute this / 다시 보지 않기
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+export function LlmReadyNotice({
+  isOpen,
+  modelName,
+  onConfirm,
+}: {
+  isOpen: boolean;
+  modelName?: string | null;
+  onConfirm: () => void;
+}) {
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[78] flex items-center justify-center bg-orbit-bg/72 p-4">
+      <aside className="orbit-hacker-reveal pointer-events-auto relative w-full max-w-md overflow-hidden border border-orbit-border-strong bg-orbit-bg-elevated shadow-[0_18px_48px_rgba(0,0,0,0.4)]">
+        <div
+          aria-hidden="true"
+          className="orbit-grid pointer-events-none absolute inset-0 opacity-15"
+        />
+        <div
+          aria-hidden="true"
+          className="orbit-scanlines pointer-events-none absolute inset-0 opacity-10"
+        />
+
+        <div className="orbit-hacker-reveal__content relative z-10">
+          <div className="border-b border-orbit-border-strong bg-orbit-bg px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex border border-orbit-accent/50 bg-orbit-panel px-2 py-0.5 font-mono text-[0.54rem] uppercase tracking-[0.16em] text-orbit-accent">
+                LLM ready
+              </span>
+              {modelName ? (
+                <span className="inline-flex border border-orbit-border bg-orbit-bg px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
+                  {modelName}
+                </span>
+              ) : null}
+            </div>
+            <h2 className="mt-2 font-display text-[1rem] font-semibold text-orbit-text">
+              Summarization and filtering are ready.
+            </h2>
+            <p className="mt-2 text-[0.76rem] leading-[1.62] text-orbit-muted">
+              The overview now includes the LLM summary and grouped paper topics.
+            </p>
+          </div>
+
+          <div className="px-4 py-3">
+            <button
+              type="button"
+              className="inline-flex border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg"
+              onClick={onConfirm}
+            >
+              check
             </button>
           </div>
         </div>

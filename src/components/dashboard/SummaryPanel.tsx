@@ -1,7 +1,12 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import type { DigestItem } from "../../content/dashboardContent";
-import type { BriefingStatus, DashboardBriefing } from "../../types/dashboard";
+import type {
+  DashboardBriefing,
+  DashboardPaperDomainSummary,
+  DashboardSourceCountSummary,
+  DashboardSummaryLlmState,
+} from "../../types/dashboard";
 import { DashboardPanel } from "./DashboardPanel";
 import { categoryAccentColor } from "./styles";
 
@@ -38,158 +43,306 @@ type SummaryPanelProps = {
   title: string;
   digests: readonly DigestItem[];
   briefing?: DashboardBriefing | null;
-  briefingStatus?: BriefingStatus;
+  llm: DashboardSummaryLlmState;
+  paperDomains: readonly DashboardPaperDomainSummary[];
+  sourceCounts: readonly DashboardSourceCountSummary[];
   selectedDigestId?: string | null;
+  selectedPaperDomain?: string | null;
   onSelectDigest?: (digest: DigestItem) => void;
+  onSelectPaperDomain?: (domain: string | null) => void;
   style?: CSSProperties;
 };
+
+function statusTone(status: DashboardSummaryLlmState["status"]) {
+  if (status === "ready") {
+    return "border-orbit-accent/55 bg-orbit-bg-elevated";
+  }
+  if (status === "processing") {
+    return "border-orbit-accent/30 bg-orbit-bg-elevated";
+  }
+  return "border-orbit-border bg-orbit-bg-elevated";
+}
+
+function statusLabel(status: DashboardSummaryLlmState["status"]) {
+  if (status === "ready") {
+    return "ready";
+  }
+  if (status === "processing") {
+    return "processing";
+  }
+  if (status === "error") {
+    return "error";
+  }
+  return "off";
+}
 
 export function SummaryPanel({
   title,
   digests,
   briefing,
-  briefingStatus,
+  llm,
+  paperDomains,
+  sourceCounts,
   selectedDigestId,
+  selectedPaperDomain,
   onSelectDigest,
+  onSelectPaperDomain,
   style,
 }: SummaryPanelProps) {
+  const paperDigest = digests.find((digest) => digest.id === "papers") ?? null;
+  const isPaperDigestSelected = selectedDigestId === paperDigest?.id;
+  const showSourceCounts = llm.status === "disabled";
+
   return (
     <DashboardPanel style={style}>
       <div className="mb-2 border-b border-orbit-border pb-2.5">
-        <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-orbit-accent">
-          Overview
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-orbit-accent">
+            Overview
+          </p>
+          <div className="flex items-center gap-1.5">
+            {llm.modelName ? (
+              <span className="inline-flex border border-orbit-border bg-orbit-bg px-2.5 py-1 font-mono text-[0.54rem] uppercase tracking-[0.12em] text-orbit-muted">
+                {llm.modelName}
+              </span>
+            ) : null}
+            <span className="inline-flex border border-orbit-border bg-orbit-bg px-2.5 py-1 font-mono text-[0.54rem] uppercase tracking-[0.12em] text-orbit-muted">
+              {statusLabel(llm.status)}
+            </span>
+          </div>
+        </div>
         <h2 className="orbit-line-clamp-2 orbit-wrap-anywhere mt-1.5 font-display text-[0.98rem] font-semibold leading-[1.35] tracking-[-0.02em] text-orbit-text">
           {title}
         </h2>
       </div>
-      {briefing?.body_en ? (
-        <section className="mb-2 border border-orbit-accent/60 bg-orbit-bg-elevated px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent">
-              Quick Summary
-            </span>
-            <span className="inline-flex border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.44rem] uppercase tracking-widest text-orbit-muted">
-              ready
-            </span>
-          </div>
-          <p className="orbit-wrap-anywhere mt-2 whitespace-pre-line text-[0.72rem] leading-[1.6] text-orbit-text">
-            {renderBriefingBody(briefing.body_en)}
-          </p>
-        </section>
-      ) : briefingStatus === "processing" ? (
-        <section className="mb-2 border border-orbit-accent/30 bg-orbit-bg-elevated px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent">
-              Quick Summary
-            </span>
-            <span className="inline-flex border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.44rem] uppercase tracking-widest text-orbit-muted">
-              updating
-            </span>
-          </div>
-          <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
-            Updating the quick summary. This may take a moment while the latest
-            items are being processed.
-          </p>
-        </section>
-      ) : briefingStatus === "error" ? (
-        <section className="mb-2 border border-orbit-border bg-orbit-bg-elevated px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent-dim">
-              Quick Summary
-            </span>
-            <span className="inline-flex border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.44rem] uppercase tracking-widest text-orbit-muted">
-              error
-            </span>
-          </div>
-          <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
-            The quick summary could not be prepared. Reload after the local
-            summary service is available.
-          </p>
-        </section>
-      ) : briefingStatus === "disabled" ? (
-        <section className="mb-2 border border-orbit-border bg-orbit-bg-elevated px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent-dim">
-              Quick Summary
-            </span>
-            <span className="inline-flex border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.44rem] uppercase tracking-widest text-orbit-muted">
-              off
-            </span>
-          </div>
-          <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
-            The quick summary is off. Topic cards below are based on source data.
-          </p>
-        </section>
-      ) : null}
-      <div className="grid min-h-0 flex-1 gap-2">
-        {digests.map((digest) => {
-          const isSelected = selectedDigestId === digest.id;
-          return (
-            <button
-              key={digest.id}
-              type="button"
-              data-digest-id={digest.id}
+
+      <section className={`mb-2 border px-3 py-2.5 ${statusTone(llm.status)}`}>
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-baseline gap-2">
+            <span
               className={[
-                "group min-w-0 border text-left transition-colors duration-150",
-                onSelectDigest
-                  ? "cursor-pointer hover:brightness-110"
-                  : "cursor-default",
-                isSelected
-                  ? "border-orbit-accent"
-                  : "border-orbit-border",
+                "font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em]",
+                llm.status === "ready"
+                  ? "text-orbit-accent"
+                  : llm.status === "processing"
+                    ? "text-orbit-accent"
+                    : "text-orbit-accent-dim",
               ].join(" ")}
-              style={{
-                backgroundColor: `color-mix(in srgb, ${categoryAccentColor(digest.domain)} ${isSelected ? "12%" : "5%"}, var(--color-orbit-bg-elevated))`,
-              }}
-              onClick={() => onSelectDigest?.(digest)}
             >
-              {/* accent bar + header row */}
-              <div
-                className={[
-                  "flex min-w-0 items-center gap-2 border-b px-3 py-2",
-                  isSelected
-                    ? "border-orbit-accent/40"
-                    : "border-orbit-border group-hover:border-orbit-border-strong",
-                ].join(" ")}
-                style={{
-                  backgroundColor: `color-mix(in srgb, ${categoryAccentColor(digest.domain)} ${isSelected ? "10%" : "4%"}, transparent)`,
-                }}
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span
-                    className="block h-3 w-0.5 shrink-0"
-                    style={{ backgroundColor: categoryAccentColor(digest.domain) }}
+              {llm.status === "disabled" ? "LLM Summary" : "Quick Summary"}
+            </span>
+            {llm.status === "ready" && llm.modelName ? (
+              <span className="font-mono text-[0.54rem] uppercase tracking-[0.1em] text-orbit-accent-dim">
+                — generated by {llm.modelName}
+              </span>
+            ) : null}
+          </span>
+          <span className="inline-flex border border-orbit-border bg-orbit-bg px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
+            {statusLabel(llm.status)}
+          </span>
+        </div>
+
+        {briefing?.body_en && llm.status === "ready" ? (
+          <div>
+            <p className="orbit-wrap-anywhere mt-2 whitespace-pre-line text-[0.72rem] leading-[1.6] text-orbit-text">
+              {renderBriefingBody(briefing.body_en)}
+            </p>
+          </div>
+        ) : (
+          <>
+            {llm.status === "processing" ? (
+              <div className="mt-2 border border-orbit-accent/35 bg-orbit-bg px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-mono text-[0.9rem] font-semibold uppercase tracking-[0.22em] text-orbit-accent">
+                      LLM Processing
+                    </p>
+                    <div className="mt-2 inline-flex items-center gap-2 border border-orbit-accent/25 bg-orbit-panel px-2 py-1">
+                      <span
+                        aria-hidden="true"
+                        className="h-1.5 w-1.5 rounded-full bg-orbit-accent animate-pulse"
+                      />
+                      <span className="font-mono text-[0.52rem] uppercase tracking-[0.14em] text-orbit-accent">
+                        live status
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[0.72rem] leading-[1.65] text-orbit-muted">
+                      {llm.message}
+                    </p>
+                    {llm.stageLabel ? (
+                      <div className="mt-3 border border-orbit-border bg-orbit-panel px-2.5 py-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-mono text-[0.54rem] uppercase tracking-[0.14em] text-orbit-accent">
+                            {llm.stageLabel}
+                          </span>
+                          {typeof llm.stageProgressPercent === "number" ? (
+                            <span className="font-mono text-[0.54rem] uppercase tracking-[0.14em] text-orbit-text">
+                              {llm.stageProgressPercent}%
+                            </span>
+                          ) : null}
+                        </div>
+                        {llm.stageProgressTotal ? (
+                          <p className="mt-1 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                            {llm.stageProgressCurrent ?? 0}/{llm.stageProgressTotal} batches
+                          </p>
+                        ) : null}
+                        {llm.stageDetail ? (
+                          <p className="mt-1.5 text-[0.68rem] leading-[1.6] text-orbit-muted">
+                            {llm.stageDetail}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {llm.totalPaperCount > 0 ? (
+                      <p className="mt-2 font-mono text-[0.52rem] uppercase tracking-[0.14em] text-orbit-accent-dim">
+                        paper grouping target {llm.labeledPaperCount}/{llm.totalPaperCount}
+                      </p>
+                    ) : null}
+                    <p className="mt-2 font-mono text-[0.56rem] uppercase tracking-[0.14em] text-orbit-accent">
+                      LLM processing can take up to 3 minutes.
+                    </p>
+                    <p className="mt-2 font-mono text-[0.52rem] uppercase tracking-[0.14em] text-orbit-accent-dim">
+                      Original source curation stays visible while the monitor keeps
+                      checking for summary and paper grouping completion.
+                    </p>
+                  </div>
+                  <div
+                    className="mt-0.5 flex items-center gap-2"
                     aria-hidden="true"
-                  />
-                  <span
-                    className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em]"
-                    style={{ color: categoryAccentColor(digest.domain) }}
                   >
-                    {digest.domain}
-                  </span>
+                    <div className="orbit-processing-bar orbit-processing-bar--large" />
+                    <div className="orbit-processing-bar orbit-processing-bar--large orbit-processing-bar--delay-1" />
+                    <div className="orbit-processing-bar orbit-processing-bar--large orbit-processing-bar--delay-2" />
+                  </div>
                 </div>
               </div>
+            ) : (
+              <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
+                {llm.message}
+              </p>
+            )}
+          </>
+        )}
+      </section>
 
-              {/* body */}
-              <div className="px-3 py-2.5">
-                <h3 className="orbit-wrap-anywhere font-display text-[0.84rem] font-semibold leading-[1.42] tracking-[-0.02em] text-orbit-text">
-                  {digest.headline}
-                </h3>
-                <p className="orbit-wrap-anywhere mt-1.5 text-[0.72rem] leading-[1.6] text-orbit-muted">
-                  {digest.summary}
+      {showSourceCounts ? (
+        <section className="mb-2 border border-orbit-border bg-orbit-bg-elevated px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2 border-b border-orbit-border pb-2">
+            <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent-dim">
+              Source Coverage
+            </span>
+            <span className="font-mono text-[0.48rem] uppercase tracking-[0.12em] text-orbit-muted">
+              original curation
+            </span>
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {sourceCounts.map((entry) => (
+              <div
+                key={entry.category}
+                className="border border-orbit-border bg-orbit-bg px-2.5 py-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-display text-[0.76rem] font-semibold text-orbit-text">
+                    {entry.label}
+                  </span>
+                  <span className="font-mono text-[0.48rem] uppercase tracking-[0.12em] text-orbit-muted">
+                    {entry.panelCount} panel{entry.panelCount === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <p className="mt-1 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                  {entry.documentCount} item{entry.documentCount === 1 ? "" : "s"}
                 </p>
-
-                {onSelectDigest ? (
-                  <p className="mt-2 font-mono text-[0.5rem] uppercase tracking-widest text-orbit-accent-dim opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                    view details →
-                  </p>
-                ) : null}
               </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {llm.status !== "disabled" ? (
+        <section className="min-h-0 border border-orbit-border bg-orbit-bg-elevated px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2 border-b border-orbit-border pb-2">
+            <span
+              className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em]"
+              style={{ color: categoryAccentColor("Paper") }}
+            >
+              Paper Topics
+            </span>
+            {selectedPaperDomain ? (
+              <button
+                type="button"
+                className="border border-orbit-border bg-orbit-bg px-2.5 py-1 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
+                onClick={() => onSelectPaperDomain?.(null)}
+              >
+                show all papers
+              </button>
+            ) : null}
+          </div>
+
+          {paperDigest ? (
+            <button
+              type="button"
+              className={[
+                "mt-2 w-full border px-3 py-2.5 text-left transition-colors duration-150",
+                onSelectDigest ? "cursor-pointer hover:border-orbit-accent/60" : "cursor-default",
+                isPaperDigestSelected ? "border-orbit-accent" : "border-orbit-border",
+              ].join(" ")}
+              style={{
+                backgroundColor: `color-mix(in srgb, ${categoryAccentColor("Paper")} ${isPaperDigestSelected ? "10%" : "4%"}, var(--color-orbit-bg))`,
+              }}
+              onClick={() => {
+                if (paperDigest && onSelectDigest) {
+                  onSelectDigest(paperDigest);
+                }
+              }}
+            >
+              <h3 className="orbit-wrap-anywhere font-display text-[0.82rem] font-semibold leading-[1.38] text-orbit-text">
+                {paperDigest.headline}
+              </h3>
+              <p className="orbit-wrap-anywhere mt-1.5 text-[0.72rem] leading-[1.6] text-orbit-muted">
+                {paperDigest.summary}
+              </p>
             </button>
-          );
-        })}
-      </div>
+          ) : (
+            <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
+              No paper summary is available yet.
+            </p>
+          )}
+
+          {paperDomains.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {paperDomains.map((domain) => {
+                const isActive = selectedPaperDomain === domain.key;
+                return (
+                  <button
+                    key={domain.key}
+                    type="button"
+                    className={[
+                      "inline-flex items-center gap-2 border px-2.5 py-1.5 font-mono text-[0.54rem] uppercase tracking-[0.1em] transition-colors duration-150",
+                      isActive
+                        ? "border-orbit-accent bg-orbit-panel text-orbit-accent"
+                        : "border-orbit-border bg-orbit-bg text-orbit-muted hover:border-orbit-accent/60 hover:text-orbit-text",
+                    ].join(" ")}
+                    onClick={() =>
+                      onSelectPaperDomain?.(isActive ? null : domain.key)
+                    }
+                  >
+                    <span>{domain.label}</span>
+                    <span className="text-[0.5rem] text-orbit-accent-dim">
+                      {domain.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
+              {llm.filteringReady
+                ? "No grouped paper domains are available for this session yet."
+                : "Paper topics will appear here after paper grouping finishes."}
+            </p>
+          )}
+        </section>
+      ) : null}
     </DashboardPanel>
   );
 }

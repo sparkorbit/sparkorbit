@@ -16,11 +16,13 @@ services:
     container_name: sparkorbit-backend
     environment:
       SPARKORBIT_REDIS_URL: "redis://redis:6379/0"
-      SPARKORBIT_BRIEFING_PROVIDER: "off"
+      SPARKORBIT_BRIEFING_PROVIDER: "${SPARKORBIT_BRIEFING_PROVIDER:-off}"
     depends_on:
       - redis
     ports:
       - "8787:8787"
+    volumes:
+      - run-data:/app/pipelines/source_fetch/data/runs
     restart: unless-stopped
 
   worker:
@@ -32,9 +34,11 @@ services:
     environment:
       SPARKORBIT_REDIS_URL: "redis://redis:6379/0"
       SPARKORBIT_WORKER_POLL_INTERVAL: "2"
-      SPARKORBIT_BRIEFING_PROVIDER: "off"
+      SPARKORBIT_BRIEFING_PROVIDER: "${SPARKORBIT_BRIEFING_PROVIDER:-off}"
     depends_on:
       - redis
+    volumes:
+      - run-data:/app/pipelines/source_fetch/data/runs
     restart: unless-stopped
 
   frontend:
@@ -50,3 +54,4 @@ services:
 
 volumes:
   redis-data:
+  run-data:

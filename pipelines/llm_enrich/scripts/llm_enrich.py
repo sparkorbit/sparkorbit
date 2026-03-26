@@ -167,7 +167,7 @@ def company_candidates(
         text_scope = document.get("text_scope")
         if source.startswith("github_"):
             continue
-        if source_category not in {"company", "company_kr", "company_cn"} and source != "hf_blog":
+        if source_category not in {"company"} and source != "hf_blog":
             continue
         if text_scope in {"empty", "metric_summary", "generated_panel"}:
             continue
@@ -301,18 +301,7 @@ class OllamaClient:
         self.user_prompt_template = user_prompt_template
         self.http = httpx.Client(timeout=timeout_seconds)
 
-    def unload_model(self) -> None:
-        try:
-            self.http.post(
-                f"{self.base_url}/api/chat",
-                json={"model": self.model, "keep_alive": 0},
-                timeout=10.0,
-            )
-        except Exception:
-            pass
-
     def close(self) -> None:
-        self.unload_model()
         self.http.close()
 
     def ping(self) -> None:
@@ -518,14 +507,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--chunk-size",
         type=int,
-        default=30,
-        help="Number of documents per batch before split retries. Default: 30",
+        default=48,
+        help="Number of documents per batch before split retries. Default: 48",
     )
     parser.add_argument(
         "--per-source",
         type=int,
-        default=5,
-        help="Max recent documents per source. Default: 5",
+        default=8,
+        help="Max recent documents per source. Default: 8",
     )
     parser.add_argument(
         "--max-age-days",

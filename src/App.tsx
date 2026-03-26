@@ -10,6 +10,7 @@ import {
 import {
   ConsoleHeader,
   GitHubStarPrompt,
+  LlmReadyNotice,
   SettingsModal,
 } from "./components/app/AppChrome";
 import { FullscreenLoading } from "./components/app/FullscreenLoading";
@@ -50,6 +51,7 @@ import {
   fetchDocument,
   fetchJobProgress,
   fetchLeaderboards,
+  openDashboardStream,
   openJobProgressStream,
 } from "./lib/dashboardApi";
 import type {
@@ -63,7 +65,8 @@ import type {
 } from "./types/jobProgress";
 
 const GITHUB_STAR_PROMPT_STORAGE_KEY = "sparkorbit-github-star-prompt-v1";
-const GITHUB_STAR_PROMPT_DELAY_MS = 60 * 1000;
+const LLM_READY_NOTICE_STORAGE_KEY = "sparkorbit-llm-ready-notice-v1";
+const GITHUB_STAR_PROMPT_DELAY_MS = 3 * 60 * 1000;
 const GITHUB_STAR_PROMPT_VISIBLE_MS = 20 * 1000;
 const GITHUB_REPO_URL = "https://github.com/sparkorbit/sparkorbit";
 
@@ -86,6 +89,36 @@ function writeGitHubStarPromptState(value: "accepted" | "dismissed") {
 
   try {
     window.localStorage.setItem(GITHUB_STAR_PROMPT_STORAGE_KEY, value);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function llmReadyNoticeStorageKey(sessionId: string) {
+  return `${LLM_READY_NOTICE_STORAGE_KEY}:${sessionId}`;
+}
+
+function hasSeenLlmReadyNotice(sessionId: string) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return (
+      window.localStorage.getItem(llmReadyNoticeStorageKey(sessionId)) === "seen"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function markLlmReadyNoticeSeen(sessionId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(llmReadyNoticeStorageKey(sessionId), "seen");
   } catch {
     // ignore storage failures
   }
@@ -361,15 +394,22 @@ function App() {
   const [hasGitHubStarPromptShown, setHasGitHubStarPromptShown] =
     useState(false);
   const [isGitHubStarPromptOpen, setIsGitHubStarPromptOpen] = useState(false);
+  const [gitHubStarPromptSignalLevel, setGitHubStarPromptSignalLevel] =
+    useState(1);
   const [activeJob, setActiveJob] = useState<ActiveJobResponse | null>(null);
   const [jobProgress, setJobProgress] = useState<JobProgressSnapshot | null>(
     null,
   );
+  const [selectedPaperDomain, setSelectedPaperDomain] = useState<string | null>(
+    null,
+  );
+  const [isLlmReadyNoticeOpen, setIsLlmReadyNoticeOpen] = useState(false);
   const detailRequestVersionRef = useRef(0);
   const currentDashboardSessionIdRef = useRef(
     EMPTY_DASHBOARD.session.sessionId,
   );
   const jobStreamRef = useRef<(() => void) | null>(null);
+  const previousLlmStatusRef = useRef<string | null>(null);
 
   const rowHeightPx = resolveRowHeightPx(uiSettings.rowHeightMode);
 
@@ -586,6 +626,75 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const closeStream = openDashboardStream(
+      (payload) => {
+        recordPayloadSnapshot({
+          key: "dashboard-stream",
+          title: "dashboard stream",
+          path: "/api/dashboard/stream",
+          transport: "sse",
+          payload,
+        });
+        setDashboard(payload);
+        setDashboardError(null);
+      },
+      (message) => {
+        if (
+          currentDashboardSessionIdRef.current ===
+          EMPTY_DASHBOARD.session.sessionId
+        ) {
+          setDashboardError(message);
+        }
+      },
+    );
+
+    return () => {
+      closeStream();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      activeJob !== null ||
+      dashboard.session.sessionId === EMPTY_DASHBOARD.session.sessionId ||
+      dashboard.summary.llm.status !== "processing"
+    ) {
+      return;
+    }
+
+    let isDisposed = false;
+
+    async function refreshLlmStatus() {
+      try {
+        const payload = await fetchDashboard("active");
+        if (isDisposed) {
+          return;
+        }
+        recordPayloadSnapshot({
+          key: "dashboard-llm-poll",
+          title: "dashboard llm poll",
+          path: "/api/dashboard?session=active",
+          transport: "http",
+          payload,
+        });
+        setDashboard(payload);
+        setDashboardError(null);
+      } catch {
+        // Keep the current monitor state visible and let SSE continue as primary transport.
+      }
+    }
+
+    const timerId = window.setInterval(() => {
+      void refreshLlmStatus();
+    }, 4000);
+
+    return () => {
+      isDisposed = true;
+      window.clearInterval(timerId);
+    };
+  }, [activeJob, dashboard.session.sessionId, dashboard.summary.llm.status]);
+
+  useEffect(() => {
     persistUiSettings(uiSettings);
   }, [uiSettings]);
 
@@ -594,20 +703,6 @@ function App() {
       setIsPayloadDebugOpen(false);
     }
   }, [uiSettings.payloadDebugEnabled]);
-
-  useEffect(() => {
-    if (readGitHubStarPromptState()) {
-      return;
-    }
-
-    const timerId = window.setTimeout(() => {
-      setHasStarPromptDelayElapsed(true);
-    }, GITHUB_STAR_PROMPT_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(timerId);
-    };
-  }, []);
 
   useEffect(() => {
     currentDashboardSessionIdRef.current = dashboard.session.sessionId;
@@ -619,7 +714,48 @@ function App() {
     setDetailError(null);
     setSelectedDigestId(null);
     setSelectedDocumentId(null);
+    setSelectedPaperDomain(null);
+    setIsLlmReadyNoticeOpen(false);
+    previousLlmStatusRef.current = null;
   }, [dashboard.session.sessionId]);
+
+  useEffect(() => {
+    const sessionId = dashboard.session.sessionId;
+    const llmStatus = dashboard.summary.llm.status;
+    const previousStatus = previousLlmStatusRef.current;
+
+    if (
+      sessionId === EMPTY_DASHBOARD.session.sessionId ||
+      hasSeenLlmReadyNotice(sessionId)
+    ) {
+      previousLlmStatusRef.current = llmStatus;
+      if (llmStatus !== "ready") {
+        setIsLlmReadyNoticeOpen(false);
+      }
+      return;
+    }
+
+    if (previousStatus === "processing" && llmStatus === "ready") {
+      setIsLlmReadyNoticeOpen(true);
+    }
+    previousLlmStatusRef.current = llmStatus;
+  }, [dashboard.session.sessionId, dashboard.summary.llm.status]);
+
+  useEffect(() => {
+    if (!selectedPaperDomain) {
+      return;
+    }
+
+    if (
+      dashboard.summary.paperDomains.some(
+        (domain) => domain.key === selectedPaperDomain,
+      )
+    ) {
+      return;
+    }
+
+    setSelectedPaperDomain(null);
+  }, [dashboard.summary.paperDomains, selectedPaperDomain]);
 
   useEffect(() => {
     if (activeJob) {
@@ -792,9 +928,37 @@ function App() {
     jobProgress ?? dashboard.session.loading,
   );
   const shouldShowFullscreenLoading =
-    activeJob !== null ||
+    (!hasUsableDashboard &&
+      (activeJob !== null || dashboard.status === "collecting")) ||
     dashboard.status === "collecting" ||
     (!hasUsableDashboard && jobProgress?.status === "error");
+  const isGitHubStarPromptTimerReady =
+    hasUsableDashboard &&
+    !shouldShowFullscreenLoading &&
+    !isLoadingLeaderboards;
+
+  useEffect(() => {
+    if (
+      readGitHubStarPromptState() ||
+      hasStarPromptDelayElapsed ||
+      hasGitHubStarPromptShown ||
+      !isGitHubStarPromptTimerReady
+    ) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      setHasStarPromptDelayElapsed(true);
+    }, GITHUB_STAR_PROMPT_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [
+    hasGitHubStarPromptShown,
+    hasStarPromptDelayElapsed,
+    isGitHubStarPromptTimerReady,
+  ]);
 
   const resolvedArenaOverview =
     leaderboardOverview ?? dashboard.session.arenaOverview;
@@ -802,8 +966,22 @@ function App() {
     resolvedArenaOverview?.boards ?? EMPTY_ARENA_BOARDS
   ).filter((board) => board.id !== "open_llm_leaderboard");
 
-  const infoItems = dashboard.feeds
+  const filteredSideFeeds = dashboard.feeds
     .filter((feed) => feed.eyebrow !== "Benchmark")
+    .filter((feed) => !selectedPaperDomain || feed.eyebrow === "Paper")
+    .flatMap((feed) => {
+      if (!selectedPaperDomain || feed.eyebrow !== "Paper") {
+        return [feed];
+      }
+
+      const filteredFeed = {
+        ...feed,
+        items: feed.items.filter((item) => item.paperDomain === selectedPaperDomain),
+      };
+      return filteredFeed.items.length > 0 ? [filteredFeed] : [];
+    });
+
+  const infoItems = filteredSideFeeds
     .flatMap((feed) => {
       if (feed.id === "hf_trending_models") {
         const parseNoteMetric = (note: string, key: string) => {
@@ -823,7 +1001,7 @@ function App() {
             .map((item) => ({
               ...item,
               timestamp: null,
-              engagementLabel: `liked ${parseNoteMetric(item.note, "♥").toLocaleString()}`,
+              engagementLabel: `♥ ${parseNoteMetric(item.note, "♥").toLocaleString()}`,
             })),
         };
 
@@ -839,7 +1017,7 @@ function App() {
             .map((item) => ({
               ...item,
               timestamp: null,
-              engagementLabel: `downloads ${parseNoteMetric(item.note, "↓").toLocaleString()}`,
+              engagementLabel: `↓ ${parseNoteMetric(item.note, "↓").toLocaleString()}`,
             })),
         };
 
@@ -862,8 +1040,11 @@ function App() {
         }));
       }
 
-      const isEngagementSorted =
-        feed.id === "github_curated_repos" || feed.id.startsWith("reddit_");
+      if (feed.id === "github_curated_repos") {
+        return [];
+      }
+
+      const isEngagementSorted = feed.id.startsWith("reddit_");
 
       const resolvedFeed = isEngagementSorted
         ? {
@@ -911,9 +1092,13 @@ function App() {
       title={dashboard.summary.title}
       digests={dashboard.summary.digests}
       briefing={dashboard.summary.briefing}
-      briefingStatus={dashboard.summary.briefing_status}
+      llm={dashboard.summary.llm}
+      paperDomains={dashboard.summary.paperDomains}
+      sourceCounts={dashboard.summary.sourceCounts}
       selectedDigestId={selectedDigestId}
+      selectedPaperDomain={selectedPaperDomain}
       onSelectDigest={handleSelectDigest}
+      onSelectPaperDomain={setSelectedPaperDomain}
     />
   );
 
@@ -1038,14 +1223,24 @@ function App() {
 
   useEffect(() => {
     if (!isGitHubStarPromptOpen) {
+      setGitHubStarPromptSignalLevel(1);
       return;
     }
 
+    const openedAt = Date.now();
+    const intervalId = window.setInterval(() => {
+      const elapsed = Date.now() - openedAt;
+      setGitHubStarPromptSignalLevel(
+        Math.max(0, 1 - elapsed / GITHUB_STAR_PROMPT_VISIBLE_MS),
+      );
+    }, 100);
     const timerId = window.setTimeout(() => {
+      setGitHubStarPromptSignalLevel(0);
       setIsGitHubStarPromptOpen(false);
     }, GITHUB_STAR_PROMPT_VISIBLE_MS);
 
     return () => {
+      window.clearInterval(intervalId);
       window.clearTimeout(timerId);
     };
   }, [isGitHubStarPromptOpen]);
@@ -1063,6 +1258,14 @@ function App() {
   function handleDismissGitHubStarPrompt() {
     writeGitHubStarPromptState("dismissed");
     setIsGitHubStarPromptOpen(false);
+  }
+
+  function handleConfirmLlmReadyNotice() {
+    const sessionId = dashboard.session.sessionId;
+    if (sessionId !== EMPTY_DASHBOARD.session.sessionId) {
+      markLlmReadyNoticeSeen(sessionId);
+    }
+    setIsLlmReadyNoticeOpen(false);
   }
 
   return (
@@ -1097,15 +1300,22 @@ function App() {
 
       <SettingsModal
         isOpen={isSettingsOpen}
-        briefingStatus={dashboard?.summary?.briefing_status}
+        llmStatus={dashboard.summary.llm.status}
+        llmModelName={dashboard.summary.llm.modelName}
         onClose={() => setIsSettingsOpen(false)}
         onRestoreDefaults={restoreDefaultSettings}
       />
       <GitHubStarPrompt
         isOpen={isGitHubStarPromptOpen}
+        signalLevel={gitHubStarPromptSignalLevel}
         onAccept={handleAcceptGitHubStarPrompt}
         onLater={handleLaterGitHubStarPrompt}
         onDismissForever={handleDismissGitHubStarPrompt}
+      />
+      <LlmReadyNotice
+        isOpen={isLlmReadyNoticeOpen}
+        modelName={dashboard.summary.llm.modelName}
+        onConfirm={handleConfirmLlmReadyNotice}
       />
       {payloadDebugOverlay}
     </div>

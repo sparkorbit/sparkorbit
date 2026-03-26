@@ -11,7 +11,12 @@ sys.path.insert(
     0,
     str(Path(__file__).resolve().parents[1] / "pipelines" / "source_fetch" / "scripts"),
 )
+sys.path.insert(
+    0,
+    str(Path(__file__).resolve().parents[1] / "pipelines" / "llm_enrich" / "scripts"),
+)
 
+from llm_enrich import company_candidates
 from source_fetch.adapters import resolve_sources
 from source_fetch.models import SourceConfig
 from source_fetch.pipeline import apply_source_collection_policy, effective_limit
@@ -67,3 +72,51 @@ def test_company_source_policy_filters_old_documents_and_metrics() -> None:
     assert excluded_count == 1
     assert [document["source_item_id"] for document in kept_documents] == ["recent-item"]
     assert [metric["source_item_id"] for metric in kept_metrics] == ["recent-item"]
+
+
+def test_company_llm_candidates_exclude_kr_and_cn_categories() -> None:
+    documents = [
+        {
+            "document_id": "company-doc",
+            "source": "anthropic_news",
+            "source_category": "company",
+            "text_scope": "body",
+            "sort_at": "2026-03-26T00:00:00Z",
+            "published_at": "2026-03-26T00:00:00Z",
+            "title": "Main company update",
+        },
+        {
+            "document_id": "kr-doc",
+            "source": "wrtn_blog",
+            "source_category": "company_kr",
+            "text_scope": "body",
+            "sort_at": "2026-03-26T00:00:00Z",
+            "published_at": "2026-03-26T00:00:00Z",
+            "title": "KR company update",
+        },
+        {
+            "document_id": "cn-doc",
+            "source": "github_qwen",
+            "source_category": "company_cn",
+            "text_scope": "body",
+            "sort_at": "2026-03-26T00:00:00Z",
+            "published_at": "2026-03-26T00:00:00Z",
+            "title": "CN company update",
+        },
+        {
+            "document_id": "hf-blog-doc",
+            "source": "hf_blog",
+            "source_category": "community",
+            "text_scope": "body",
+            "sort_at": "2026-03-26T00:00:00Z",
+            "published_at": "2026-03-26T00:00:00Z",
+            "title": "HF blog update",
+        },
+    ]
+
+    candidates = company_candidates(documents, per_source=8, max_age_days=None)
+
+    assert [document["document_id"] for document in candidates] == [
+        "company-doc",
+        "hf-blog-doc",
+    ]

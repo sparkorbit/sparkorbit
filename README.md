@@ -83,19 +83,21 @@ macOS/Windows에서 Bash 진입점이 불편하면 아래처럼 `docker compose`
 
 스크립트가 `Ollama + qwen3.5:4b` bundle을 포함할지 한 번 묻는다. 포함하면 첫 실행에서 모델 pull 때문에 시간이 꽤 걸릴 수 있다.
 
-TTY가 없는 실행 환경에서는 기본값이 `without-llm` 이다. 질문 없이 고정하고 싶다면 `bash scripts/docker-up.sh --with-llm` 또는 `bash scripts/docker-up.sh --without-llm` 를 쓴다.
+TTY가 있는 실행 환경에서는 local LLM bundle이 기본 선택이다. TTY가 없는 실행 환경에서도 기본값은 `with-llm` 이다. 질문 없이 고정하고 싶다면 `bash scripts/docker-up.sh --with-llm` 또는 `bash scripts/docker-up.sh --without-llm` 를 쓴다.
 
 직접 실행하고 싶다면:
 
 ```bash
 # 앱만
-docker compose up --build
+docker compose -f docker-compose.yml up --build
 
 # 앱 + local LLM bundle
 docker compose -f docker-compose.yml -f docker-compose.llm.yml up --build
 ```
 
 LLM bundle을 포함해도 model pull이 늦거나 실패하면 앱 스택은 그대로 올라오고, LLM 관련 단계만 조용히 pass된다.
+
+`npm run docker:up` 는 기본적으로 위 `with-llm` 경로를 사용한다. LLM 없이 띄우고 싶으면 `npm run docker:up:no-llm` 를 쓴다.
 
 주소:
 

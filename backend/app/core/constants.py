@@ -40,7 +40,7 @@ SESSION_RETAIN_COUNT = env_int(
     minimum=1,
 )
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 19
 DEFAULT_RUN_LABEL = "redis-session"
 HOMEPAGE_BOOTSTRAP_RUN_LABEL = "homepage-entry"
 
@@ -60,6 +60,26 @@ OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.7"))
 OLLAMA_TOP_P = float(os.getenv("OLLAMA_TOP_P", "0.8"))
 OLLAMA_TOP_K = int(os.getenv("OLLAMA_TOP_K", "20"))
 OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
+LLM_COMPANY_CHUNK_SIZE = env_int(
+    "SPARKORBIT_LLM_COMPANY_CHUNK_SIZE",
+    48,
+    minimum=1,
+)
+LLM_COMPANY_PER_SOURCE = env_int(
+    "SPARKORBIT_LLM_COMPANY_PER_SOURCE",
+    8,
+    minimum=1,
+)
+LLM_COMPANY_MAX_AGE_DAYS = env_int(
+    "SPARKORBIT_LLM_COMPANY_MAX_AGE_DAYS",
+    90,
+    minimum=0,
+)
+LLM_PAPER_CHUNK_SIZE = env_int(
+    "SPARKORBIT_LLM_PAPER_CHUNK_SIZE",
+    100,
+    minimum=1,
+)
 BRIEFING_PROMPT_PACKS = {
     "papers": ROOT_DIR / "docs" / "prompt_packs" / "briefing_papers_v1.md",
     "company": ROOT_DIR / "docs" / "prompt_packs" / "briefing_company_v1.md",

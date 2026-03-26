@@ -271,6 +271,8 @@ def _truncate_sentences(text: str, max_sentences: int) -> str:
 
 
 def _has_company_issue(session_overview: dict[str, Any]) -> bool:
+    if not session_overview.get("company_filtering_enabled"):
+        return False
     issue_domains = session_overview.get("company_issue_domains") or []
     return bool(issue_domains)
 
@@ -309,6 +311,7 @@ def _build_hf_signal_sentence(session_overview: dict[str, Any]) -> str:
 def _build_today_intro(session_overview: dict[str, Any]) -> str:
     dominant_papers = session_overview.get("dominant_paper_domains") or []
     paper_phrase = ", ".join(str(value) for value in dominant_papers[:3] if value)
+    company_enabled = bool(session_overview.get("company_filtering_enabled"))
     if paper_phrase and _has_company_issue(session_overview):
         base = (
             f"Today’s flow leans most clearly toward {paper_phrase}, with company "
@@ -316,7 +319,9 @@ def _build_today_intro(session_overview: dict[str, Any]) -> str:
         )
     elif paper_phrase:
         base = (
-            f"Today’s flow leans most clearly toward {paper_phrase}, with no single "
+            f"Today’s flow leans most clearly toward {paper_phrase}."
+            if not company_enabled
+            else f"Today’s flow leans most clearly toward {paper_phrase}, with no single "
             "company issue standing out."
         )
     elif _has_company_issue(session_overview):
@@ -328,6 +333,8 @@ def _build_today_intro(session_overview: dict[str, Any]) -> str:
         base = (
             "Today’s flow is shaped more by research and model attention than by a "
             "single company storyline."
+            if company_enabled
+            else "Today’s flow is shaped more by research and model attention than by one central storyline."
         )
     hf_signal_sentence = _build_hf_signal_sentence(session_overview)
     if hf_signal_sentence:
@@ -478,18 +485,7 @@ class BriefingGenerator:
     def available(self) -> bool:
         return self._available
 
-    def unload_model(self) -> None:
-        try:
-            self.http.post(
-                f"{self.base_url}/api/chat",
-                json={"model": self.model_name, "keep_alive": 0},
-                timeout=10.0,
-            )
-        except Exception:
-            pass
-
     def close(self) -> None:
-        self.unload_model()
         if self.http is not None:
             self.http.close()
 
@@ -557,6 +553,8 @@ class BriefingGenerator:
             "community": 1,
         }
         for category in self.CATEGORY_ORDER:
+            if category == "company" and not session_overview.get("company_filtering_enabled"):
+                continue
             if category == "company" and not _has_company_issue(session_overview):
                 parts.append("[Company News] No single company issue stands out today.")
                 continue

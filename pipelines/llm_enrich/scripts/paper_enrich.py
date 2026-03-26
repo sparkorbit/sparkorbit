@@ -234,18 +234,7 @@ class OllamaClient:
         self.user_prompt_template = user_prompt_template
         self.http = httpx.Client(timeout=timeout_seconds)
 
-    def unload_model(self) -> None:
-        try:
-            self.http.post(
-                f"{self.base_url}/api/chat",
-                json={"model": self.model, "keep_alive": 0},
-                timeout=10.0,
-            )
-        except Exception:
-            pass
-
     def close(self) -> None:
-        self.unload_model()
         self.http.close()
 
     def ping(self) -> None:

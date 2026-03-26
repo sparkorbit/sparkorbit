@@ -186,6 +186,18 @@ export const EMPTY_DASHBOARD: DashboardResponse = {
   summary: {
     title: "Today in AI",
     headline: "Waiting to connect.",
+    llm: {
+      enabled: false,
+      status: "disabled",
+      modelName: null,
+      summaryReady: false,
+      filteringReady: false,
+      labeledPaperCount: 0,
+      totalPaperCount: 0,
+      message: "LLM summarization and paper grouping are off until the local provider is enabled.",
+    },
+    paperDomains: [],
+    sourceCounts: [],
     digests: [],
   },
   feeds: [],

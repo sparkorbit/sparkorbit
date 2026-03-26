@@ -39,8 +39,8 @@ services:
 
   backend:
     environment:
-      SPARKORBIT_BRIEFING_PROVIDER: "ollama"
-      OLLAMA_BASE_URL: "http://ollama:11434"
+      SPARKORBIT_BRIEFING_PROVIDER: "${SPARKORBIT_BRIEFING_PROVIDER:-ollama}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://ollama:11434}"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen3.5:4b}"
     depends_on:
       - redis
@@ -48,8 +48,8 @@ services:
 
   worker:
     environment:
-      SPARKORBIT_BRIEFING_PROVIDER: "ollama"
-      OLLAMA_BASE_URL: "http://ollama:11434"
+      SPARKORBIT_BRIEFING_PROVIDER: "${SPARKORBIT_BRIEFING_PROVIDER:-ollama}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://ollama:11434}"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen3.5:4b}"
     depends_on:
       - redis
