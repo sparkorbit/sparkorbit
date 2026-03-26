@@ -71,6 +71,27 @@ const LLM_READY_NOTICE_STORAGE_KEY = "sparkorbit-llm-ready-notice-v1";
 const GITHUB_STAR_PROMPT_DELAY_MS = 3 * 60 * 1000;
 const GITHUB_STAR_PROMPT_VISIBLE_MS = 20 * 1000;
 const GITHUB_REPO_URL = "https://github.com/sparkorbit/sparkorbit";
+const INITIAL_CONNECTION_MAX_ATTEMPTS = 8;
+const INITIAL_CONNECTION_RETRY_MS = 1500;
+const COLLECTION_ONLY_JOB_STAGES = new Set([
+  "queued",
+  "starting",
+  "fetching_sources",
+  "publishing_documents",
+  "publishing_views",
+]);
+const INITIAL_CONNECTION_LOADING: JobProgressSnapshot = {
+  ...EMPTY_LOADING,
+  status: "running",
+  stage: "starting",
+  stage_label: "Preparing",
+  detail: "Connecting to the live monitor.",
+  percent: 4,
+  steps: EMPTY_LOADING.steps.map((step, index) => ({
+    ...step,
+    status: index === 0 ? "active" : "pending",
+  })),
+};
 
 function readGitHubStarPromptState() {
   if (typeof window === "undefined") {
@@ -407,12 +428,16 @@ function App() {
   );
   const [isLlmReadyNoticeOpen, setIsLlmReadyNoticeOpen] = useState(false);
   const [isReloadConfirmOpen, setIsReloadConfirmOpen] = useState(false);
+  const [isInitialConnectionPending, setIsInitialConnectionPending] =
+    useState(true);
   const detailRequestVersionRef = useRef(0);
   const currentDashboardSessionIdRef = useRef(
     EMPTY_DASHBOARD.session.sessionId,
   );
+  const currentDashboardStatusRef = useRef(EMPTY_DASHBOARD.status);
   const jobStreamRef = useRef<(() => void) | null>(null);
   const previousLlmStatusRef = useRef<string | null>(null);
+  const primedPublishedDashboardRef = useRef<string | null>(null);
 
   const rowHeightPx = resolveRowHeightPx(uiSettings.rowHeightMode);
 
@@ -461,6 +486,7 @@ function App() {
       });
       setDashboard(payload);
       setDashboardError(null);
+      setIsInitialConnectionPending(false);
       return payload;
     } catch (error) {
       if (!options?.preserveCurrent) {
@@ -490,6 +516,7 @@ function App() {
         payload,
       });
       setJobProgress(payload);
+      setIsInitialConnectionPending(false);
       return payload;
     } catch (error) {
       const message =
@@ -525,6 +552,101 @@ function App() {
     }
   }
 
+  async function recoverFromJobStreamError(
+    job: ActiveJobResponse,
+    message: string,
+  ) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      }
+
+      try {
+        const active = await fetchActiveJob("dashboard");
+        recordPayloadSnapshot({
+          key: "job-active-recover",
+          title: "active job recover",
+          path: "/api/jobs/active?surface=dashboard",
+          transport: "http",
+          payload: active,
+        });
+
+        if (active) {
+          setActiveJob(active);
+          const progress = await loadJobProgressData(active);
+          if (!progress) {
+            continue;
+          }
+          if (
+            progress.status === "ready" ||
+            progress.status === "partial_error"
+          ) {
+            setActiveJob(null);
+            const dashboardPayload = await loadDashboardData("active", {
+              preserveCurrent: true,
+            });
+            if (dashboardPayload) {
+              setJobProgress(null);
+              return true;
+            }
+            continue;
+          }
+
+          await maybePrimePublishedDashboard(progress);
+          if (progress.status !== "error") {
+            startJobStream(active);
+            return true;
+          }
+        }
+
+        const dashboardPayload = await loadDashboardData("active", {
+          preserveCurrent: true,
+        });
+        if (dashboardPayload) {
+          setActiveJob(null);
+          setJobProgress(null);
+          return true;
+        }
+      } catch {
+        // Keep retrying while services finish booting.
+      }
+    }
+
+    setJobProgress((current) => buildJobErrorSnapshot(current, message, job));
+    setActiveJob(null);
+    return false;
+  }
+
+  async function maybePrimePublishedDashboard(
+    progress: JobProgressSnapshot | null,
+  ) {
+    const sessionId = progress?.session_id?.trim();
+    const stage = progress?.stage?.trim();
+    if (!sessionId || !stage || COLLECTION_ONLY_JOB_STAGES.has(stage)) {
+      return null;
+    }
+
+    const primeKey = `${sessionId}:${stage}`;
+    if (primedPublishedDashboardRef.current === primeKey) {
+      return null;
+    }
+    if (
+      currentDashboardSessionIdRef.current === sessionId &&
+      currentDashboardStatusRef.current !== "collecting"
+    ) {
+      primedPublishedDashboardRef.current = primeKey;
+      return null;
+    }
+
+    const payload = await loadDashboardData(sessionId, { preserveCurrent: true });
+    if (payload) {
+      primedPublishedDashboardRef.current = primeKey;
+    } else {
+      primedPublishedDashboardRef.current = null;
+    }
+    return payload;
+  }
+
   function startJobStream(job: ActiveJobResponse) {
     jobStreamRef.current?.();
     jobStreamRef.current = openJobProgressStream(
@@ -538,6 +660,7 @@ function App() {
           payload,
         });
         setJobProgress(payload);
+        void maybePrimePublishedDashboard(payload);
         if (payload.status === "ready" || payload.status === "partial_error") {
           jobStreamRef.current = null;
           setActiveJob(null);
@@ -560,88 +683,104 @@ function App() {
       },
       (message) => {
         jobStreamRef.current = null;
-        setJobProgress((current) =>
-          buildJobErrorSnapshot(current, message, job),
-        );
-        setActiveJob(null);
+        void recoverFromJobStreamError(job, message);
       },
     );
   }
 
   useEffect(() => {
     let isDisposed = false;
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
     async function loadInitialState() {
-      try {
-        const active = await fetchActiveJob("dashboard");
-        if (isDisposed) {
-          return;
-        }
-        recordPayloadSnapshot({
-          key: "job-active",
-          title: "active job",
-          path: "/api/jobs/active?surface=dashboard",
-          transport: "http",
-          payload: active,
-        });
-
-        if (active) {
-          setActiveJob(active);
-          if (
-            dashboard.session.sessionId === EMPTY_DASHBOARD.session.sessionId
-          ) {
-            await loadDashboardData("active", { preserveCurrent: true });
-            if (isDisposed) {
-              return;
-            }
-          }
-          const progress = await loadJobProgressData(active);
+      for (
+        let attempt = 0;
+        attempt < INITIAL_CONNECTION_MAX_ATTEMPTS && !isDisposed;
+        attempt += 1
+      ) {
+        try {
+          const active = await fetchActiveJob("dashboard");
           if (isDisposed) {
             return;
           }
-          if (
-            progress?.status === "ready" ||
-            progress?.status === "partial_error"
-          ) {
-            setActiveJob(null);
-            await loadDashboardData("active", { preserveCurrent: true });
-          } else {
-            startJobStream(active);
+          recordPayloadSnapshot({
+            key: "job-active",
+            title: "active job",
+            path: "/api/jobs/active?surface=dashboard",
+            transport: "http",
+            payload: active,
+          });
+
+          if (active) {
+            setActiveJob(active);
+            setIsInitialConnectionPending(false);
+            if (
+              dashboard.session.sessionId === EMPTY_DASHBOARD.session.sessionId
+            ) {
+              await loadDashboardData("active", { preserveCurrent: true });
+              if (isDisposed) {
+                return;
+              }
+            }
+            const progress = await loadJobProgressData(active);
+            if (isDisposed) {
+              return;
+            }
+            if (
+              progress?.status === "ready" ||
+              progress?.status === "partial_error"
+            ) {
+              setActiveJob(null);
+              await loadDashboardData("active", { preserveCurrent: true });
+            } else {
+              await maybePrimePublishedDashboard(progress);
+              startJobStream(active);
+            }
+            return;
           }
-          return;
+
+          const payload = await loadDashboardData("active");
+          if (isDisposed || payload) {
+            return;
+          }
+
+          const retryActive = await fetchActiveJob("dashboard");
+          if (isDisposed) {
+            return;
+          }
+          recordPayloadSnapshot({
+            key: "job-active-retry",
+            title: "active job retry",
+            path: "/api/jobs/active?surface=dashboard",
+            transport: "http",
+            payload: retryActive,
+          });
+          if (retryActive) {
+            setActiveJob(retryActive);
+            setIsInitialConnectionPending(false);
+            startJobStream(retryActive);
+            await loadJobProgressData(retryActive);
+            return;
+          }
+        } catch (error) {
+          if (isDisposed) {
+            return;
+          }
+          setDashboardError(
+            error instanceof Error
+              ? compactText(error.message, 180)
+              : "Failed to connect to BFF API.",
+          );
         }
 
-        const payload = await loadDashboardData("active");
-        if (isDisposed || payload) {
-          return;
+        if (attempt < INITIAL_CONNECTION_MAX_ATTEMPTS - 1) {
+          await sleep(INITIAL_CONNECTION_RETRY_MS);
         }
+      }
 
-        const retryActive = await fetchActiveJob("dashboard");
-        if (isDisposed) {
-          return;
-        }
-        recordPayloadSnapshot({
-          key: "job-active-retry",
-          title: "active job retry",
-          path: "/api/jobs/active?surface=dashboard",
-          transport: "http",
-          payload: retryActive,
-        });
-        if (!retryActive) {
-          return;
-        }
-        setActiveJob(retryActive);
-        startJobStream(retryActive);
-        await loadJobProgressData(retryActive);
-      } catch (error) {
-        if (isDisposed) {
-          return;
-        }
-        setDashboardError(
-          error instanceof Error
-            ? compactText(error.message, 180)
-            : "Failed to connect to BFF API.",
-        );
+      if (!isDisposed) {
+        setIsInitialConnectionPending(false);
       }
     }
 
@@ -664,6 +803,7 @@ function App() {
         });
         setDashboard(payload);
         setDashboardError(null);
+        setIsInitialConnectionPending(false);
       },
       (message) => {
         if (
@@ -733,7 +873,8 @@ function App() {
 
   useEffect(() => {
     currentDashboardSessionIdRef.current = dashboard.session.sessionId;
-  }, [dashboard.session.sessionId]);
+    currentDashboardStatusRef.current = dashboard.status;
+  }, [dashboard.session.sessionId, dashboard.status]);
 
   useEffect(() => {
     detailRequestVersionRef.current += 1;
@@ -742,6 +883,10 @@ function App() {
     setSelectedDigestId(null);
     setSelectedDocumentId(null);
     setSelectedPaperDomain(null);
+    setHasStarPromptDelayElapsed(false);
+    setHasGitHubStarPromptShown(false);
+    setIsGitHubStarPromptOpen(false);
+    setGitHubStarPromptSignalLevel(1);
     setIsLlmReadyNoticeOpen(false);
     previousLlmStatusRef.current = null;
   }, [dashboard.session.sessionId]);
@@ -951,24 +1096,25 @@ function App() {
   }
   const hasUsableDashboard =
     dashboard.session.sessionId !== EMPTY_DASHBOARD.session.sessionId;
-  const loadingSnapshot = normalizeLoadingSnapshot(
-    jobProgress ?? dashboard.session.loading,
-  );
+  const loadingSnapshot =
+    isInitialConnectionPending && !hasUsableDashboard && jobProgress === null
+      ? INITIAL_CONNECTION_LOADING
+      : normalizeLoadingSnapshot(jobProgress ?? dashboard.session.loading);
   const shouldShowFullscreenLoading =
-    activeJob !== null ||
+    (isInitialConnectionPending && !hasUsableDashboard) ||
+    (!hasUsableDashboard &&
+      (activeJob !== null || dashboard.status === "collecting")) ||
     dashboard.status === "collecting" ||
     (!hasUsableDashboard && jobProgress?.status === "error");
-  const isGitHubStarPromptTimerReady =
-    hasUsableDashboard &&
-    !shouldShowFullscreenLoading &&
-    !isLoadingLeaderboards;
+  const hasFinishedCollecting =
+    hasUsableDashboard && dashboard.status !== "collecting";
 
   useEffect(() => {
     if (
       readGitHubStarPromptState() ||
       hasStarPromptDelayElapsed ||
       hasGitHubStarPromptShown ||
-      !isGitHubStarPromptTimerReady
+      !hasFinishedCollecting
     ) {
       return;
     }
@@ -981,9 +1127,9 @@ function App() {
       window.clearTimeout(timerId);
     };
   }, [
+    hasFinishedCollecting,
     hasGitHubStarPromptShown,
     hasStarPromptDelayElapsed,
-    isGitHubStarPromptTimerReady,
   ]);
 
   const resolvedArenaOverview =
@@ -1230,7 +1376,7 @@ function App() {
       !hasStarPromptDelayElapsed ||
       hasGitHubStarPromptShown ||
       isGitHubStarPromptOpen ||
-      shouldShowFullscreenLoading ||
+      !hasFinishedCollecting ||
       isSettingsOpen ||
       readGitHubStarPromptState()
     ) {
@@ -1242,9 +1388,9 @@ function App() {
   }, [
     hasGitHubStarPromptShown,
     hasStarPromptDelayElapsed,
+    hasFinishedCollecting,
     isGitHubStarPromptOpen,
     isSettingsOpen,
-    shouldShowFullscreenLoading,
   ]);
 
   useEffect(() => {

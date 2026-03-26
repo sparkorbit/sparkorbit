@@ -2841,7 +2841,6 @@ def build_summary_llm_state(
         status = "processing"
         message = (
             "LLM summarization and paper grouping are still processing. "
-            "This step can take up to 3 minutes. "
             "The monitor is showing original source curation until they finish."
         )
 

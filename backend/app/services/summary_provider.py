@@ -57,6 +57,29 @@ def to_number(value: Any) -> float:
     return 0.0
 
 
+def _best_effort_unload_ollama_model(
+    http_client: Any,
+    *,
+    base_url: str,
+    model_name: str | None,
+) -> None:
+    if http_client is None or not model_name:
+        return
+    try:
+        response = http_client.post(
+            f"{base_url.rstrip('/')}/api/generate",
+            json={
+                "model": model_name,
+                "prompt": "",
+                "stream": False,
+                "keep_alive": 0,
+            },
+        )
+        response.raise_for_status()
+    except Exception as exc:
+        logger.warning("Failed to unload Ollama model %s: %s", model_name, exc)
+
+
 class SummaryGenerator(Protocol):
     provider_name: str
     model_name: str | None
@@ -487,6 +510,11 @@ class BriefingGenerator:
 
     def close(self) -> None:
         if self.http is not None:
+            _best_effort_unload_ollama_model(
+                self.http,
+                base_url=self.base_url,
+                model_name=self.model_name,
+            )
             self.http.close()
 
     def _call_ollama(

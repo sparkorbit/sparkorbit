@@ -40,20 +40,46 @@ if [[ "${USE_LLM}" == "yes" ]]; then
   compose_args+=(-f "${LLM_COMPOSE}")
 fi
 
+echo ""
+echo "  ╔══════════════════════════════════════════════════════╗"
+echo "  ║                                                      ║"
+echo "  ║   SparkOrbit — AI World Monitor                      ║"
+echo "  ║                                                      ║"
+echo "  ║   Open your browser now:                             ║"
+echo "  ║   → http://localhost:3000                            ║"
+echo "  ║                                                      ║"
+echo "  ╚══════════════════════════════════════════════════════╝"
+echo ""
+echo "  What happens next:"
+echo ""
+echo "  1. Building containers      — First run may take 1-2 minutes."
+echo "  2. Starting services        — Frontend, Backend, Redis."
+if [[ "${USE_LLM}" == "yes" ]]; then
+  echo "  3. Downloading LLM model   — qwen3.5:4b (~3.4GB), runs in background."
+fi
+echo "  4. Collecting source data   — Papers, models, news from 30+ sources."
+if [[ "${USE_LLM}" == "yes" ]]; then
+  echo "  5. LLM enrichment          — Summarization, paper filtering, briefing."
+  echo "                               This runs automatically once the model is ready."
+fi
+echo ""
+echo "  You can open http://localhost:3000 right away."
+echo "  The loading screen shows real-time progress as each step completes."
+echo ""
+if [[ "${USE_LLM}" == "yes" ]]; then
+  echo "  [LLM: ON]  AI summary, paper topics, and daily briefing enabled."
+else
+  echo "  [LLM: OFF] Source curation only. No AI summarization."
+  echo "              To enable LLM later: bash scripts/docker-up.sh --with-llm"
+fi
+echo ""
+echo "  Building and starting containers..."
+echo ""
+
 docker compose "${compose_args[@]}" up --build -d --remove-orphans "${EXTRA_ARGS[@]}"
 
 echo ""
-echo "  SparkOrbit is starting up."
+echo "  ✓ All containers started successfully."
 echo ""
-echo "  Frontend:  http://localhost:3000   ← open this now"
-echo "  Backend:   http://localhost:8787"
-if [[ "${USE_LLM}" == "yes" ]]; then
-  echo "  Ollama:    http://localhost:11434  (model downloading in background)"
-fi
+echo "  → http://localhost:3000"
 echo ""
-echo "  Data collection starts immediately."
-if [[ "${USE_LLM}" == "yes" ]]; then
-  echo "  LLM enrichment + briefing will run automatically once the model is ready."
-else
-  echo "  Started without the local LLM bundle."
-fi

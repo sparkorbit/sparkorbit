@@ -97,6 +97,28 @@ def now_utc_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def best_effort_unload_model(
+    http_client: httpx.Client,
+    *,
+    base_url: str,
+    model_name: str,
+) -> None:
+    try:
+        response = http_client.post(
+            f"{base_url.rstrip('/')}/api/generate",
+            json={
+                "model": model_name,
+                "prompt": "",
+                "stream": False,
+                "keep_alive": 0,
+            },
+        )
+        response.raise_for_status()
+    except Exception:
+        # Releasing VRAM is best effort. Classification output is already written.
+        pass
+
+
 def extract_markdown_code_block(markdown_text: str, info_string: str) -> str:
     pattern = rf"```{re.escape(info_string)}\n(.*?)\n```"
     match = re.search(pattern, markdown_text, re.DOTALL)
@@ -235,6 +257,11 @@ class OllamaClient:
         self.http = httpx.Client(timeout=timeout_seconds)
 
     def close(self) -> None:
+        best_effort_unload_model(
+            self.http,
+            base_url=self.base_url,
+            model_name=self.model,
+        )
         self.http.close()
 
     def ping(self) -> None:

@@ -94,6 +94,28 @@ def now_utc_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def best_effort_unload_model(
+    http_client: httpx.Client,
+    *,
+    base_url: str,
+    model_name: str,
+) -> None:
+    try:
+        response = http_client.post(
+            f"{base_url.rstrip('/')}/api/generate",
+            json={
+                "model": model_name,
+                "prompt": "",
+                "stream": False,
+                "keep_alive": 0,
+            },
+        )
+        response.raise_for_status()
+    except Exception:
+        # Best effort only. Main output path should still complete.
+        pass
+
+
 def parse_iso_datetime(value: str | None) -> datetime | None:
     if not value or not isinstance(value, str):
         return None
@@ -302,6 +324,11 @@ class OllamaClient:
         self.http = httpx.Client(timeout=timeout_seconds)
 
     def close(self) -> None:
+        best_effort_unload_model(
+            self.http,
+            base_url=self.base_url,
+            model_name=self.model,
+        )
         self.http.close()
 
     def ping(self) -> None:
