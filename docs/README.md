@@ -20,6 +20,7 @@ Technical documentation root for the SparkOrbit project.
 
 | Doc | Description |
 |-----|-------------|
+| [Getting Started (No GPU)](./00_getting_started_no_gpu.md) | Beginner-first local setup guide with the easiest no-GPU path |
 | [Overall Flow](./01_overall_flow.md) | Product flow, user journey, implementation scope |
 | [Sources](./02_sections/02_1_sources.md) | Complete source list and adapters |
 | [Fields](./02_sections/02_2_fields.md) | Normalized data contract |
@@ -35,9 +36,10 @@ Technical documentation root for the SparkOrbit project.
 
 ## Reading Guide
 
-1. Start with [Overall Flow](./01_overall_flow.md) for the product goal and current scope.
-2. Source list and collection: [Sources](./02_sections/02_1_sources.md), field contract: [Fields](./02_sections/02_2_fields.md).
-3. Backend, Redis session, SSE: [Runtime Flow](./03_runtime_flow_draft.md).
-4. Collection pipeline: [Data Collection](./05_data_collection_pipeline.md), frontend rules: [UI Design Guide](./06_ui_design_guide.md).
-5. LLM enrichment and summary: [LLM Usage](./04_llm_usage.md).
-6. Setup and run procedures: [Operational Playbook](./06_operational_playbook.md).
+1. If you want the easiest first run, start with [Getting Started (No GPU)](./00_getting_started_no_gpu.md).
+2. For the product goal and current scope, read [Overall Flow](./01_overall_flow.md).
+3. Source list and collection: [Sources](./02_sections/02_1_sources.md), field contract: [Fields](./02_sections/02_2_fields.md).
+4. Backend, Redis session, SSE: [Runtime Flow](./03_runtime_flow_draft.md).
+5. Collection pipeline: [Data Collection](./05_data_collection_pipeline.md), frontend rules: [UI Design Guide](./06_ui_design_guide.md).
+6. LLM enrichment and summary: [LLM Usage](./04_llm_usage.md).
+7. Canonical setup, run, and verification procedures: [Operational Playbook](./06_operational_playbook.md).

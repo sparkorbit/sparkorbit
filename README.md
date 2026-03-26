@@ -21,14 +21,14 @@
 </p>
 
 <p align="center">
-  <a href="./docs/README.md">Documentation</a> · <a href="https://github.com/sparkorbit/sparkorbit/issues">Issues</a> · <a href="#contributing">Contributing</a>
+  <a href="./docs/00_getting_started_no_gpu.md">Beginner Guide</a> · <a href="./docs/README.md">Documentation</a> · <a href="https://github.com/sparkorbit/sparkorbit/issues">Issues</a> · <a href="#contributing">Contributing</a>
 </p>
 
 ***
 
-> **Official local support:** Linux and macOS
+> **Tested on:** Linux, macOS, and Windows
 >
-> **Windows:** not officially supported yet
+> Edge cases may exist depending on Docker/WSL setup — see [Known Issues](#known-issues)
 
 ***
 
@@ -40,60 +40,56 @@
 - **Rank** — every item sorted by what matters: likes, downloads, stars, scores. Not just "newest first."
 - **Compare** — AI Model Leaderboard shows LMArena rankings across Text, Code, Vision, Image, Video, and Search side by side.
 - **Summarize** — optional local LLM reads everything and generates a daily briefing + paper topic grouping. Runs on your GPU, stays on your machine.
-- **One command** — on Linux and macOS, `bash scripts/docker-up.sh` and you're live. Docker handles the rest.
+- **One command** — the beginner path on Linux and macOS is `bash scripts/docker-up.sh --without-llm`. Docker handles the rest.
 - **Fully open-source** — run it, fork it, extend it. Add your own sources. Make the orbit wider.
 
 ***
 
-## Quick Start (Linux/macOS)
+## Quick Start
 
-Windows is not officially supported yet.
+Recommended first run: **No GPU / no local LLM**.
+This quick start and the Beginner Guide use the Bash-based Linux/macOS path.
+On Windows, Docker Desktop / WSL details can differ.
+
+If you are new to Docker or just want the easiest path, start with the step-by-step guide:
+**[Getting Started (No GPU)](./docs/00_getting_started_no_gpu.md)**
+
+Before you run this, make sure Docker is installed and currently running.
+The first build may take a few minutes.
 
 ```bash
 git clone https://github.com/sparkorbit/sparkorbit.git
 cd sparkorbit
-bash scripts/docker-up.sh
+bash scripts/docker-up.sh --without-llm
 ```
 
-The script asks one question — **don't just hit Enter without reading it!**
+Need Git for the command above, or use the ZIP download path in the Beginner Guide.
 
-> **⚠️ `Use local LLM bundle? [Y/n]`**
->
-> This decides whether AI summarization runs on your machine. Choose carefully.
-
-| Answer | What you get | Requirements |
-|--------|-------------|--------------|
-| **Y** (default) | Full experience — AI summary, paper topics, daily briefing | NVIDIA GPU, ~13GB VRAM |
-| **N** | Source curation only, no AI summarization | Docker only |
-
-<details>
-<summary><b>Screenshot: With GPU (full AI features)</b></summary>
-<br/>
-<p align="center">
-  <img src="./docs/images/AIorbits_comp.png" alt="SparkOrbit with GPU — full AI features" width="100%"/>
-</p>
-</details>
-
-<details>
-<summary><b>Screenshot: Without GPU (source curation only)</b></summary>
-<br/>
 <p align="center">
   <img src="./docs/images/AIOribits_NoGPU.png" alt="SparkOrbit without GPU — source curation only" width="100%"/>
 </p>
-</details>
 
 Then open **http://localhost:3000** — the loading screen shows live progress.
 If you're running on a remote server, use `http://<server-ip>:3000` instead.
 
-> **No GPU?** No problem. Choose `N` and you still get the full dashboard with 30+ sources, leaderboards, and engagement rankings. LLM features are additive — the core experience works without them.
+- No GPU mode still gives you the full dashboard. AI summaries are simply skipped.
 
-> **Reload anytime** — click the `RELOAD` button (top-right) to re-collect all sources and re-run LLM features without restarting containers.
+If you have an NVIDIA GPU and want local AI summaries later:
 
 ```bash
-# skip the prompt
 bash scripts/docker-up.sh --with-llm      # always include LLM
-bash scripts/docker-up.sh --without-llm   # always skip LLM
 ```
+
+If you run the helper script without `--with-llm` or `--without-llm`, it will ask:
+
+```text
+Use local LLM bundle? [Y/n]
+```
+
+<font color="red"><strong>This asks whether the local LLM should be used.</strong></font>
+
+Full setup, run, and verification details:
+**[Operational Playbook](./docs/06_operational_playbook.md)**
 
 ***
 
@@ -151,6 +147,7 @@ Got ideas or questions? [Open an issue](https://github.com/sparkorbit/sparkorbit
 ## Known Issues
 
 - **LLM processing can be unstable** — local LLM summarization (Ollama) may occasionally fail or produce unexpected results depending on your GPU, available VRAM, and model load. If it hangs or errors out, try reloading or restarting with `--without-llm`. The core dashboard works fine without it. We're actively checking and improving stability on this.
+- **Cross-platform edge cases** — we've tested on Linux, macOS, and Windows. Everything works, but depending on your Docker version, WSL configuration, or network setup, unexpected errors may occur. If you run into any issues, please [open an issue](https://github.com/sparkorbit/sparkorbit/issues) — we want to know about it.
 
 ***
 
