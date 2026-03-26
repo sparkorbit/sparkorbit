@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import threading
+import uuid
 from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ from ..core.constants import (
 )
 from ..core.store import RedisLike
 from .collector import collect_run
+from .job_progress import get_or_create_job_tracker
 from .summary_provider import (
     BriefingGenerator,
     SummaryGenerator,
@@ -3812,18 +3814,27 @@ def run_homepage_bootstrap(
     *,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     timeout: float = 30.0,
+    job_id: str | None = None,
 ) -> None:
+    resolved_job_id = job_id or str(uuid.uuid4())
+    tracker = get_or_create_job_tracker(
+        store,
+        job_id=resolved_job_id,
+        surface="dashboard",
+        job_type="session_loading",
+    )
+
     try:
         def handle_collect_progress(event: dict[str, Any]) -> None:
+            # collect_run emits typed events compatible with JobProgressTracker
+            tracker.handle_event(event)
+            # Keep legacy bootstrap state for dashboard API fallback during collection
             update_bootstrap_state(
                 store,
                 status="collecting",
                 run_label=run_label,
                 stage=str(event.get("stage") or "fetching_sources"),
-                detail=str(
-                    event.get("detail")
-                    or "Scanning live data."
-                ),
+                detail=str(event.get("detail") or "Scanning live data."),
                 progress_current=resolve_collect_progress_current(event),
                 progress_total=int(event.get("total_sources") or 0),
                 current_source=(
@@ -3833,16 +3844,31 @@ def run_homepage_bootstrap(
                 ),
             )
 
+        def handle_flat_progress(event: dict[str, Any]) -> None:
+            # publish_run and run_session_enrichment emit flat events; convert to typed
+            session_id = event.get("session_id")
+            if session_id:
+                tracker.handle_event({"type": "identity", "session_id": str(session_id)})
+            stage = str(event.get("stage") or "").strip()
+            if stage:
+                tracker.handle_event({
+                    "type": "stage",
+                    "stage": stage,
+                    "detail": event.get("detail"),
+                    "progress_current": event.get("progress_current"),
+                    "progress_total": event.get("progress_total"),
+                    "status": event.get("status"),
+                    "force": True,
+                })
+
         def handle_publish_progress(event: dict[str, Any]) -> None:
+            handle_flat_progress(event)
             update_bootstrap_state(
                 store,
                 status=str(event.get("status") or "collecting"),
                 run_label=run_label,
                 stage=str(event.get("stage") or "publishing_documents"),
-                detail=str(
-                    event.get("detail")
-                    or "Cache write in progress."
-                ),
+                detail=str(event.get("detail") or "Cache write in progress."),
                 progress_current=int(event.get("progress_current") or 0),
                 progress_total=int(event.get("progress_total") or 0),
                 current_source=(
@@ -3863,9 +3889,15 @@ def run_homepage_bootstrap(
             queue=False,
             progress_callback=handle_publish_progress,
         )
-        run_session_enrichment(store, result["session_id"])
+        run_session_enrichment(store, result["session_id"], progress_callback=handle_flat_progress)
+        tracker.handle_event({"type": "terminal", "status": "ready"})
         store.delete(BOOTSTRAP_STATE_KEY)
     except Exception as exc:
+        tracker.handle_event({
+            "type": "terminal",
+            "status": "error",
+            "error": {"message": str(exc)},
+        })
         current_state = get_bootstrap_state(store) or {}
         set_bootstrap_state(
             store,

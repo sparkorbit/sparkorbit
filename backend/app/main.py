@@ -16,8 +16,10 @@ def create_app(store: Any | None = None):
     from .api.routes.jobs import router as jobs_router
     from .api.routes.leaderboards import router as leaderboards_router
     from .api.routes.sessions import router as sessions_router
+    import uuid
+
     from .core.constants import ACTIVE_SESSION_KEY
-    from .services.job_progress import get_active_job_id
+    from .services.job_progress import JobProgressTracker, get_active_job_id
     from .services.session_service import run_homepage_bootstrap
 
     resolved_store = store or RedisStore()
@@ -42,15 +44,23 @@ def create_app(store: Any | None = None):
 
     app.include_router(api_router)
 
-    # Eagerly start data collection on boot if no active session exists
-    def _eager_bootstrap() -> None:
-        if resolved_store.get(ACTIVE_SESSION_KEY):
-            return
-        if get_active_job_id(resolved_store, "dashboard"):
-            return
-        run_homepage_bootstrap(resolved_store)
+    # Eagerly start data collection on boot if no active session exists.
+    # Pre-register the job in the main thread so fetchActiveJob returns it
+    # immediately, before the background thread has had a chance to run.
+    if not resolved_store.get(ACTIVE_SESSION_KEY) and not get_active_job_id(resolved_store, "dashboard"):
+        bootstrap_job_id = str(uuid.uuid4())
+        _bootstrap_tracker = JobProgressTracker(
+            resolved_store,
+            job_id=bootstrap_job_id,
+            surface="dashboard",
+            job_type="session_loading",
+        )
+        _bootstrap_tracker.flush(force=True)
 
-    threading.Thread(target=_eager_bootstrap, daemon=True).start()
+        def _run_bootstrap() -> None:
+            run_homepage_bootstrap(resolved_store, job_id=bootstrap_job_id)
+
+        threading.Thread(target=_run_bootstrap, daemon=True).start()
 
     return app
 
