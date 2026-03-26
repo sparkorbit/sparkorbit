@@ -3,6 +3,7 @@ import type {
   SessionArenaBoard,
   SessionArenaBoardEntry,
 } from "../../types/dashboard";
+import type { JobProgressSnapshot } from "../../types/jobProgress";
 
 const SOURCE_CATEGORY_LABELS: Record<string, string> = {
   papers: "Papers",
@@ -62,6 +63,54 @@ const BENCHMARK_KIND_LABELS: Record<string, string> = {
 
 export const EMPTY_ARENA_BOARDS: readonly SessionArenaBoard[] = [];
 
+const EMPTY_LOADING: JobProgressSnapshot = {
+  job_id: null,
+  surface: "dashboard",
+  job_type: "session_loading",
+  status: "error",
+  stage: "error",
+  stage_label: "Error",
+  detail: "Waiting for a reachable dashboard session.",
+  percent: 0,
+  steps: [
+    { id: "prepare", label: "Prepare", status: "error" },
+    { id: "collect", label: "Collect Sources", status: "pending" },
+    { id: "artifacts", label: "Write Artifacts", status: "pending" },
+    { id: "publish_docs", label: "Publish Docs", status: "pending" },
+    { id: "publish_views", label: "Publish Views", status: "pending" },
+    { id: "summaries", label: "Summaries", status: "pending" },
+    { id: "labels", label: "LLM Labels", status: "pending" },
+    { id: "digests", label: "Digests", status: "pending" },
+    { id: "briefing", label: "Briefing", status: "pending" },
+  ],
+  source_counts: {
+    completed: 0,
+    total: 0,
+    active: 0,
+    error: 0,
+    skipped: 0,
+  },
+  document_counts: {
+    completed: 0,
+    total: 0,
+    error: 0,
+  },
+  task_counts: {
+    completed: 0,
+    total: 0,
+    error: 0,
+  },
+  current_work_item: null,
+  active_work_items: [],
+  recent_completed_items: [],
+  session_id: null,
+  run_id: null,
+  started_at: null,
+  updated_at: null,
+  finished_at: null,
+  error: null,
+};
+
 export const EMPTY_DASHBOARD: DashboardResponse = {
   brand: {
     name: "BLACKSITE",
@@ -113,6 +162,7 @@ export const EMPTY_DASHBOARD: DashboardResponse = {
         status: "waiting",
       },
     ],
+    loading: EMPTY_LOADING,
     rules: [
       "Display reads only from the relay API.",
       "Detail panel renders server payload as-is.",

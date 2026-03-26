@@ -8,6 +8,7 @@ import {
   PayloadDebugPanel,
   type PayloadDebugSnapshot,
 } from "./components/app/PayloadDebugPanel";
+import { FullscreenLoading } from "./components/app/FullscreenLoading";
 import { LeaderboardPanel } from "./components/dashboard/LeaderboardPanel";
 import { PanelWorkspace } from "./components/dashboard/PanelWorkspace";
 import { SourcePanel } from "./components/dashboard/SourcePanel";
@@ -35,9 +36,11 @@ import {
   type UiSettings,
 } from "./features/dashboard/uiSettings";
 import {
+  fetchActiveJob,
   fetchDashboard,
   fetchDigestDetail,
   fetchDocument,
+  fetchJobProgress,
   fetchLeaderboards,
   reloadSession,
 } from "./lib/dashboardApi";
@@ -45,6 +48,10 @@ import type {
   DashboardResponse,
   SessionArenaOverview,
 } from "./types/dashboard";
+import type {
+  ActiveJobResponse,
+  JobProgressSnapshot,
+} from "./types/jobProgress";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -103,6 +110,32 @@ function buildFeedSourceSummary(feed: DashboardResponse["feeds"][number]) {
   return `${visibleSources}${extraCount}`;
 }
 
+function buildJobErrorSnapshot(
+  current: JobProgressSnapshot | null,
+  message: string,
+  activeJob: ActiveJobResponse | null,
+): JobProgressSnapshot {
+  const now = new Date().toISOString();
+  const fallback = current ?? EMPTY_DASHBOARD.session.loading;
+
+  return {
+    ...fallback,
+    job_id: activeJob?.job_id ?? fallback.job_id,
+    surface: activeJob?.surface ?? fallback.surface,
+    job_type: activeJob?.job_type ?? fallback.job_type,
+    status: "error",
+    stage: "error",
+    stage_label: "Error",
+    detail: message,
+    updated_at: now,
+    finished_at: now,
+    error: {
+      message,
+      type: "JobProgressError",
+    },
+  };
+}
+
 function App() {
   const [dashboard, setDashboard] =
     useState<DashboardResponse>(EMPTY_DASHBOARD);
@@ -125,6 +158,10 @@ function App() {
     PayloadDebugSnapshot[]
   >([]);
   const [isPayloadDebugOpen, setIsPayloadDebugOpen] = useState(false);
+  const [activeJob, setActiveJob] = useState<ActiveJobResponse | null>(null);
+  const [jobProgress, setJobProgress] = useState<JobProgressSnapshot | null>(
+    null,
+  );
 
   const rowHeightPx = resolveRowHeightPx(uiSettings.rowHeightMode);
 
@@ -158,29 +195,135 @@ function App() {
     ]);
   }
 
-  useEffect(() => {
-    let isDisposed = false;
-
-    async function loadDashboardData(session = "active") {
-      try {
-        const payload = await fetchDashboard(session);
-        if (isDisposed) return;
-        recordPayloadSnapshot({
-          key: "dashboard-fetch",
-          title: "dashboard fetch",
-          path: `/api/dashboard?session=${session}`,
-          transport: "http",
-          payload,
-        });
-        setDashboard(payload);
-        setDashboardError(null);
-      } catch (error) {
-        if (isDisposed) return;
+  async function loadDashboardData(
+    session = "active",
+    options?: { preserveCurrent?: boolean },
+  ) {
+    try {
+      const payload = await fetchDashboard(session);
+      recordPayloadSnapshot({
+        key: "dashboard-fetch",
+        title: "dashboard fetch",
+        path: `/api/dashboard?session=${session}`,
+        transport: "http",
+        payload,
+      });
+      setDashboard(payload);
+      setDashboardError(null);
+      return payload;
+    } catch (error) {
+      if (!options?.preserveCurrent) {
         setDashboard((current) =>
           current.session.sessionId === EMPTY_DASHBOARD.session.sessionId
             ? EMPTY_DASHBOARD
             : current,
         );
+      }
+      setDashboardError(
+        error instanceof Error
+          ? compactText(error.message, 180)
+          : "Failed to connect to BFF API.",
+      );
+      return null;
+    }
+  }
+
+  async function loadJobProgressData(job: ActiveJobResponse) {
+    try {
+      const payload = await fetchJobProgress(job.job_id);
+      recordPayloadSnapshot({
+        key: "job-progress",
+        title: "job progress",
+        path: job.poll_path,
+        transport: "http",
+        payload,
+      });
+      setJobProgress(payload);
+      return payload;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? compactText(error.message, 180)
+          : "Failed to read job progress.";
+      setJobProgress((current) => buildJobErrorSnapshot(current, message, job));
+      return null;
+    }
+  }
+
+  useEffect(() => {
+    let isDisposed = false;
+
+    async function loadInitialState() {
+      try {
+        const active = await fetchActiveJob("dashboard");
+        if (isDisposed) {
+          return;
+        }
+        recordPayloadSnapshot({
+          key: "job-active",
+          title: "active job",
+          path: "/api/jobs/active?surface=dashboard",
+          transport: "http",
+          payload: active,
+        });
+
+        if (active) {
+          setActiveJob(active);
+          if (
+            dashboard.session.sessionId === EMPTY_DASHBOARD.session.sessionId
+          ) {
+            await loadDashboardData("active", { preserveCurrent: true });
+            if (isDisposed) {
+              return;
+            }
+          }
+          const progress = await loadJobProgressData(active);
+          if (isDisposed) {
+            return;
+          }
+          if (progress?.status === "ready" || progress?.status === "partial_error") {
+            setActiveJob(null);
+            await loadDashboardData("active", { preserveCurrent: true });
+          } else if (
+            progress?.status === "error" &&
+            dashboard.session.sessionId !== EMPTY_DASHBOARD.session.sessionId
+          ) {
+            setActiveJob(null);
+            setDashboardError(
+              compactText(
+                progress.error?.message ?? "The active job ended with an error.",
+                180,
+              ),
+            );
+          }
+          return;
+        }
+
+        const payload = await loadDashboardData("active");
+        if (isDisposed || payload) {
+          return;
+        }
+
+        const retryActive = await fetchActiveJob("dashboard");
+        if (isDisposed) {
+          return;
+        }
+        recordPayloadSnapshot({
+          key: "job-active-retry",
+          title: "active job retry",
+          path: "/api/jobs/active?surface=dashboard",
+          transport: "http",
+          payload: retryActive,
+        });
+        if (!retryActive) {
+          return;
+        }
+        setActiveJob(retryActive);
+        await loadJobProgressData(retryActive);
+      } catch (error) {
+        if (isDisposed) {
+          return;
+        }
         setDashboardError(
           error instanceof Error
             ? compactText(error.message, 180)
@@ -189,7 +332,7 @@ function App() {
       }
     }
 
-    void loadDashboardData();
+    void loadInitialState();
 
     return () => {
       isDisposed = true;
@@ -208,6 +351,56 @@ function App() {
   }, [uiSettings.payloadDebugEnabled]);
 
   useEffect(() => {
+    if (!activeJob) {
+      return;
+    }
+
+    const currentJob = activeJob;
+    let isDisposed = false;
+
+    async function pollJob() {
+      const payload = await loadJobProgressData(currentJob);
+      if (isDisposed || !payload) {
+        return;
+      }
+
+      if (payload.status === "ready" || payload.status === "partial_error") {
+        setActiveJob(null);
+        await loadDashboardData("active", { preserveCurrent: true });
+        return;
+      }
+
+      if (payload.status === "error") {
+        setActiveJob(null);
+        if (dashboard.session.sessionId !== EMPTY_DASHBOARD.session.sessionId) {
+          setDashboardError(
+            compactText(
+              payload.error?.message ?? "The active job ended with an error.",
+              180,
+            ),
+          );
+        }
+      }
+    }
+
+    void pollJob();
+    const intervalId = window.setInterval(() => {
+      void pollJob();
+    }, 1500);
+
+    return () => {
+      isDisposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeJob, dashboard.session.sessionId]);
+
+  useEffect(() => {
+    if (activeJob) {
+      setLeaderboardOverview(null);
+      setLeaderboardError(null);
+      return;
+    }
+
     const sessionId = dashboard.session.sessionId;
     if (
       sessionId === EMPTY_DASHBOARD.session.sessionId ||
@@ -253,7 +446,7 @@ function App() {
     return () => {
       isDisposed = true;
     };
-  }, [dashboard.session.sessionId, dashboard.status]);
+  }, [activeJob, dashboard.session.sessionId, dashboard.status]);
 
   function resetWorkspaceLayout() {
     resetPanelWorkspaceStorage();
@@ -341,6 +534,16 @@ function App() {
         transport: "http",
         payload: result,
       });
+      if (result.job_id && result.poll_path) {
+        const nextActiveJob: ActiveJobResponse = {
+          job_id: result.job_id,
+          poll_path: result.poll_path,
+          surface: "dashboard",
+          status: result.status,
+        };
+        setActiveJob(nextActiveJob);
+        await loadJobProgressData(nextActiveJob);
+      }
     } catch (error) {
       setDashboardError(
         error instanceof Error
@@ -355,6 +558,12 @@ function App() {
     dashboard.session.sessionDate,
     dashboard.session.window,
   );
+  const hasUsableDashboard =
+    dashboard.session.sessionId !== EMPTY_DASHBOARD.session.sessionId;
+  const loadingSnapshot = jobProgress ?? dashboard.session.loading;
+  const shouldShowLoadingOverlay =
+    activeJob !== null ||
+    (!hasUsableDashboard && jobProgress?.status === "error");
   const resolvedArenaOverview =
     leaderboardOverview ?? dashboard.session.arenaOverview;
   const arenaBoards = resolvedArenaOverview?.boards ?? EMPTY_ARENA_BOARDS;
@@ -445,6 +654,7 @@ function App() {
     <LeaderboardPanel
       sessionLabel={sessionLabel}
       onReload={() => void handleReloadSession()}
+      isReloading={activeJob !== null}
       resolvedArenaOverview={resolvedArenaOverview}
       selectedArenaBoard={selectedArenaBoard}
       arenaBoards={arenaBoards}
@@ -498,6 +708,11 @@ function App() {
           rowHeightPx={rowHeightPx}
         />
       </main>
+
+      <FullscreenLoading
+        progress={loadingSnapshot}
+        visible={shouldShowLoadingOverlay}
+      />
 
       <SettingsModal
         isOpen={isSettingsOpen}

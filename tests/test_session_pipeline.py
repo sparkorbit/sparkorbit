@@ -18,16 +18,21 @@ from backend.app.core.constants import (
     SESSION_TTL_SECONDS,
 )
 from backend.app.core.store import MemoryStore
+from backend.app.services.job_progress import get_or_create_job_tracker
 from backend.app.services.session_service import (
     build_briefing_input,
     document_sort_key,
+    get_active_job_response,
     get_dashboard_response,
     get_document_response,
+    get_job_progress_response,
     get_json,
     get_leaderboard_response,
     publish_run,
     run_session_enrichment,
     run_session_reload,
+    set_homepage_bootstrap_running,
+    set_session_reload_running,
     session_key,
     start_session_reload,
 )
@@ -362,8 +367,12 @@ class SessionPipelineTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store = MemoryStore()
         self._temp_roots: list[Path] = []
+        set_homepage_bootstrap_running(False)
+        set_session_reload_running(False)
 
     def tearDown(self) -> None:
+        set_homepage_bootstrap_running(False)
+        set_session_reload_running(False)
         for path in self._temp_roots:
             shutil.rmtree(path, ignore_errors=True)
 
@@ -402,6 +411,131 @@ class SessionPipelineTests(unittest.TestCase):
             self.store.ttl_for(session_key(session_id, "dashboard")),
             SESSION_TTL_SECONDS,
         )
+        self.assertEqual(dashboard["session"]["loading"]["stage"], "publishing_views")
+        self.assertEqual(dashboard["session"]["loading"]["percent"], 88)
+
+    def test_job_progress_tracker_tracks_parallel_sources_and_terminal_state(
+        self,
+    ) -> None:
+        tracker = get_or_create_job_tracker(
+            self.store,
+            job_id="job_parallel_sources",
+            surface="dashboard",
+            job_type="collection_reload",
+        )
+
+        tracker.handle_event(
+            {
+                "type": "stage",
+                "stage": "fetching_sources",
+                "detail": "Fetching sources.",
+                "progress_current": 0,
+                "progress_total": 3,
+                "force": True,
+            }
+        )
+        tracker.handle_event(
+            {
+                "type": "source_started",
+                "source": "openai_news_rss",
+                "label": "openai_news_rss",
+                "total": 3,
+            }
+        )
+        tracker.handle_event(
+            {
+                "type": "source_started",
+                "source": "reddit_machinelearning",
+                "label": "reddit_machinelearning",
+                "total": 3,
+            }
+        )
+        tracker.handle_event(
+            {
+                "type": "source_finished",
+                "source": "reddit_machinelearning",
+                "label": "reddit_machinelearning",
+                "status": "ok",
+            }
+        )
+        tracker.handle_event(
+            {
+                "type": "source_started",
+                "source": "hf_models_new",
+                "label": "hf_models_new",
+                "total": 3,
+            }
+        )
+        tracker.handle_event(
+            {
+                "type": "source_finished",
+                "source": "openai_news_rss",
+                "label": "openai_news_rss",
+                "status": "error",
+            }
+        )
+        tracker.handle_event(
+            {
+                "type": "source_finished",
+                "source": "hf_models_new",
+                "label": "hf_models_new",
+                "status": "skipped",
+            }
+        )
+        tracker.handle_event(
+            {
+                "type": "terminal",
+                "status": "partial_error",
+                "detail": "Collection finished with partial summary errors.",
+                "step_id": "summaries",
+            }
+        )
+
+        payload = get_job_progress_response(
+            self.store,
+            job_id="job_parallel_sources",
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["source_counts"]["completed"], 3)
+        self.assertEqual(payload["source_counts"]["error"], 1)
+        self.assertEqual(payload["source_counts"]["skipped"], 1)
+        self.assertEqual(payload["source_counts"]["active"], 0)
+        self.assertEqual(payload["status"], "partial_error")
+        self.assertEqual(payload["steps"][5]["id"], "summaries")
+        self.assertEqual(payload["steps"][5]["status"], "error")
+        self.assertEqual(payload["recent_completed_items"][0]["id"], "hf_models_new")
+
+    def test_start_session_reload_creates_job_state_and_reuses_existing_job(
+        self,
+    ) -> None:
+        scheduled_job_ids: list[str] = []
+
+        first = start_session_reload(
+            self.store,
+            schedule_reload=lambda job_id: scheduled_job_ids.append(job_id),
+        )
+
+        self.assertIsNotNone(first["job_id"])
+        self.assertEqual(first["poll_path"], f"/api/jobs/{first['job_id']}")
+        self.assertEqual(scheduled_job_ids, [first["job_id"]])
+
+        active_job = get_active_job_response(self.store, surface="dashboard")
+        self.assertIsNotNone(active_job)
+        self.assertEqual(active_job["job_id"], first["job_id"])
+
+        progress = get_job_progress_response(self.store, job_id=first["job_id"])
+        self.assertIsNotNone(progress)
+        self.assertEqual(progress["status"], "queued")
+        self.assertEqual(progress["stage"], "starting")
+
+        duplicate = start_session_reload(
+            self.store,
+            schedule_reload=lambda job_id: scheduled_job_ids.append(f"duplicate:{job_id}"),
+        )
+        self.assertEqual(duplicate["job_id"], first["job_id"])
+        self.assertEqual(scheduled_job_ids, [first["job_id"]])
+        set_session_reload_running(False)
 
     def test_feed_lists_are_sorted_by_feed_score_then_sort_at(self) -> None:
         run_dir = self._make_run("2026-03-24T000102Z_sorted")

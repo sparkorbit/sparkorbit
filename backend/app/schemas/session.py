@@ -18,3 +18,5 @@ class SessionReloadResponse(BaseModel):
     session_id: str | None
     status: str
     error: str | None = None
+    job_id: str | None = None
+    poll_path: str | None = None

@@ -24,19 +24,22 @@ AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world
 
 ### 백엔드 런타임
 - `backend/app/main.py` — FastAPI app entrypoint
-- `backend/app/api/routes/dashboard.py` — dashboard, digest, document, SSE
-- `backend/app/api/routes/sessions.py` — reload state, reload stream
+- `backend/app/api/routes/dashboard.py` — dashboard, digest, document
+- `backend/app/api/routes/jobs.py` — active job, job progress polling
+- `backend/app/api/routes/sessions.py` — reload start
 - `backend/app/api/routes/leaderboards.py` — leaderboard overview
 - `backend/app/services/session_service.py` — bootstrap, reload, publish, digest
+- `backend/app/services/job_progress.py` — Redis-backed job progress snapshot + loading contract
 - `backend/app/services/collector.py` — `pipelines/source_fetch` wrapper
 - `backend/app/services/summary_provider.py` — summary provider abstraction
 
 ### 프론트엔드
 - `src/App.tsx` — dashboard, fullscreen loading, reload recovery, settings
+- `src/components/app/FullscreenLoading.tsx` — polling-based fullscreen progress overlay
 - `src/components/dashboard/PanelWorkspace.tsx` — workspace layout
 - `src/components/dashboard/SourcePanel.tsx` — source feed panel
 - `src/components/dashboard/SummaryPanel.tsx` — category digest panel
-- `src/lib/dashboardApi.ts` — BFF API client + SSE hooks
+- `src/lib/dashboardApi.ts` — BFF API client + polling hooks
 - `src/index.css` — visual tokens, loader, reveal motion
 
 ### LLM Enrichment

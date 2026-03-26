@@ -4,6 +4,7 @@ import type {
   RuntimeItem,
   SessionMetric,
 } from "../content/dashboardContent";
+import type { JobProgressSnapshot } from "./jobProgress";
 import type { SessionDocument } from "./sessionDocument";
 
 export type DashboardStatus =
@@ -56,6 +57,7 @@ export type DashboardSession = {
   reloadRule: string;
   metrics: SessionMetric[];
   runtime: RuntimeItem[];
+  loading: JobProgressSnapshot;
   rules: string[];
   arenaOverview: SessionArenaOverview | null;
 };
@@ -109,4 +111,6 @@ export type SessionReloadStateResponse = {
   session_id: string | null;
   status: SessionReloadStateStatus;
   error: string | null;
+  job_id?: string | null;
+  poll_path?: string | null;
 };
