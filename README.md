@@ -1,4 +1,4 @@
-# SparkOrbit
+# SparkOrbit ✨
 
 AI/Tech 정보를 한 화면에서 탐색하는 `Open World Agents` 기반 world monitor 프로젝트다.
 
