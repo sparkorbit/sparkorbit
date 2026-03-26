@@ -24,6 +24,11 @@
   <a href="./docs/00_getting_started_no_gpu.md">Beginner Guide</a> · <a href="./docs/README.md">Documentation</a> · <a href="https://github.com/sparkorbit/sparkorbit/issues">Issues</a> · <a href="#contributing">Contributing</a>
 </p>
 
+<p align="center">
+  <img src="./docs/images/AIorbits_comp.png" alt="SparkOrbit dashboard — full AI features" width="100%"/>
+</p>
+- Proejct View with LLM 
+
 ***
 
 > **Tested on:** Linux, macOS, and Windows.
@@ -41,6 +46,8 @@
 - **Summarize** — optional local LLM reads everything and generates a daily briefing + paper topic grouping. Runs on your GPU, stays on your machine.
 - **One command** — the beginner path on Linux and macOS is `bash scripts/docker-up.sh --without-llm`. Docker handles the rest.
 - **Fully open-source** — run it, fork it, extend it. Add your own sources. Make the orbit wider.
+
+
 
 ***
 
@@ -100,8 +107,8 @@ Hit the **RELOAD** button (top-right) anytime to re-collect all sources and re-r
 
 Never used Docker? Not sure what a "local LLM" is? No worries — we've got you covered.
 
-- **[Getting Started (No GPU)](./docs/00_getting_started_no_gpu.md)** — a step-by-step walkthrough from zero to dashboard. No GPU needed, no terminal wizardry required. Start here if `git clone` already sounds scary.
-- **[Operational Playbook](./docs/06_operational_playbook.md)** — the full setup guide with verification steps, troubleshooting, and advanced options. For when you're ready to go deeper.
+- **[Getting Started (No GPU)](./docs/00_getting_started_no_gpu.md)** — a step-by-step walkthrough from zero to dashboard. No GPU needed, no terminal wizardry required. Start here if `git clone` already sounds scary. (Need a more detailed check)
+- **[Operational Playbook](./docs/06_operational_playbook.md)** — the full setup guide with verification steps, troubleshooting, and advanced options. For when you're ready to go deeper. (Need a more detailed check)
 
 ***
 
