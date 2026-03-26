@@ -1,10 +1,10 @@
 <p align="center">
   <h1 align="center">🛰️ SparkOrbit 🛰️</h1>
   <p align="center">
-    <b><i>✦ Tracking the orbit of AI signals ✦</i></b>
+    <b><i>✦ No more AI FOMO — orbit the signals that matter ✦</i></b>
   </p>
   <p align="center">
-    <b>Real-time AI world monitor — papers, models, benchmarks, and news in one dashboard.</b>
+    <b>All the AI info you need — papers, models, benchmarks, and news in one dashboard.</b>
   </p>
   <p align="center">
     Our personal home hackathon result, built with brilliant coding agents — Codex & Claude. Keep going!
@@ -28,15 +28,30 @@
 
 ## What It Does
 
-**Stop tab-hopping.** arXiv, HuggingFace, Hacker News, Reddit, company blogs — SparkOrbit pulls them all into one screen so you can scan the AI world in 30 seconds.
+**Tired of AI FOMO?** New papers every hour, model drops you missed, benchmark shakeups you heard about too late — stop drowning in tabs. SparkOrbit pulls everything into one screen so you can catch up in a few minutes.
 
-- **Collect** — 30+ sources fetched automatically. Papers, trending models, top stories, company announcements. No API keys, no login.
+- **Collect** — 30+ sources fetched on demand. Papers, trending models, top stories, company announcements. No API keys, no login.
 - **Rank** — every item sorted by what matters: likes, downloads, stars, scores. Not just "newest first."
 - **Compare** — AI Model Leaderboard shows LMArena rankings across Text, Code, Vision, Image, Video, and Search side by side.
 - **Summarize** — optional local LLM reads everything and generates a daily briefing + paper topic grouping. Runs on your GPU, stays on your machine.
 - **One command** — `bash scripts/docker-up.sh` and you're live. Docker handles the rest.
 - **Fully open-source** — run it, fork it, extend it. Add your own sources. Make the orbit wider.
 
+***
+
+## With GPU vs Without GPU
+
+> **GPU available** — full experience with AI-generated summaries, paper domain grouping, and daily briefing.
+
+<p align="center">
+  <img src="./AIorbits_comp.png" alt="SparkOrbit with GPU — full AI features" width="100%"/>
+</p>
+
+> **No GPU** — you still get the complete dashboard with 30+ sources, leaderboards, and engagement rankings. LLM features are simply skipped.
+
+<p align="center">
+  <img src="./AIOribits_NoGPU.png" alt="SparkOrbit without GPU — source curation only" width="100%"/>
+</p>
 
 ***
 
@@ -59,7 +74,7 @@ Use local LLM bundle? [Y/n]
 | **Y** (default) | Full experience — AI summary, paper topics, daily briefing | NVIDIA GPU, ~13GB VRAM |
 | **N** | Source curation only, no AI summarization | Docker only |
 
-Then open **http://localhost:3000** — the loading screen shows real-time progress.
+Then open **http://localhost:3000** — the loading screen shows live progress.
 If you're running on a remote server, use `http://<server-ip>:3000` instead.
 
 > **No GPU?** No problem. Choose `N` and you still get the full dashboard with 30+ sources, leaderboards, and engagement rankings. LLM features are additive — the core experience works without them.
@@ -129,11 +144,11 @@ Got ideas or questions? [Open an issue](https://github.com/sparkorbit/sparkorbit
 <summary><b>What can I search to find this project?</b></summary>
 <br/>
 
-SparkOrbit is an **AI dashboard**, **AI news aggregator**, **arxiv monitor**, **paper tracker**, **HuggingFace trending viewer**, **LLM leaderboard dashboard**, and **AI research feed reader**.
+SparkOrbit is an **AI dashboard**, **AI news aggregator**, **arxiv paper tracker**, **HuggingFace trending viewer**, **LLM leaderboard dashboard**, and **AI research feed reader**.
 
 If you searched for any of these, you're in the right place:
 
-`ai dashboard` · `ai monitor` · `ai news aggregator` · `arxiv paper tracker` · `huggingface trending` · `llm leaderboard` · `ai research feed` · `machine learning news` · `deep learning dashboard` · `ai world monitor` · `paper summarizer` · `model ranking` · `ai tool` · `open source ai dashboard` · `ollama dashboard` · `lmarena` · `ai benchmark tracker` · `nlp news` · `computer vision papers` · `ai community feed`
+`ai dashboard` · `ai monitor` · `ai news aggregator` · `arxiv paper tracker` · `huggingface trending` · `llm leaderboard` · `ai research feed` · `machine learning news` · `deep learning dashboard` · `ai info dashboard` · `paper summarizer` · `model ranking` · `ai tool` · `open source ai dashboard` · `ollama dashboard` · `lmarena` · `ai benchmark tracker` · `nlp news` · `computer vision papers` · `ai community feed`
 
 </details>
 
