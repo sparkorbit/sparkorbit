@@ -34,6 +34,8 @@
 > **Tested on:** Linux, macOS, and Windows.
 > Edge cases may exist depending on Docker/WSL setup — see [Known Issues](#known-issues)
 
+> **Don't want to install?** We're considering a live demo server so you can try SparkOrbit right from your browser. No promises yet — stay tuned.
+
 ***
 
 ## What It Does
@@ -166,7 +168,7 @@ Got ideas or questions? [Open an issue](https://github.com/sparkorbit/sparkorbit
 ## Known Issues
 
 - **LLM processing can be unstable** — local LLM summarization (Ollama) may occasionally fail or produce unexpected results depending on your GPU, available VRAM, and model load. If it hangs or errors out, try reloading or restarting with `--without-llm`. The core dashboard works fine without it. We're actively checking and improving stability on this.
-- **Cross-platform edge cases** — we've tested on Linux, macOS, and Windows. Everything works, but depending on your Docker version, WSL configuration, or network setup, unexpected errors may occur. If you run into any issues, please [open an issue](https://github.com/sparkorbit/sparkorbit/issues) — we want to know about it.
+- **Cross-platform edge cases** — we've tested on Linux, macOS, and partially on Windows. Everything works, but depending on your Docker version, WSL configuration, or network setup, unexpected errors may occur. If you run into any issues, please [open an issue](https://github.com/sparkorbit/sparkorbit/issues) — we want to know about it.
 
 ***
 
