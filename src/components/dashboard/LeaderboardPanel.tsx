@@ -13,6 +13,7 @@ import type {
 type LeaderboardPanelProps = {
   sessionLabel: string;
   onReload: () => void;
+  isReloading?: boolean;
   resolvedArenaOverview: SessionArenaOverview | null;
   selectedArenaBoard: SessionArenaBoard | null;
   arenaBoards: readonly SessionArenaBoard[];
@@ -206,6 +207,7 @@ function BoardColumn({
 export function LeaderboardPanel({
   sessionLabel,
   onReload,
+  isReloading = false,
   resolvedArenaOverview,
   arenaBoards,
   leaderboardError,
@@ -249,10 +251,11 @@ export function LeaderboardPanel({
           </span>
           <button
             type="button"
-            className="border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg"
+            className="border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg disabled:cursor-not-allowed disabled:border-orbit-border disabled:text-orbit-muted"
             onClick={onReload}
+            disabled={isReloading}
           >
-            rerun probe
+            {isReloading ? "probe running" : "rerun probe"}
           </button>
         </div>
       </div>

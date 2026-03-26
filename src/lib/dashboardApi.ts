@@ -2,7 +2,12 @@ import type {
   DashboardResponse,
   DigestDetailResponse,
   LeaderboardsResponse,
+  SessionReloadStateResponse,
 } from "../types/dashboard";
+import type {
+  ActiveJobResponse,
+  JobProgressSnapshot,
+} from "../types/jobProgress";
 import type { SessionDocument } from "../types/sessionDocument";
 
 const API_BASE_URL =
@@ -63,11 +68,23 @@ export function reloadSession(payload?: {
   run_label?: string;
   sources?: string[];
 }) {
-  return fetchJson<{ session_id: string | null; status: string; error: string | null }>(
+  return fetchJson<SessionReloadStateResponse>(
     "/api/sessions/reload",
     {
       method: "POST",
       body: JSON.stringify(payload ?? {}),
     },
+  );
+}
+
+export function fetchActiveJob(surface = "dashboard") {
+  return fetchJson<ActiveJobResponse | null>(
+    `/api/jobs/active?surface=${encodeURIComponent(surface)}`,
+  );
+}
+
+export function fetchJobProgress(jobId: string) {
+  return fetchJson<JobProgressSnapshot>(
+    `/api/jobs/${encodeURIComponent(jobId)}`,
   );
 }

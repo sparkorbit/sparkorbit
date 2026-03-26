@@ -29,7 +29,7 @@ def create_session_reload(
 ) -> SessionReloadResponse:
     result = start_session_reload(
         store,
-        schedule_reload=lambda: background_tasks.add_task(
+        schedule_reload=lambda job_id: background_tasks.add_task(
             run_session_reload,
             store,
             sources=payload.sources,
@@ -37,10 +37,13 @@ def create_session_reload(
             output_dir=payload.output_dir,
             run_label=payload.run_label,
             timeout=payload.timeout,
+            job_id=job_id,
         ),
     )
     return SessionReloadResponse(
         session_id=result["session_id"],
         status=result["status"],
         error=result["error"],
+        job_id=result.get("job_id"),
+        poll_path=result.get("poll_path"),
     )

@@ -29,6 +29,14 @@ from ..core.constants import (
 )
 from ..core.store import RedisLike
 from .collector import collect_run
+from .job_progress import (
+    build_default_loading_snapshot,
+    build_poll_path,
+    build_work_item,
+    get_active_job,
+    get_job_progress,
+    get_or_create_job_tracker,
+)
 from .summary_provider import (
     BriefingGenerator,
     SummaryGenerator,
@@ -85,6 +93,20 @@ def now_utc_iso() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def make_job_id(label: str) -> str:
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+    return f"job_{stamp}_{label}"
+
+
+def build_job_error(exc: Exception) -> dict[str, str]:
+    return {
+        "message": str(exc),
+        "type": type(exc).__name__,
+    }
 
 
 def session_key(session_id: str, suffix: str) -> str:
@@ -539,7 +561,12 @@ def build_runtime_items(status: str, *, stage: str | None = None) -> list[dict[s
         collector_status = "completed"
         redis_status = "running"
 
-    if status == "summarizing" or stage in {"summarizing_documents", "building_digests"}:
+    if status == "summarizing" or stage in {
+        "summarizing_documents",
+        "offline_labeling",
+        "building_digests",
+        "building_briefing",
+    }:
         enricher_status = "running"
     elif status in {"ready", "partial_error"}:
         enricher_status = "complete"
@@ -570,6 +597,43 @@ def build_runtime_items(status: str, *, stage: str | None = None) -> list[dict[s
     ]
 
 
+def resolve_loading_snapshot(meta: dict[str, Any]) -> dict[str, Any]:
+    loading = meta.get("loading")
+    if isinstance(loading, dict):
+        return loading
+    session_id = str(meta.get("session_id") or "") or None
+    run_id = str(meta.get("run_id") or "") or None
+    return build_default_loading_snapshot(
+        status=str(meta.get("status") or "published"),
+        session_id=session_id,
+        run_id=run_id,
+        detail=f"Session state {meta.get('status') or 'published'}.",
+    )
+
+
+def attach_loading_snapshot(
+    meta: dict[str, Any],
+    *,
+    store: RedisLike,
+    job_id: str | None = None,
+) -> dict[str, Any]:
+    if job_id:
+        loading = get_job_progress(store, job_id)
+        meta["loading"] = (
+            deepcopy(loading)
+            if isinstance(loading, dict)
+            else resolve_loading_snapshot(meta)
+        )
+        return meta
+
+    meta["loading"] = build_default_loading_snapshot(
+        status=str(meta.get("status") or "published"),
+        session_id=str(meta.get("session_id") or "") or None,
+        run_id=str(meta.get("run_id") or "") or None,
+        detail=f"Session state {meta.get('status') or 'published'}.",
+    )
+    return meta
+
 
 def build_session_block(
     session_id: str,
@@ -582,6 +646,7 @@ def build_session_block(
     session_date = _ts[:16].replace("T", " ") if len(_ts) >= 16 else _ts[:10]
     digests_ready = "yes" if meta.get("digests_ready") else "no"
     session_status = str(meta.get("status") or "published")
+    loading = resolve_loading_snapshot(meta)
     arena_overview = build_lmarena_session_overview(documents_by_id)
     return {
         "title": "Relay Cache",
@@ -614,7 +679,11 @@ def build_session_block(
                 "note": f"summaries {meta.get('summaries_ready', 0)} / state {meta.get('status')}",
             },
         ],
-        "runtime": build_runtime_items(session_status),
+        "runtime": build_runtime_items(
+            session_status,
+            stage=str(loading.get("stage") or ""),
+        ),
+        "loading": loading,
         "rules": [
             "Run output is the canonical reference data.",
             "Cache only holds per-source feeds and UI views.",
@@ -1399,9 +1468,20 @@ def publish_run(
     run_dir: str | Path,
     *,
     queue: bool = True,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    job_id: str | None = None,
 ) -> dict[str, Any]:
     artifacts = load_run_artifacts(run_dir)
     session_id = str(artifacts.run_manifest["run_id"])
+
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "type": "identity",
+                "session_id": session_id,
+                "run_id": session_id,
+            }
+        )
 
     company_lookup: dict[str, dict[str, Any]] = {
         row["document_id"]: row
@@ -1457,6 +1537,7 @@ def publish_run(
         "summary_candidates": len(candidate_ids),
         "source_ids": source_ids,
     }
+    attach_loading_snapshot(meta, store=store, job_id=job_id)
 
     set_json_with_ttl(store, session_key(session_id, "meta"), meta)
     set_json_with_ttl(store, artifact_root_key(session_id), str(artifacts.run_dir))
@@ -1467,15 +1548,72 @@ def publish_run(
         store, session_key(session_id, "source_manifest"), artifacts.source_manifest
     )
 
-    for document in documents:
+    total_documents = len(documents)
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "type": "stage",
+                "stage": "publishing_documents",
+                "detail": f"Publishing {total_documents} normalized documents.",
+                "progress_current": 0,
+                "progress_total": total_documents,
+                "reset_document_counts": True,
+                "force": True,
+            }
+        )
+
+    for index, document in enumerate(documents, start=1):
         set_json_with_ttl(store, doc_key(session_id, document["document_id"]), document)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "type": "progress",
+                    "stage": "publishing_documents",
+                    "count_kind": "document",
+                    "completed": index,
+                    "total": total_documents,
+                    "error": 0,
+                    "current_item": build_work_item(
+                        "document",
+                        str(document["document_id"]),
+                        str(document.get("title") or document["document_id"]),
+                    ),
+                }
+            )
 
     feed_lists = {
         source: [document["document_id"] for document in documents_for_source]
         for source, documents_for_source in documents_by_source.items()
     }
-    for source, document_ids in feed_lists.items():
+    total_feeds = len(feed_lists)
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "type": "stage",
+                "stage": "publishing_views",
+                "detail": f"Publishing {total_feeds} source views.",
+                "progress_current": 0,
+                "progress_total": total_feeds,
+                "force": True,
+            }
+        )
+
+    for index, (source, document_ids) in enumerate(feed_lists.items(), start=1):
         set_list_with_ttl(store, feed_key(session_id, source), document_ids)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "type": "progress",
+                    "stage": "publishing_views",
+                    "completed": index,
+                    "total": total_feeds,
+                    "error": 0,
+                    "current_item": build_work_item("source", source, source),
+                }
+            )
+
+    attach_loading_snapshot(meta, store=store, job_id=job_id)
+    set_json_with_ttl(store, session_key(session_id, "meta"), meta)
 
     dashboard = build_dashboard_payload(
         session_id=session_id,
@@ -1562,15 +1700,65 @@ def run_offline_llm_enrichment(
     store: RedisLike,
     session_id: str,
     run_dir: Path,
+    *,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> bool:
     """Run company filter + paper domain classifier, then re-merge labels
     into Redis documents. Returns True if any labels were produced."""
+    task_items = [
+        build_work_item("task", "company_filter", "company_filter"),
+        build_work_item("task", "paper_domain", "paper_domain"),
+    ]
+
+    def emit_task_finish(
+        item: dict[str, str],
+        *,
+        completed: int,
+        error: int,
+        failed: bool = False,
+    ) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(
+            {
+                "type": "task_finished",
+                "item": item,
+                "error": failed,
+                "task_error_total": error,
+                "step_id": "labels" if failed else None,
+            }
+        )
+        progress_callback(
+            {
+                "type": "progress",
+                "stage": "offline_labeling",
+                "count_kind": "task",
+                "completed": completed,
+                "total": len(task_items),
+                "error": error,
+                "current_item": item,
+            }
+        )
+
     if not _ollama_reachable():
+        emit_task_finish(task_items[0], completed=1, error=1, failed=True)
+        emit_task_finish(task_items[1], completed=2, error=2, failed=True)
         return False
 
     logger.info("Running offline LLM enrichment for session %s", session_id)
+    if progress_callback is not None:
+        progress_callback({"type": "task_started", "item": task_items[0]})
     company_ok = _run_llm_enrich_script("llm_enrich.py", run_dir)
+    emit_task_finish(task_items[0], completed=1, error=0 if company_ok else 1, failed=not company_ok)
+    if progress_callback is not None:
+        progress_callback({"type": "task_started", "item": task_items[1]})
     paper_ok = _run_llm_enrich_script("paper_enrich.py", run_dir)
+    emit_task_finish(
+        task_items[1],
+        completed=2,
+        error=(0 if company_ok else 1) + (0 if paper_ok else 1),
+        failed=not paper_ok,
+    )
     if not company_ok and not paper_ok:
         return False
 
@@ -1635,6 +1823,8 @@ def run_session_enrichment(
     *,
     generator: SummaryGenerator | None = None,
     briefing_generator: BriefingGenerator | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    job_id: str | None = None,
 ) -> dict[str, Any]:
     generator = generator or build_summary_generator()
     owns_briefing_generator = briefing_generator is None
@@ -1664,6 +1854,7 @@ def run_session_enrichment(
     meta["status"] = "summarizing"
     meta["summary_provider"] = provider_name
     meta["updated_at"] = now_utc_iso()
+    attach_loading_snapshot(meta, store=store, job_id=job_id)
     set_json_with_ttl(store, session_key(session_id, "meta"), meta)
 
     summary_errors = 0
@@ -1672,6 +1863,19 @@ def run_session_enrichment(
     category_documents: dict[str, list[dict[str, Any]]] = {
         category: [] for category in ORDERED_SOURCE_CATEGORIES
     }
+
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "type": "stage",
+                "stage": "summarizing_documents",
+                "detail": f"Summarizing {pending_total} candidate documents.",
+                "progress_current": 0,
+                "progress_total": pending_total,
+                "reset_task_counts": True,
+                "force": True,
+            }
+        )
 
     for source in source_ids:
         for document_id in feed_lists.get(source, []):
@@ -1710,32 +1914,130 @@ def run_session_enrichment(
             document["llm"] = llm
             documents_by_id[document_id] = document
             set_json_with_ttl(store, doc_key(session_id, document_id), document)
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "type": "progress",
+                        "stage": "summarizing_documents",
+                        "count_kind": "task",
+                        "completed": processed_summaries,
+                        "total": pending_total,
+                        "error": summary_errors,
+                        "current_item": build_work_item(
+                            "document",
+                            document_id,
+                            str(document.get("title") or document_id),
+                        ),
+                    }
+                )
 
-    digests_by_category: dict[str, dict[str, Any]] = {}
-    for category in ORDERED_SOURCE_CATEGORIES:
-        documents = sort_documents(category_documents.get(category, []))
-        digest = build_digest_from_documents(category, documents)
-        digests_by_category[category] = digest
-        set_json_with_ttl(store, digest_key(session_id, category), digest)
+    if summary_errors and progress_callback is not None:
+        progress_callback({"type": "step_error", "step_id": "summaries"})
 
     # --- offline LLM enrichment (company filter + paper domain) ---
     run_dir_str = store.get(artifact_root_key(session_id))
     if run_dir_str:
-        enriched = run_offline_llm_enrichment(store, session_id, Path(run_dir_str))
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "type": "stage",
+                    "stage": "offline_labeling",
+                    "detail": "Running company and paper labelers.",
+                    "progress_current": 0,
+                    "progress_total": 2,
+                    "reset_task_counts": True,
+                    "force": True,
+                }
+            )
+        enriched = run_offline_llm_enrichment(
+            store,
+            session_id,
+            Path(run_dir_str),
+            progress_callback=progress_callback,
+        )
         if enriched:
             # Reload documents after label merge so briefing sees domains
             documents_by_id = get_documents_by_id(store, session_id, feed_lists)
+    elif progress_callback is not None:
+        progress_callback(
+            {
+                "type": "stage",
+                "stage": "offline_labeling",
+                "detail": "No run directory available for offline labels.",
+                "progress_current": 2,
+                "progress_total": 2,
+                "reset_task_counts": True,
+                "force": True,
+            }
+        )
+
+    digests_by_category: dict[str, dict[str, Any]] = {}
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "type": "stage",
+                "stage": "building_digests",
+                "detail": f"Building {len(ORDERED_SOURCE_CATEGORIES)} category digests.",
+                "progress_current": 0,
+                "progress_total": len(ORDERED_SOURCE_CATEGORIES),
+                "reset_task_counts": True,
+                "force": True,
+            }
+        )
+    for index, category in enumerate(ORDERED_SOURCE_CATEGORIES, start=1):
+        documents = sort_documents(category_documents.get(category, []))
+        digest = build_digest_from_documents(category, documents)
+        digests_by_category[category] = digest
+        set_json_with_ttl(store, digest_key(session_id, category), digest)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "type": "progress",
+                    "stage": "building_digests",
+                    "count_kind": "task",
+                    "completed": index,
+                    "total": len(ORDERED_SOURCE_CATEGORIES),
+                    "error": 0,
+                    "current_item": build_work_item("task", category, category),
+                }
+            )
 
     briefing: dict[str, Any] | None = None
     if briefing_generator is not None:
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "type": "stage",
+                    "stage": "building_briefing",
+                    "detail": "Building session briefing.",
+                    "progress_current": 0,
+                    "progress_total": 1,
+                    "reset_task_counts": True,
+                    "force": True,
+                    "current_item": build_work_item("task", "briefing", "briefing"),
+                }
+            )
         briefing_input = build_briefing_input(documents_by_id, feed_lists)
         briefing = briefing_generator.generate_briefing(briefing_input)
         set_json_with_ttl(store, session_key(session_id, "briefing"), briefing)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "type": "progress",
+                    "stage": "building_briefing",
+                    "count_kind": "task",
+                    "completed": 1,
+                    "total": 1,
+                    "error": 0,
+                    "current_item": build_work_item("task", "briefing", "briefing"),
+                }
+            )
 
     meta["digests_ready"] = True
     meta["summaries_ready"] = summaries_ready
     meta["updated_at"] = now_utc_iso()
     meta["status"] = "partial_error" if summary_errors else "ready"
+    attach_loading_snapshot(meta, store=store, job_id=job_id)
     set_json_with_ttl(store, session_key(session_id, "meta"), meta)
 
     dashboard = build_dashboard_payload(
@@ -1769,6 +2071,25 @@ def run_session_enrichment(
         close = getattr(briefing_generator, "close", None)
         if callable(close):
             close()
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "type": "terminal",
+                "status": meta["status"],
+                "detail": (
+                    "Session ready with partial summary errors."
+                    if meta["status"] == "partial_error"
+                    else "Session ready."
+                ),
+                "step_id": "summaries" if meta["status"] == "partial_error" else None,
+            }
+        )
+        latest_loading = get_job_progress(store, job_id) if job_id else None
+        if isinstance(latest_loading, dict):
+            meta["loading"] = latest_loading
+            set_json_with_ttl(store, session_key(session_id, "meta"), meta)
+            dashboard["session"]["loading"] = latest_loading
+            set_json_with_ttl(store, session_key(session_id, "dashboard"), dashboard)
     return {
         "session_id": session_id,
         "meta": meta,
@@ -1799,16 +2120,45 @@ def run_homepage_bootstrap(
     *,
     run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     timeout: float = 30.0,
+    job_id: str | None = None,
 ) -> None:
+    set_homepage_bootstrap_running(True)
+    resolved_job_id = job_id or make_job_id("bootstrap")
+    tracker = get_or_create_job_tracker(
+        store,
+        job_id=resolved_job_id,
+        surface="dashboard",
+        job_type="collection_bootstrap",
+    )
     try:
         _, run_dir = collect_run(
             run_label=run_label,
             timeout=timeout,
+            progress_callback=tracker.handle_event,
         )
-        result = publish_run(store, run_dir, queue=False)
-        run_session_enrichment(store, result["session_id"])
-    except Exception:
+        result = publish_run(
+            store,
+            run_dir,
+            queue=False,
+            progress_callback=tracker.handle_event,
+            job_id=resolved_job_id,
+        )
+        run_session_enrichment(
+            store,
+            result["session_id"],
+            progress_callback=tracker.handle_event,
+            job_id=resolved_job_id,
+        )
+    except Exception as exc:
         logger.exception("Error during homepage bootstrap")
+        tracker.handle_event(
+            {
+                "type": "terminal",
+                "status": "error",
+                "detail": "Homepage bootstrap failed.",
+                "error": build_job_error(exc),
+            }
+        )
     finally:
         set_homepage_bootstrap_running(False)
 
@@ -1821,7 +2171,15 @@ def run_session_reload(
     output_dir: str | Path | None = None,
     run_label: str = DEFAULT_RUN_LABEL,
     timeout: float = 30.0,
+    job_id: str | None = None,
 ) -> None:
+    resolved_job_id = job_id or make_job_id("reload")
+    tracker = get_or_create_job_tracker(
+        store,
+        job_id=resolved_job_id,
+        surface="dashboard",
+        job_type="collection_reload",
+    )
     try:
         _, run_dir = collect_run(
             sources=sources,
@@ -1829,11 +2187,31 @@ def run_session_reload(
             output_dir=output_dir,
             run_label=run_label,
             timeout=timeout,
+            progress_callback=tracker.handle_event,
         )
-        result = publish_run(store, run_dir, queue=False)
-        run_session_enrichment(store, result["session_id"])
-    except Exception:
+        result = publish_run(
+            store,
+            run_dir,
+            queue=False,
+            progress_callback=tracker.handle_event,
+            job_id=resolved_job_id,
+        )
+        run_session_enrichment(
+            store,
+            result["session_id"],
+            progress_callback=tracker.handle_event,
+            job_id=resolved_job_id,
+        )
+    except Exception as exc:
         logger.exception("Error during session reload")
+        tracker.handle_event(
+            {
+                "type": "terminal",
+                "status": "error",
+                "detail": "Session reload failed.",
+                "error": build_job_error(exc),
+            }
+        )
     finally:
         set_session_reload_running(False)
 
@@ -1842,18 +2220,68 @@ def run_session_reload(
 def start_session_reload(
     store: RedisLike,
     *,
-    schedule_reload: Callable[[], None],
+    schedule_reload: Callable[[str], None],
 ) -> dict[str, Any]:
     if is_session_reload_running():
-        return {"session_id": None, "status": "collecting", "error": None}
+        active_job = get_active_job(store, "dashboard")
+        return {
+            "session_id": None,
+            "status": "collecting",
+            "error": None,
+            "job_id": active_job["job_id"] if active_job else None,
+            "poll_path": active_job["poll_path"] if active_job else None,
+        }
 
+    job_id = make_job_id("reload")
+    get_or_create_job_tracker(
+        store,
+        job_id=job_id,
+        surface="dashboard",
+        job_type="collection_reload",
+    )
     set_session_reload_running(True)
     try:
-        schedule_reload()
-    except Exception:
+        schedule_reload(job_id)
+    except Exception as exc:
         set_session_reload_running(False)
+        tracker = get_or_create_job_tracker(
+            store,
+            job_id=job_id,
+            surface="dashboard",
+            job_type="collection_reload",
+        )
+        tracker.handle_event(
+            {
+                "type": "terminal",
+                "status": "error",
+                "detail": "Failed to schedule reload.",
+                "error": build_job_error(exc),
+            }
+        )
         raise
-    return {"session_id": None, "status": "collecting", "error": None}
+    return {
+        "session_id": None,
+        "status": "collecting",
+        "error": None,
+        "job_id": job_id,
+        "poll_path": build_poll_path(job_id),
+    }
+
+
+def get_active_job_response(
+    store: RedisLike,
+    *,
+    surface: str,
+) -> dict[str, Any] | None:
+    return get_active_job(store, surface)
+
+
+def get_job_progress_response(
+    store: RedisLike,
+    *,
+    job_id: str,
+) -> dict[str, Any] | None:
+    return get_job_progress(store, job_id)
 
 
 def get_dashboard_response(
@@ -1971,6 +2399,8 @@ def reload_session(
     run_label: str = DEFAULT_RUN_LABEL,
     timeout: float = 30.0,
     queue: bool = True,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    job_id: str | None = None,
 ) -> dict[str, Any]:
     _, run_dir = collect_run(
         sources=sources,
@@ -1978,5 +2408,12 @@ def reload_session(
         output_dir=output_dir,
         run_label=run_label,
         timeout=timeout,
+        progress_callback=progress_callback,
     )
-    return publish_run(store, run_dir, queue=queue)
+    return publish_run(
+        store,
+        run_dir,
+        queue=queue,
+        progress_callback=progress_callback,
+        job_id=job_id,
+    )

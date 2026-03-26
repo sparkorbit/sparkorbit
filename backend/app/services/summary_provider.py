@@ -7,7 +7,10 @@ import re
 from pathlib import Path
 from typing import Any, Protocol
 
-import httpx
+try:
+    import httpx
+except ModuleNotFoundError:  # pragma: no cover - local test env fallback
+    httpx = None
 
 from ..core.constants import (
     BRIEFING_PROMPT_PACKS,
@@ -462,7 +465,7 @@ class BriefingGenerator:
         self.top_p = OLLAMA_TOP_P
         self.top_k = OLLAMA_TOP_K
         self.keep_alive = OLLAMA_KEEP_ALIVE
-        self.http = httpx.Client(timeout=OLLAMA_TIMEOUT)
+        self.http = httpx.Client(timeout=OLLAMA_TIMEOUT) if httpx is not None else None
         self._available = True
 
         self._category_packs: dict[str, dict[str, str]] = {}
@@ -472,6 +475,11 @@ class BriefingGenerator:
                 continue
             if path.exists():
                 self._category_packs[cat] = _load_prompt_pack(path)
+
+        if self.http is None:
+            logger.warning("httpx is unavailable — briefing will be skipped")
+            self._available = False
+            return
 
         try:
             resp = self.http.get(f"{self.base_url}/api/tags", timeout=5.0)
@@ -499,7 +507,8 @@ class BriefingGenerator:
 
     def close(self) -> None:
         self.unload_model()
-        self.http.close()
+        if self.http is not None:
+            self.http.close()
 
     def _call_ollama(
         self, system: str, user: str, fmt: dict[str, Any]
