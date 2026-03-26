@@ -26,8 +26,7 @@
 
 ***
 
-> **Tested on:** Linux, macOS, and Windows
->
+> **Tested on:** Linux, macOS, and Windows.
 > Edge cases may exist depending on Docker/WSL setup — see [Known Issues](#known-issues)
 
 ***
@@ -47,49 +46,62 @@
 
 ## Quick Start
 
-Recommended first run: **No GPU / no local LLM**.
-This quick start and the Beginner Guide use the Bash-based Linux/macOS path.
-On Windows, Docker Desktop / WSL details can differ.
-
-If you are new to Docker or just want the easiest path, start with the step-by-step guide:
-**[Getting Started (No GPU)](./docs/00_getting_started_no_gpu.md)**
-
-Before you run this, make sure Docker is installed and currently running.
-The first build may take a few minutes.
+Three lines. That's it.
 
 ```bash
 git clone https://github.com/sparkorbit/sparkorbit.git
 cd sparkorbit
-bash scripts/docker-up.sh --without-llm
+bash scripts/docker-up.sh
 ```
 
-Need Git for the command above, or use the ZIP download path in the Beginner Guide.
+You'll see one question pop up — **don't just hit Enter without reading it!**
 
-<p align="center">
-  <img src="./docs/images/AIOribits_NoGPU.png" alt="SparkOrbit without GPU — source curation only" width="100%"/>
-</p>
+> **⚠️ `Use local LLM bundle? [Y/n]`**
+>
+> This decides whether AI summarization runs on your machine. Choose carefully.
 
-Then open **http://localhost:3000** — the loading screen shows live progress.
-If you're running on a remote server, use `http://<server-ip>:3000` instead.
+| Answer | What you get | Requirements |
+|--------|-------------|--------------|
+| **Y** (default) | Full experience — AI summary, paper topics, daily briefing | NVIDIA GPU, ~13GB VRAM |
+| **N** | Source curation only, no AI summarization | Docker only |
 
-- No GPU mode still gives you the full dashboard. AI summaries are simply skipped.
+No GPU? No problem — pick `N` and you still get the full dashboard with 30+ sources, leaderboards, and engagement rankings. The AI stuff is a bonus, not a requirement.
 
-If you have an NVIDIA GPU and want local AI summaries later:
+Once it's up, open **http://localhost:3000** and watch it load. On a remote server, swap in your server IP.
+
+Want to skip the question entirely? Pass the flag directly:
 
 ```bash
 bash scripts/docker-up.sh --with-llm      # always include LLM
+bash scripts/docker-up.sh --without-llm   # always skip LLM
 ```
 
-If you run the helper script without `--with-llm` or `--without-llm`, it will ask:
+Hit the **RELOAD** button (top-right) anytime to re-collect all sources and re-run LLM features — no restart needed.
 
-```text
-Use local LLM bundle? [Y/n]
-```
+<details>
+<summary><b>Screenshot: With GPU (full AI features)</b></summary>
+<br/>
+<p align="center">
+  <img src="./docs/images/AIorbits_comp.png" alt="SparkOrbit with GPU — full AI features" width="100%"/>
+</p>
+</details>
 
-<font color="red"><strong>This asks whether the local LLM should be used.</strong></font>
+<details>
+<summary><b>Screenshot: Without GPU (source curation only)</b></summary>
+<br/>
+<p align="center">
+  <img src="./docs/images/AIOribits_NoGPU.png" alt="SparkOrbit without GPU — source curation only" width="100%"/>
+</p>
+</details>
 
-Full setup, run, and verification details:
-**[Operational Playbook](./docs/06_operational_playbook.md)**
+***
+
+## First Time Here? Welcome Aboard 🚀
+
+Never used Docker? Not sure what a "local LLM" is? No worries — we've got you covered.
+
+- **[Getting Started (No GPU)](./docs/00_getting_started_no_gpu.md)** — a step-by-step walkthrough from zero to dashboard. No GPU needed, no terminal wizardry required. Start here if `git clone` already sounds scary.
+- **[Operational Playbook](./docs/06_operational_playbook.md)** — the full setup guide with verification steps, troubleshooting, and advanced options. For when you're ready to go deeper.
 
 ***
 
