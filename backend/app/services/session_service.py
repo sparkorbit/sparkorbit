@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -16,6 +17,8 @@ from ..core.constants import (
     ACTIVE_SESSION_KEY,
     BOOTSTRAP_STATE_KEY,
     BOOTSTRAP_STATE_TTL_SECONDS,
+    BRIEFING_PROVIDER_ENV_VAR,
+    DEFAULT_BRIEFING_PROVIDER,
     DEFAULT_RUN_LABEL,
     HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     OLLAMA_BASE_URL,
@@ -30,6 +33,7 @@ from ..core.constants import (
     SESSION_PREFIX,
     SESSION_TTL_SECONDS,
     SOURCE_CATEGORY_LABELS,
+    SUMMARY_EXCLUDED_TEXT_SCOPES,
 )
 from ..core.store import RedisLike
 from .collector import collect_run
@@ -56,6 +60,7 @@ logger = logging.getLogger(__name__)
 SESSION_DOCUMENT_SUMMARIES_FILENAME = "session_document_summaries.ndjson"
 SESSION_CATEGORY_DIGESTS_FILENAME = "session_category_digests.ndjson"
 SESSION_BRIEFINGS_FILENAME = "session_briefings.ndjson"
+OPEN_LLM_LEADERBOARD_REFERENCE_URL = "https://huggingface.co/datasets/open-llm-leaderboard/contents"
 
 _HOMEPAGE_BOOTSTRAP_LOCK = threading.Lock()
 _HOMEPAGE_BOOTSTRAP_RUNNING = False
@@ -326,26 +331,428 @@ def compact_text(value: str | None, max_length: int = 124) -> str:
     return normalized[: max_length - 3].rstrip() + "..."
 
 
+_ARXIV_ABSTRACT_PREFIX_PATTERNS = (
+    re.compile(
+        r"(^|\n\n)\s*(?:arXiv:\s*[0-9]{4}\.[0-9]{4,5}(?:v\d+)?\s+)?Announce Type:\s*[^\n]*?\s+Abstract:\s*",
+        re.I,
+    ),
+    re.compile(r"(^|\n\n)\s*Abstract:\s*", re.I),
+)
+
+
+def strip_arxiv_monitor_abstract(value: Any) -> Any:
+    if not isinstance(value, str) or not value.strip():
+        return value
+    cleaned = value
+    for pattern in _ARXIV_ABSTRACT_PREFIX_PATTERNS:
+        cleaned = pattern.sub(r"\1", cleaned, count=1)
+    cleaned = cleaned.strip()
+    return cleaned or value
+
+
+_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>", re.DOTALL)
+_JUNK_CONTENT_PATTERNS = (
+    re.compile(r"<!doctype\s+html", re.I),
+    re.compile(r"<html[\s>]", re.I),
+    re.compile(r"bad\s*gateway", re.I),
+    re.compile(r"internal\s*server\s*error", re.I),
+    re.compile(r"403\s*forbidden", re.I),
+    re.compile(r"access\s*denied", re.I),
+    re.compile(r"nginx/", re.I),
+    re.compile(r"apache/", re.I),
+    re.compile(r"^region:\w+$", re.I),
+    re.compile(r"^a blog post by .+ on hugging face$", re.I),
+    re.compile(
+        r"^(?:text-generation|text-to-image|image-text-to-text|feature-extraction"
+        r"|fill-mask|token-classification|sentence-similarity|text-classification"
+        r"|automatic-speech-recognition|audio-classification"
+        r"|visual-question-answering|image-to-text|reinforcement-learning)\b",
+        re.I,
+    ),
+)
+
+# ``sanitize_document_for_monitor`` still checks the legacy error-pattern name.
+# Keep the alias so monitor cleanup and publish-time payload building stay aligned.
+_HTML_ERROR_PATTERNS = _JUNK_CONTENT_PATTERNS
+
+
+def _is_tag_soup(text: str) -> bool:
+    """Detect HF-style tag lists (space-separated tokens, no prose)."""
+    if re.search(r"[.!?](?:\s|$)", text):
+        return False
+    tokens = text.split()
+    if len(tokens) < 3:
+        return False
+    tag_like = sum(
+        1
+        for t in tokens
+        if re.fullmatch(r"[\w.:/-]+", t) and len(t) < 60
+    )
+    return tag_like / len(tokens) > 0.8
+
+
+def sanitize_content_text(
+    text: str | None, *, title: str | None = None
+) -> str | None:
+    """Strip HTML, reject error pages / metadata-only / tag-soup content."""
+    if not text:
+        return None
+    for pattern in _JUNK_CONTENT_PATTERNS:
+        if pattern.search(text):
+            return None
+    cleaned = _HTML_TAG_RE.sub("", text).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if len(cleaned) < 8:
+        return None
+    if _is_tag_soup(cleaned):
+        return None
+    if title:
+        norm_title = re.sub(r"\s+", " ", title).strip().lower()
+        norm_cleaned = cleaned.lower()
+        if norm_cleaned == norm_title or norm_cleaned.startswith(norm_title + "."):
+            return None
+    return cleaned
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def sanitize_document_for_monitor(document: Any) -> Any:
+    if not isinstance(document, dict):
+        return document
+
+    next_document = deepcopy(document)
+    next_document["authors"] = _normalize_string_list(next_document.get("authors"))
+    next_document["related_urls"] = _normalize_string_list(
+        next_document.get("related_urls")
+    )
+    next_document["external_ids"] = (
+        deepcopy(next_document.get("external_ids"))
+        if isinstance(next_document.get("external_ids"), dict)
+        else {}
+    )
+    next_document["engagement"] = (
+        deepcopy(next_document.get("engagement"))
+        if isinstance(next_document.get("engagement"), dict)
+        else {}
+    )
+    next_document["engagement_primary"] = {
+        **(
+            deepcopy(next_document.get("engagement_primary"))
+            if isinstance(next_document.get("engagement_primary"), dict)
+            else {}
+        ),
+        "name": (
+            (next_document.get("engagement_primary") or {}).get("name")
+            if isinstance(next_document.get("engagement_primary"), dict)
+            else None
+        ),
+        "value": (
+            (next_document.get("engagement_primary") or {}).get("value")
+            if isinstance(next_document.get("engagement_primary"), dict)
+            else None
+        ),
+    }
+    next_document["discovery"] = {
+        **(
+            deepcopy(next_document.get("discovery"))
+            if isinstance(next_document.get("discovery"), dict)
+            else {}
+        ),
+        "spark_score": (
+            (next_document.get("discovery") or {}).get("spark_score")
+            if isinstance(next_document.get("discovery"), dict)
+            else None
+        ),
+    }
+    next_document["ranking"] = {
+        **(
+            deepcopy(next_document.get("ranking"))
+            if isinstance(next_document.get("ranking"), dict)
+            else {}
+        ),
+        "feed_score": (
+            (next_document.get("ranking") or {}).get("feed_score")
+            if isinstance(next_document.get("ranking"), dict)
+            else None
+        ),
+    }
+    next_document["benchmark"] = {
+        **(
+            deepcopy(next_document.get("benchmark"))
+            if isinstance(next_document.get("benchmark"), dict)
+            else {}
+        ),
+        "kind": (
+            (next_document.get("benchmark") or {}).get("kind")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "board_id": (
+            (next_document.get("benchmark") or {}).get("board_id")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "board_name": (
+            (next_document.get("benchmark") or {}).get("board_name")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "snapshot_at": (
+            (next_document.get("benchmark") or {}).get("snapshot_at")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "rank": (
+            (next_document.get("benchmark") or {}).get("rank")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "score_label": (
+            (next_document.get("benchmark") or {}).get("score_label")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "score_value": (
+            (next_document.get("benchmark") or {}).get("score_value")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "score_unit": (
+            (next_document.get("benchmark") or {}).get("score_unit")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "votes": (
+            (next_document.get("benchmark") or {}).get("votes")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "model_name": (
+            (next_document.get("benchmark") or {}).get("model_name")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "organization": (
+            (next_document.get("benchmark") or {}).get("organization")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "total_models": (
+            (next_document.get("benchmark") or {}).get("total_models")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+        "total_votes": (
+            (next_document.get("benchmark") or {}).get("total_votes")
+            if isinstance(next_document.get("benchmark"), dict)
+            else None
+        ),
+    }
+    reference = (
+        deepcopy(next_document.get("reference"))
+        if isinstance(next_document.get("reference"), dict)
+        else {}
+    )
+    next_document["reference"] = {
+        **reference,
+        "source_label": reference.get("source_label"),
+        "display_title": reference.get("display_title"),
+        "display_url": reference.get("display_url"),
+        "snippet": reference.get("snippet"),
+    }
+    llm = (
+        deepcopy(next_document.get("llm"))
+        if isinstance(next_document.get("llm"), dict)
+        else {}
+    )
+    run_meta = (
+        deepcopy(llm.get("run_meta")) if isinstance(llm.get("run_meta"), dict) else {}
+    )
+    next_document["llm"] = {
+        **llm,
+        "status": str(llm.get("status") or "pending"),
+        "summary_1l": llm.get("summary_1l"),
+        "summary_short": llm.get("summary_short"),
+        "key_points": _normalize_string_list(llm.get("key_points")),
+        "entities": _normalize_string_list(llm.get("entities")),
+        "primary_domain": llm.get("primary_domain"),
+        "subdomains": _normalize_string_list(llm.get("subdomains")),
+        "importance_score": llm.get("importance_score"),
+        "importance_reason": llm.get("importance_reason"),
+        "evidence_chunk_ids": _normalize_string_list(llm.get("evidence_chunk_ids")),
+        "run_meta": {
+            **run_meta,
+            "model_name": run_meta.get("model_name"),
+            "prompt_version": run_meta.get("prompt_version"),
+            "fewshot_pack_version": run_meta.get("fewshot_pack_version"),
+            "generated_at": run_meta.get("generated_at"),
+        },
+    }
+    next_document["metadata"] = (
+        deepcopy(next_document.get("metadata"))
+        if isinstance(next_document.get("metadata"), dict)
+        else {}
+    )
+    next_document["raw_ref"] = (
+        deepcopy(next_document.get("raw_ref"))
+        if isinstance(next_document.get("raw_ref"), dict)
+        else {}
+    )
+
+    # Strip HTML tags from text fields for all sources
+    for text_field in ("description", "body_text", "summary_input_text"):
+        raw = next_document.get(text_field)
+        if isinstance(raw, str) and _HTML_TAG_RE.search(raw):
+            stripped = _HTML_TAG_RE.sub("", raw).strip()
+            # If the entire content was an error page, null it out
+            is_error = any(p.search(raw) for p in _HTML_ERROR_PATTERNS)
+            next_document[text_field] = None if is_error else (stripped or None)
+
+    source = str(document.get("source") or "")
+    if not source.startswith("arxiv_rss_"):
+        return next_document
+
+    next_document["description"] = strip_arxiv_monitor_abstract(
+        next_document.get("description")
+    )
+    next_document["body_text"] = strip_arxiv_monitor_abstract(
+        next_document.get("body_text")
+    )
+    next_document["summary_input_text"] = strip_arxiv_monitor_abstract(
+        next_document.get("summary_input_text")
+    )
+
+    next_document["llm"] = {
+        **next_document["llm"],
+        "summary_1l": strip_arxiv_monitor_abstract(next_document["llm"].get("summary_1l")),
+        "summary_short": strip_arxiv_monitor_abstract(
+            next_document["llm"].get("summary_short")
+        ),
+    }
+    next_document["reference"] = {
+        **next_document["reference"],
+        "snippet": strip_arxiv_monitor_abstract(
+            next_document["reference"].get("snippet")
+        ),
+    }
+
+    return next_document
+
+
+SOURCE_DISPLAY_NAMES = {
+    "amazon_science": "Amazon Science",
+    "anthropic_news": "Anthropic News",
+    "apple_ml": "Apple ML",
+    "arxiv_rss_cs_ai": "ARXIV - AI",
+    "arxiv_rss_cs_cl": "ARXIV - Language AI",
+    "arxiv_rss_cs_cr": "ARXIV - Security",
+    "arxiv_rss_cs_cv": "ARXIV - Vision",
+    "arxiv_rss_cs_ir": "ARXIV - Search and Retrieval",
+    "arxiv_rss_cs_lg": "ARXIV - Machine Learning",
+    "arxiv_rss_cs_ro": "ARXIV - Robotics",
+    "arxiv_rss_stat_ml": "ARXIV - Statistics and ML",
+    "deepmind_blog": "Google DeepMind News",
+    "deepseek_updates": "DeepSeek Updates",
+    "github_bytedance_repos": "ByteDance GitHub",
+    "github_curated_repos": "GitHub Curated Repos",
+    "github_mindspore_repos": "MindSpore GitHub",
+    "github_paddlepaddle_repos": "PaddlePaddle GitHub",
+    "github_tencent_hunyuan_repos": "Tencent Hunyuan GitHub",
+    "google_ai_blog": "Google AI News",
+    "groq_newsroom": "Groq News",
+    "hf_blog": "Hugging Face Blog",
+    "hf_daily_papers": "Hugging Face Daily Papers",
+    "hf_models_likes": "Hugging Face Top Liked Models",
+    "hf_models_new": "Hugging Face New Models",
+    "hf_trending_models": "Hugging Face Trending Models",
+    "hn_topstories": "Hacker News Top Stories",
+    "kakao_tech_rss": "Kakao Tech",
+    "lg_ai_research_blog": "LG AI Research Blog",
+    "lmarena_overview": "LMArena",
+    "microsoft_research": "Microsoft Research",
+    "mistral_news": "Mistral AI News",
+    "naver_cloud_blog_rss": "NAVER Cloud Blog",
+    "nvidia_deep_learning": "NVIDIA Deep Learning",
+    "open_llm_leaderboard": "Open LLM Leaderboard",
+    "openai_news_rss": "OpenAI News",
+    "qwen_blog_rss": "Qwen Blog",
+    "reddit_localllama": "Reddit - LocalLLaMA",
+    "reddit_machinelearning": "Reddit - MachineLearning",
+    "salesforce_ai_research_rss": "Salesforce AI Research",
+    "samsung_research_posts": "Samsung Research",
+    "stability_news": "Stability AI News",
+    "upstage_blog": "Upstage Blog",
+}
+
+SOURCE_CATEGORY_TITLE_LABELS = {
+    "papers": "Paper",
+    "models": "Model",
+    "community": "Community",
+    "company": "Company",
+    "company_kr": "Company KR",
+    "company_cn": "Company CN",
+    "benchmark": "Benchmark",
+}
+
 def prettify_source_name(source: str) -> str:
+    normalized_source = str(source or "").strip()
+    if not normalized_source:
+        return "-"
+
+    mapped = SOURCE_DISPLAY_NAMES.get(normalized_source)
+    if mapped:
+        return mapped
+
     parts = []
-    for part in source.split("_"):
+    for part in normalized_source.split("_"):
+        if part in {"rss", "api", "posts"}:
+            continue
         if part == "ai":
             parts.append("AI")
-        elif part == "rss":
-            parts.append("RSS")
         elif part == "hf":
-            parts.append("HF")
+            parts.append("Hugging Face")
         elif part == "hn":
-            parts.append("HN")
+            parts.append("Hacker News")
         elif part == "kr":
             parts.append("KR")
         elif part == "cn":
             parts.append("CN")
         elif part == "llm":
             parts.append("LLM")
+        elif part == "arxiv":
+            parts.append("ARXIV")
+        elif part == "github":
+            parts.append("GitHub")
+        elif part == "reddit":
+            parts.append("Reddit")
+        elif part == "openai":
+            parts.append("OpenAI")
+        elif part == "naver":
+            parts.append("NAVER")
+        elif part == "nvidia":
+            parts.append("NVIDIA")
         else:
             parts.append(part.capitalize())
-    return " ".join(parts)
+    return " ".join(parts) if parts else normalized_source
+
+
+def prettify_source_category_title(category: Any) -> str:
+    resolved = str(category or "").strip()
+    if not resolved:
+        return "Source"
+    return SOURCE_CATEGORY_TITLE_LABELS.get(resolved, prettify_source_name(resolved))
+
+
+def build_feed_panel_title(category: Any, source: str) -> str:
+    readable = prettify_source_name(str(source or "").strip())
+    category_label = prettify_source_category_title(category)
+    if readable == "-":
+        return f"[{category_label}]"
+    return f"[{category_label}] {readable}"
 
 
 DOC_TYPE_LABELS = {
@@ -449,6 +856,22 @@ def sort_documents(documents: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(documents, key=document_sort_key, reverse=True)
 
 
+_GENERIC_TITLES = frozenset({
+    "news", "blog", "post", "article", "home", "about", "contact",
+    "updates", "update", "research", "papers", "paper", "model",
+    "models", "stories", "story", "announcements", "announcement",
+})
+
+
+def _is_generic_title(title: str | None) -> bool:
+    if not title:
+        return True
+    stripped = title.strip()
+    if len(stripped) < 4:
+        return True
+    return stripped.lower() in _GENERIC_TITLES
+
+
 def has_displayable_reference(document: dict[str, Any]) -> bool:
     if not document.get("title"):
         return False
@@ -503,16 +926,22 @@ def default_llm_state() -> dict[str, Any]:
 
 
 def build_document_note(document: dict[str, Any]) -> str:
+    document = sanitize_document_for_monitor(document)
     llm = document.get("llm") or {}
     reference = document.get("reference") or {}
-    return compact_text(
-        llm.get("summary_short")
-        or document.get("description")
-        or reference.get("snippet")
-        or document.get("summary_input_text")
-        or document.get("body_text"),
-        124,
-    )
+    title = str(document.get("title") or "")
+    candidates = [
+        llm.get("summary_short"),
+        document.get("description"),
+        reference.get("snippet"),
+        document.get("summary_input_text"),
+        document.get("body_text"),
+    ]
+    for candidate in candidates:
+        cleaned = sanitize_content_text(candidate, title=title)
+        if cleaned:
+            return compact_text(cleaned, 124)
+    return ""
 
 
 def build_feed_meta(document: dict[str, Any]) -> str:
@@ -530,7 +959,7 @@ def build_feed_meta(document: dict[str, Any]) -> str:
     if doc_type in {"model", "model_trending"}:
         return " · ".join(
             [
-                f"likes {int(to_number(engagement.get('likes')))}",
+                f"♥ {int(to_number(engagement.get('likes')))}",
                 f"downloads {int(to_number(engagement.get('downloads')))}",
                 f"pipeline {metadata.get('pipeline_tag') or '-'}",
             ]
@@ -565,6 +994,7 @@ def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
         or document.get("canonical_url")
         or document.get("url")
         or "",
+        "timestamp": document_timestamp(document) or None,
         "source": build_document_badge(document),
         "type": prettify_doc_type(document.get("doc_type")),
         "title": str(document.get("title") or "-"),
@@ -575,19 +1005,19 @@ def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
 
 def loading_stage_label(stage: str, status: str) -> str:
     labels = {
-        "starting": "Link Prep",
-        "fetching_sources": "Signal Sweep",
-        "writing_artifacts": "Trace Write",
-        "publishing_session": "Cache Relay",
-        "publishing_documents": "Cache Write",
-        "publishing_views": "View Relay",
-        "published": "Relay Armed",
-        "summarizing_documents": "Pattern Pass",
-        "building_digests": "Sweep Build",
-        "generating_briefing": "Briefing Gen",
-        "ready": "Grid Ready",
-        "partial_error": "Partial Ready",
-        "error": "Fault",
+        "starting": "Preparing",
+        "fetching_sources": "Collecting Sources",
+        "writing_artifacts": "Saving Results",
+        "publishing_session": "Updating Dashboard",
+        "publishing_documents": "Updating Documents",
+        "publishing_views": "Updating Views",
+        "published": "Data Ready",
+        "summarizing_documents": "Writing Summaries",
+        "building_digests": "Building Overview",
+        "generating_briefing": "Writing Briefing",
+        "ready": "Ready",
+        "partial_error": "Ready with Issues",
+        "error": "Error",
     }
     if status == "partial_error":
         return labels["partial_error"]
@@ -598,43 +1028,43 @@ def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
     steps = [
         {
             "id": "prepare",
-            "label": "Handshake",
-            "detail": "Accepting request and locking scan scope and run parameters.",
+            "label": "Prepare",
+            "detail": "Setting up the scan request and current run scope.",
         },
         {
             "id": "collect",
-            "label": "Sweep",
-            "detail": "Collector is scanning raw signals from each source.",
+            "label": "Collect",
+            "detail": "Reading new items from each source.",
         },
         {
             "id": "normalize",
-            "label": "Trace Write",
-            "detail": "Writing manifest and normalized artifacts to the trace directory.",
+            "label": "Save Results",
+            "detail": "Writing manifests and normalized artifacts to disk.",
         },
         {
             "id": "publish-docs",
-            "label": "Cache Docs",
-            "detail": "Pushing displayable documents into cache keys.",
+            "label": "Update Documents",
+            "detail": "Publishing readable documents into the cache.",
         },
         {
             "id": "publish-views",
-            "label": "Relay Views",
-            "detail": "Refreshing feeds and live views.",
+            "label": "Update Views",
+            "detail": "Refreshing feeds and dashboard views.",
         },
         {
             "id": "summarize",
-            "label": "Pattern Pass",
+            "label": "Write Summaries",
             "detail": "Extracting key lines from selected documents.",
         },
         {
             "id": "digest",
-            "label": "Sweep Build",
-            "detail": "Bundling sweeps and recording final state.",
+            "label": "Build Overview",
+            "detail": "Building category overviews and recording final state.",
         },
         {
             "id": "briefing",
             "label": "Briefing",
-            "detail": "Generating a daily briefing from the collected signals.",
+            "detail": "Generating a daily briefing from the collected documents.",
         },
     ]
 
@@ -769,22 +1199,22 @@ def build_runtime_items(status: str, *, stage: str | None = None) -> list[dict[s
     return [
         {
             "name": "collector",
-            "role": "Collector maintains raw traces as canonical artifacts.",
+            "role": "Collects raw source data and saves the canonical artifacts.",
             "status": collector_status,
         },
         {
             "name": "enricher",
-            "role": "Extracts key lines and generates signal sweeps.",
+            "role": "Builds summaries and overview text from collected documents.",
             "status": enricher_status,
         },
         {
             "name": "redis",
-            "role": "Relay cache stores documents, feeds, sweeps, and live views.",
+            "role": "Stores documents, feeds, summaries, and live dashboard views.",
             "status": redis_status,
         },
         {
             "name": "ui",
-            "role": "UI reads only relay responses and trace details.",
+            "role": "Displays only the server responses prepared for the UI.",
             "status": "live",
         },
     ]
@@ -808,30 +1238,30 @@ def build_bootstrap_runtime_items(status: str, stage: str) -> list[dict[str, str
     return [
         {
             "name": "collector",
-            "role": "Collector runs a full scan on first visit.",
+            "role": "Runs a full source scan on first visit.",
             "status": collector_status,
         },
         {
             "name": "enricher",
-            "role": "Populates key lines and sweeps after publish.",
+            "role": "Adds summaries after documents are published.",
             "status": enricher_status,
         },
         {
             "name": "redis",
-            "role": "Replaces the active cache once collector results arrive.",
+            "role": "Replaces the active cache when the new run is ready.",
             "status": redis_status,
         },
         {
             "name": "ui",
-            "role": "Monitors cold boot status via stream.",
+            "role": "Shows startup progress through the live stream.",
             "status": ui_status,
         },
     ]
 
 
 def build_bootstrap_digest_items(status: str) -> list[dict[str, str]]:
-    collecting_summary = "Signal sweeps will be populated once the scan completes."
-    error_summary = "Cold boot failed. Please reopen the link or re-run the probe."
+    collecting_summary = "Summaries will appear once the scan completes."
+    error_summary = "Startup failed. Please reopen the page or run refresh again."
     summary = collecting_summary if status == "collecting" else error_summary
     evidence = "pending" if status == "collecting" else "error"
     return [
@@ -882,20 +1312,20 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "note": detail,
         },
         {
-            "label": "sweeps",
+            "label": "summaries",
             "value": "pending" if status == "collecting" else "error",
             "note": error_message
-            or "Will proceed to summarization once the collector finishes.",
+            or "Summary generation starts after source collection finishes.",
         },
     ]
     return {
         "brand": {
-            "name": "BLACKSITE",
-            "tagline": "Cold Boot",
+            "name": "AI World Monitor",
+            "tagline": "Starting Up",
         },
         "status": status,
         "session": {
-            "title": "Cold Boot Relay",
+            "title": "Starting Scan",
             "sessionId": "bootstrapping",
             "sessionDate": started_at[:10] or "unknown",
             "window": "live scan",
@@ -911,7 +1341,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "loading": loading,
         },
         "summary": {
-            "title": "Signal Sweep",
+            "title": "Today's Highlights",
             "headline": error_message or detail,
             "digests": build_bootstrap_digest_items(status),
         },
@@ -974,7 +1404,7 @@ def build_session_block(
                 "note": "Number of documents with live references",
             },
             {
-                "label": "sweeps",
+                "label": "summaries",
                 "value": digests_ready,
                 "note": f"summaries {meta.get('summaries_ready', 0)} / state {meta.get('status')}",
             },
@@ -986,7 +1416,7 @@ def build_session_block(
         "rules": [
             "Run output is the canonical reference data.",
             "Cache only holds per-source feeds and UI views.",
-            "Cross-source mixing is performed only in sweeps.",
+            "Cross-source mixing is performed only in summaries.",
         ],
         "arenaOverview": arena_overview,
         "loading": loading,
@@ -1012,6 +1442,121 @@ def lmarena_board_label(document: dict[str, Any]) -> str:
     return title or "Overview"
 
 
+def prettify_owner_label(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+
+    parts = re.split(r"[-_ ]+", normalized)
+    formatted_parts: list[str] = []
+    for part in parts:
+        token = part.strip()
+        if not token:
+            continue
+        lower = token.lower()
+        if lower in {"ai", "llm", "ml", "nlp", "hf"}:
+            formatted_parts.append(lower.upper())
+        elif token.isupper() or token.isdigit():
+            formatted_parts.append(token)
+        else:
+            formatted_parts.append(token.capitalize())
+
+    return " ".join(formatted_parts) or normalized
+
+
+def clean_leaderboard_score_label(value: Any, default: str) -> str:
+    normalized = re.sub(r"[⬆️↑]+", "", str(value or "")).strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized or default
+
+
+def build_open_llm_board(
+    documents_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    open_llm_documents = [
+        document
+        for document in documents_by_id.values()
+        if document.get("source") == "open_llm_leaderboard"
+    ]
+    if not open_llm_documents:
+        return None
+
+    ranked_documents = sorted(
+        open_llm_documents,
+        key=lambda document: (
+            to_number((document.get("benchmark") or {}).get("score_value")),
+            str(document.get("published_at") or document.get("sort_at") or ""),
+            str(document.get("title") or ""),
+        ),
+        reverse=True,
+    )
+
+    entries = []
+    updated_at_candidates: list[str] = []
+    score_label = "Average"
+    for rank, document in enumerate(ranked_documents, start=1):
+        benchmark = document.get("benchmark") or {}
+        metadata = document.get("metadata") or {}
+        model_name = str(
+            benchmark.get("model_name") or document.get("title") or ""
+        ).strip()
+        if not model_name:
+            continue
+
+        owner = benchmark.get("organization") or metadata.get("organization")
+        if not owner and "/" in model_name:
+            owner = prettify_owner_label(model_name.split("/", 1)[0])
+
+        snapshot_at = str(
+            benchmark.get("snapshot_at")
+            or document.get("published_at")
+            or document.get("sort_at")
+            or ""
+        ).strip()
+        if snapshot_at:
+            updated_at_candidates.append(snapshot_at)
+
+        score_label = clean_leaderboard_score_label(
+            benchmark.get("score_label"), score_label
+        )
+        entries.append(
+            {
+                "rank": rank,
+                "modelName": model_name,
+                "organization": str(owner).strip() or None,
+                "rating": benchmark.get("score_value"),
+                "votes": benchmark.get("votes"),
+                "url": document.get("canonical_url")
+                or document.get("reference_url")
+                or document.get("url"),
+                "license": metadata.get("license"),
+                "contextLength": metadata.get("context_length"),
+                "inputPricePerMillion": None,
+                "outputPricePerMillion": None,
+            }
+        )
+
+    if not entries:
+        return None
+
+    top_entry = entries[0]
+    return {
+        "id": "open_llm_leaderboard",
+        "label": "Open LLM",
+        "boardName": "Open LLM",
+        "documentId": str(ranked_documents[0].get("document_id") or "open_llm_leaderboard"),
+        "referenceUrl": OPEN_LLM_LEADERBOARD_REFERENCE_URL,
+        "updatedAt": max(updated_at_candidates) if updated_at_candidates else None,
+        "description": "Top open-weight models ranked by the Open LLM benchmark average.",
+        "totalVotes": None,
+        "totalModels": len(entries),
+        "scoreLabel": score_label,
+        "scoreUnit": "leaderboard_points",
+        "topModel": top_entry,
+        "topEntries": entries,
+    }
+
+
 def build_lmarena_session_overview(
     documents_by_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -1020,9 +1565,6 @@ def build_lmarena_session_overview(
         for document in documents_by_id.values()
         if document.get("source") == "lmarena_overview"
     ]
-    if not lmarena_documents:
-        return None
-
     boards = []
     for document in sort_documents(lmarena_documents):
         benchmark = document.get("benchmark") or {}
@@ -1087,8 +1629,15 @@ def build_lmarena_session_overview(
             }
         )
 
+    open_llm_board = build_open_llm_board(documents_by_id)
+    if open_llm_board is not None:
+        boards.append(open_llm_board)
+
+    if not boards:
+        return None
+
     return {
-        "title": "Arena Rank Feed",
+        "title": "Model Leaderboards",
         "boards": boards,
     }
 
@@ -1117,6 +1666,86 @@ def build_placeholder_digest(
     }
 
 
+PAPER_DOMAIN_DISPLAY: dict[str, str] = {
+    "llm": "LLM",
+    "vlm": "VLM",
+    "diffusion": "Diffusion",
+    "agents": "Agents",
+    "reasoning": "Reasoning",
+    "rlhf_alignment": "RLHF / Alignment",
+    "safety": "Safety",
+    "rag_retrieval": "RAG / Retrieval",
+    "efficient_inference": "Efficient Inference",
+    "finetuning": "Fine-tuning",
+    "evaluation": "Evaluation",
+    "nlp": "NLP",
+    "speech_audio": "Speech / Audio",
+    "robotics_embodied": "Robotics",
+    "video": "Video",
+    "3d_spatial": "3D / Spatial",
+    "graph_structured": "Graph",
+    "continual_learning": "Continual Learning",
+    "federated_privacy": "Federated / Privacy",
+    "medical_bio": "Medical / Bio",
+    "science": "Science",
+    "others": "Others",
+}
+
+
+def _build_paper_domain_digest(
+    documents: list[dict[str, Any]],
+) -> tuple[str, str]:
+    """Build headline and summary from paper domain distribution."""
+    from collections import Counter
+
+    domain_counts: Counter[str] = Counter()
+    for doc in documents:
+        domain = str((doc.get("labels") or {}).get("paper_domain") or "others").strip() or "others"
+        domain_counts[domain] += 1
+
+    if not domain_counts:
+        return "Today's Research Papers", "No domain classification available yet."
+
+    grouped_domain_counts: Counter[str] = Counter(
+        {
+            domain: count
+            for domain, count in domain_counts.items()
+            if domain != "others"
+        }
+    )
+    ungrouped_count = domain_counts.get("others", 0)
+
+    if not grouped_domain_counts:
+        return (
+            "Today's Papers: Not grouped by domain yet",
+            (
+                f"{len(documents)} papers loaded. "
+                "Paper domains have not been separated yet, so papers are shown without topic groups."
+            ),
+        )
+
+    top_domains = grouped_domain_counts.most_common(5)
+    display_parts = [
+        f"{PAPER_DOMAIN_DISPLAY.get(d, d)} ({c})"
+        for d, c in top_domains
+    ]
+    headline = "Today's Papers: " + ", ".join(
+        PAPER_DOMAIN_DISPLAY.get(d, d) for d, _ in top_domains[:3]
+    )
+    summary = (
+        f"{len(documents)} papers across {len(grouped_domain_counts)} grouped domains. "
+        f"Top areas: {', '.join(display_parts)}."
+    )
+    if ungrouped_count > 0:
+        summary += " "
+        summary += (
+            f"{ungrouped_count} paper is still not grouped by domain."
+            if ungrouped_count == 1
+            else f"{ungrouped_count} papers are still not grouped by domain."
+        )
+    return headline, summary
+
+
 def build_digest_from_documents(
     category: str, documents: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -1124,22 +1753,28 @@ def build_digest_from_documents(
     if not documents:
         return digest
 
-    top_document = documents[0]
-    llm = top_document.get("llm") or {}
-    summaries = [
-        compact_text(
-            (document.get("llm") or {}).get("summary_short")
-            or build_document_note(document),
-            140,
+    if category == "papers":
+        headline, summary = _build_paper_domain_digest(documents)
+        digest["headline"] = headline
+        digest["summary"] = summary
+    else:
+        top_document = documents[0]
+        llm = top_document.get("llm") or {}
+        summaries = [
+            compact_text(
+                (document.get("llm") or {}).get("summary_short")
+                or build_document_note(document),
+                140,
+            )
+            for document in documents[:3]
+        ]
+        digest["headline"] = (
+            llm.get("summary_1l") or top_document.get("title") or digest["headline"]
         )
-        for document in documents[:3]
-    ]
-    digest["headline"] = (
-        llm.get("summary_1l") or top_document.get("title") or digest["headline"]
-    )
-    digest["summary"] = " ".join(summary for summary in summaries if summary)
+        digest["summary"] = " ".join(summary for summary in summaries if summary)
+
     digest["evidence"] = (
-        f"{len(documents)} docs · {prettify_doc_type(top_document.get('doc_type'))}"
+        f"{len(documents)} docs · {prettify_doc_type(documents[0].get('doc_type'))}"
     )
     digest["document_ids"] = [document["document_id"] for document in documents[:8]]
     digest["updated_at"] = now_utc_iso()
@@ -1544,6 +2179,31 @@ def build_briefing_input(
     }
 
 
+def _resolve_briefing_status(
+    meta: dict[str, Any], briefing: dict[str, Any] | None
+) -> str:
+    """Return briefing status for the frontend.
+
+    - ``"ready"``      – briefing generated successfully
+    - ``"processing"``  – LLM enabled, generation in progress or not yet started
+    - ``"error"``       – LLM enabled but generation failed
+    - ``"disabled"``    – LLM provider is turned off
+    """
+    provider = (
+        os.environ.get(BRIEFING_PROVIDER_ENV_VAR) or DEFAULT_BRIEFING_PROVIDER
+    ).strip().lower()
+    if provider in {"", "off", "none", "disabled", "false", "0"}:
+        return "disabled"
+    if briefing is not None and briefing.get("body_en") and not briefing.get("error"):
+        return "ready"
+    if briefing is not None and briefing.get("error"):
+        return "error"
+    loading_stage = str(meta.get("loading_stage") or "")
+    if loading_stage in {"generating_briefing", "collecting", "summarizing", "building_digests"}:
+        return "processing"
+    return "disabled"
+
+
 def build_dashboard_payload(
     *,
     session_id: str,
@@ -1560,31 +2220,51 @@ def build_dashboard_payload(
         entry["source"]: entry for entry in source_manifest if entry.get("source")
     }
 
+    _FEED_CATEGORY_ORDER = {
+        "models": 0,
+        "community": 1,
+        "company": 2,
+        "company_kr": 3,
+        "company_cn": 4,
+        "papers": 5,
+        "benchmark": 6,
+    }
+
     feeds: list[dict[str, Any]] = []
     category_documents: dict[str, list[dict[str, Any]]] = {
         category: [] for category in ORDERED_SOURCE_CATEGORIES
     }
 
-    for source, document_ids in sorted(feed_lists.items()):
-        documents = [
-            documents_by_id[document_id]
+    def _feed_sort_key(item: tuple[str, list[str]]) -> tuple[int, str]:
+        source = item[0]
+        doc_ids = item[1]
+        first_doc = documents_by_id.get(doc_ids[0]) if doc_ids else None
+        cat = str((first_doc or {}).get("source_category") or "community")
+        return (_FEED_CATEGORY_ORDER.get(cat, 99), source)
+
+    for source, document_ids in sorted(feed_lists.items(), key=_feed_sort_key):
+        documents = sort_documents(
+            document
             for document_id in document_ids
-            if document_id in documents_by_id
-        ]
+            if (document := documents_by_id.get(document_id)) is not None
+            and not _is_generic_title(document.get("title"))
+        )
         if not documents:
             continue
         top_document = documents[0]
         category = str(top_document.get("source_category") or "community")
+        if category == "benchmark":
+            continue
         category_documents.setdefault(category, []).extend(documents)
         manifest_entry = source_manifest_lookup.get(source, {})
         feeds.append(
             {
                 "id": source,
-                "title": prettify_source_name(source),
-                "eyebrow": SOURCE_CATEGORY_LABELS.get(category, category),
+                "title": build_feed_panel_title(category, source),
+                "eyebrow": prettify_source_category_title(category),
                 "sourceNote": (manifest_entry.get("notes") or [None])[0]
                 or f"{prettify_doc_type(top_document.get('doc_type'))} / {build_document_note(top_document)}",
-                "items": [build_feed_item(document) for document in documents[:3]],
+                "items": [build_feed_item(document) for document in documents],
             }
         )
 
@@ -1620,17 +2300,18 @@ def build_dashboard_payload(
 
     return {
         "brand": {
-            "name": "BLACKSITE",
-            "tagline": "Signal Relay",
+            "name": "AI World Monitor",
+            "tagline": "AI World Monitor",
         },
         "status": meta.get("status") or "published",
         "session": build_session_block(
             session_id, meta, run_manifest, source_manifest, documents_by_id
         ),
         "summary": {
-            "title": "Signal Sweep",
+            "title": "Today's Highlights",
             "headline": f"{hottest_digest['domain']} / {hottest_digest['headline']}",
             "briefing": briefing if briefing and not briefing.get("error") else None,
+            "briefing_status": _resolve_briefing_status(meta, briefing),
             "digests": digests,
         },
         "feeds": feeds,
@@ -1655,7 +2336,7 @@ def get_documents_by_id(
     for document_id in document_ids:
         document = get_json(store, doc_key(session_id, document_id))
         if document is not None:
-            documents[document_id] = document
+            documents[document_id] = sanitize_document_for_monitor(document)
     return documents
 
 
@@ -1926,7 +2607,7 @@ def select_summary_candidate_ids(
             continue
         if not (document.get("summary_input_text") or "").strip():
             continue
-        if document.get("text_scope") == "empty":
+        if document.get("text_scope") in SUMMARY_EXCLUDED_TEXT_SCOPES:
             continue
         category = str(document.get("source_category") or "community")
         grouped.setdefault(category, [])
@@ -2410,7 +3091,7 @@ def run_session_enrichment(
 
     digests_by_category: dict[str, dict[str, Any]] = {}
     meta["loading_stage"] = "building_digests"
-    meta["loading_detail"] = "Bundling signal sweeps."
+    meta["loading_detail"] = "Building category overviews."
     meta["loading_progress_current"] = 0
     meta["loading_progress_total"] = len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_current_source"] = None
@@ -2447,7 +3128,7 @@ def run_session_enrichment(
         )
 
     # --- offline LLM enrichment (company filter + paper domain) ---
-    run_dir_str = store.get(artifact_root_key(session_id))
+    run_dir_str = get_json(store, artifact_root_key(session_id))
     if run_dir_str:
         enriched = run_offline_llm_enrichment(store, session_id, Path(run_dir_str))
         if enriched:
@@ -2475,6 +3156,16 @@ def run_session_enrichment(
         briefing_input = build_briefing_input(documents_by_id, feed_lists)
         briefing = briefing_generator.generate_briefing(briefing_input)
         set_json_with_ttl(store, session_key(session_id, "briefing"), briefing)
+
+        # Merge LLM-generated category summaries into digests
+        cat_summaries = briefing.get("category_summaries") or {}
+        for cat_key, cat_summary in cat_summaries.items():
+            if cat_summary and cat_key in digests_by_category:
+                digests_by_category[cat_key]["summary"] = compact_text(cat_summary, 500)
+                set_json_with_ttl(
+                    store, digest_key(session_id, cat_key), digests_by_category[cat_key]
+                )
+
         meta["loading_progress_current"] = 1
         meta["loading_detail"] = (
             "Daily briefing generation complete."
@@ -2511,11 +3202,11 @@ def run_session_enrichment(
     elif summaries_ready == 0 and pending_total > 0:
         meta["loading_detail"] = (
             "LLM provider not connected; skipped pattern pass and "
-            f"generated {len(ORDERED_SOURCE_CATEGORIES)} signal sweep(s) only."
+            f"generated {len(ORDERED_SOURCE_CATEGORIES)} category overview(s) only."
         )
     else:
         meta["loading_detail"] = (
-            f"Pattern pass and {len(ORDERED_SOURCE_CATEGORIES)} signal sweep(s) generation complete."
+            f"Pattern pass and {len(ORDERED_SOURCE_CATEGORIES)} category overview(s) generation complete."
         )
     meta["loading_progress_current"] = len(ORDERED_SOURCE_CATEGORIES)
     meta["loading_progress_total"] = len(ORDERED_SOURCE_CATEGORIES)
@@ -2680,7 +3371,7 @@ def run_homepage_bootstrap(
                 status="error",
                 run_label=run_label,
                 stage=str(current_state.get("stage") or "error"),
-                detail="A fault occurred during cold boot.",
+                detail="An error occurred during startup.",
                 progress_current=int(current_state.get("progress_current") or 0),
                 progress_total=int(current_state.get("progress_total") or 0),
                 current_source=(
@@ -2737,7 +3428,7 @@ def run_session_reload(
                 stage=str(event.get("stage") or "summarizing_documents"),
                 detail=str(
                     event.get("detail")
-                    or "Updating pattern pass and sweeps."
+                    or "Updating summaries and overviews."
                 ),
                 progress_current=int(event.get("progress_current") or 0),
                 progress_total=int(event.get("progress_total") or 0),
@@ -2975,7 +3666,7 @@ def get_digest_response(
         digest = build_placeholder_digest(digest_id, documents)
 
     documents = [
-        get_json(store, doc_key(session_id, document_id))
+        sanitize_document_for_monitor(get_json(store, doc_key(session_id, document_id)))
         for document_id in digest.get("document_ids", [])
     ]
     return {
@@ -3001,7 +3692,7 @@ def get_document_response(
     document = get_json(store, doc_key(session_id, document_id))
     if document is None:
         raise KeyError(f"Unknown document: {document_id}")
-    return document
+    return sanitize_document_for_monitor(document)
 
 
 def reload_session(

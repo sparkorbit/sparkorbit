@@ -62,7 +62,7 @@ function SettingsToggle({
         ].join(" ")}
         onClick={onToggle}
       >
-        {enabled ? "armed" : "sleep"}
+        {enabled ? "on" : "off"}
       </button>
     </div>
   );
@@ -85,10 +85,10 @@ export function FullscreenLoading({
       : null;
   const resolvedStageLabel = hasServerLoading
     ? loading.stageLabel
-    : "Link Handshake";
+    : "Connecting";
   const resolvedDetail = hasServerLoading
     ? loading.detail
-    : "Checking active cache status on relay.";
+    : "Checking the current dashboard status.";
   const currentSource =
     hasServerLoading && loading.currentSource ? loading.currentSource : null;
   const steps = hasServerLoading ? loading.steps : [];
@@ -100,7 +100,7 @@ export function FullscreenLoading({
     <main className="flex flex-1 items-center justify-center px-5 py-8">
       <section className="orbit-loader-shell w-full max-w-2xl">
         <p className="font-mono text-[0.64rem] uppercase tracking-[0.22em] text-orbit-accent">
-          {hasServerLoading ? "cold boot" : "handshake"}
+          {hasServerLoading ? "starting up" : "connecting"}
         </p>
         <h1 className="orbit-wrap-anywhere mt-4 font-display text-[1.5rem] font-semibold text-orbit-text md:text-[1.9rem]">
           {brand.name}
@@ -123,7 +123,7 @@ export function FullscreenLoading({
 
           <div className="mt-4 flex items-center justify-between gap-3">
             <p className="font-mono text-[0.66rem] uppercase tracking-[0.16em] text-orbit-accent">
-              {hasServerLoading ? `${loading.percent}%` : "handshake"}
+              {hasServerLoading ? `${loading.percent}%` : "connecting"}
             </p>
             <p className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted">
               {progressCount ?? "waiting"}
@@ -133,7 +133,7 @@ export function FullscreenLoading({
 
         <div className="mt-4 border border-orbit-border bg-orbit-bg px-4 py-3">
           <p className="font-mono text-[0.6rem] uppercase tracking-[0.16em] text-orbit-accent">
-            trace log
+            status
           </p>
           <p className="orbit-wrap-anywhere mt-2 text-[0.76rem] leading-[1.65] text-orbit-text">
             {resolvedDetail}
@@ -142,7 +142,7 @@ export function FullscreenLoading({
             <div className="mt-4 grid gap-2 sm:grid-cols-3">
               <div className="border border-orbit-border bg-orbit-panel px-3 py-2">
                 <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                  active trace
+                  current step
                 </p>
                 <p className="orbit-wrap-anywhere mt-1 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-orbit-text">
                   {currentStep?.label ?? loading.stageLabel}
@@ -158,7 +158,7 @@ export function FullscreenLoading({
               </div>
               <div className="border border-orbit-border bg-orbit-panel px-3 py-2">
                 <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                  ops
+                  progress
                 </p>
                 <p className="mt-1 font-mono text-[0.82rem] text-orbit-text">
                   {progressCount ?? "-"}
@@ -173,7 +173,7 @@ export function FullscreenLoading({
           ) : null}
           {currentSource ? (
             <p className="orbit-wrap-anywhere mt-2 font-mono text-[0.62rem] uppercase leading-[1.5] tracking-[0.12em] text-orbit-accent-dim">
-              target / {currentSource}
+              source / {currentSource}
             </p>
           ) : null}
         </div>
@@ -226,7 +226,7 @@ export function ConsoleHeader({
           />
           <div className="min-w-0">
             <p className="font-mono text-[0.56rem] uppercase tracking-[0.22em] text-orbit-accent">
-              relay header
+              live dashboard
             </p>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <h1 className="orbit-wrap-anywhere min-w-0 font-display text-[0.9rem] font-semibold text-orbit-text">
@@ -241,8 +241,8 @@ export function ConsoleHeader({
 
         <button
           type="button"
-          aria-label="console"
-          title="console"
+          aria-label="settings"
+          title="settings"
           className="group inline-flex h-9 w-9 shrink-0 items-center justify-center border border-orbit-border-strong bg-orbit-panel font-mono text-orbit-accent transition-colors duration-150 hover:border-orbit-accent hover:bg-orbit-bg hover:text-orbit-text"
           onClick={onOpenSettings}
         >
@@ -256,6 +256,7 @@ export function ConsoleHeader({
 export function SettingsModal({
   isOpen,
   settings,
+  briefingStatus,
   onClose,
   onUpdateSettings,
   onResetWorkspace,
@@ -263,6 +264,7 @@ export function SettingsModal({
 }: {
   isOpen: boolean;
   settings: UiSettings;
+  briefingStatus?: string | null;
   onClose: () => void;
   onUpdateSettings: (next: UiSettings) => void;
   onResetWorkspace: () => void;
@@ -315,10 +317,10 @@ export function SettingsModal({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="font-mono text-[0.62rem] uppercase tracking-[0.2em] text-orbit-accent">
-                console flags
+                settings
               </p>
               <h2 className="mt-2 font-display text-[1rem] font-semibold text-orbit-text">
-                Operator Console
+                Display Settings
               </h2>
               <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
                 Display settings are saved to local cache and applied to the grid immediately.
@@ -330,7 +332,7 @@ export function SettingsModal({
               className="shrink-0 border border-orbit-border bg-orbit-panel px-3 py-1.5 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
               onClick={onClose}
             >
-              seal
+              close
             </button>
           </div>
         </div>
@@ -340,7 +342,7 @@ export function SettingsModal({
             <section className="space-y-3 border border-orbit-border bg-orbit-bg-elevated p-3">
               <div className="border-b border-orbit-border pb-3">
                 <p className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-orbit-accent">
-                  Signal Mask
+                  Display
                 </p>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
                   Control visual noise and density.
@@ -348,8 +350,8 @@ export function SettingsModal({
               </div>
 
               <SettingsToggle
-                label="Motion Layer"
-                description="Toggle trace card reveal and boot motion."
+                label="Animations"
+                description="Toggle entry animations and startup motion."
                 enabled={settings.motionEnabled}
                 onToggle={() =>
                   onUpdateSettings({
@@ -360,8 +362,8 @@ export function SettingsModal({
               />
 
               <SettingsToggle
-                label="Grid Veil"
-                description="Show background grid and scanline veil. Useful for reducing decoration while keeping density."
+                label="Background Grid"
+                description="Show or hide the decorative background grid and scan lines."
                 enabled={settings.overlaysEnabled}
                 onToggle={() =>
                   onUpdateSettings({
@@ -372,8 +374,8 @@ export function SettingsModal({
               />
 
               <SettingsToggle
-                label="Payload Tap"
-                description="Inspect raw dashboard, reload, and detail payloads from BFF in the bottom-right trace panel."
+                label="Debug Panel"
+                description="Show raw dashboard, reload, and detail payloads in the bottom-right panel."
                 enabled={settings.payloadDebugEnabled}
                 onToggle={() =>
                   onUpdateSettings({
@@ -418,6 +420,68 @@ export function SettingsModal({
                     </button>
                   ))}
                 </div>
+              </div>
+            </section>
+
+            <section className="space-y-3 border border-orbit-border bg-orbit-bg-elevated p-3">
+              <div className="border-b border-orbit-border pb-3">
+                <p className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-orbit-accent">
+                  LLM Provider
+                </p>
+                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+                  AI briefing and category summaries powered by a local LLM.
+                </p>
+              </div>
+
+              <div className="border border-orbit-border bg-orbit-bg p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
+                    Status
+                  </p>
+                  <span
+                    className={[
+                      "inline-flex border px-2 py-0.5 font-mono text-[0.56rem] uppercase tracking-[0.14em]",
+                      briefingStatus === "ready"
+                        ? "border-orbit-accent bg-orbit-panel text-orbit-accent"
+                        : briefingStatus === "processing"
+                          ? "border-orbit-accent/40 bg-orbit-panel text-orbit-accent-dim"
+                          : briefingStatus === "error"
+                            ? "border-red-600/40 bg-orbit-panel text-red-400"
+                            : "border-orbit-border bg-orbit-bg-elevated text-orbit-muted",
+                    ].join(" ")}
+                  >
+                    {briefingStatus === "ready"
+                      ? "active"
+                      : briefingStatus === "processing"
+                        ? "processing"
+                        : briefingStatus === "error"
+                          ? "error"
+                          : "off"}
+                  </span>
+                </div>
+                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
+                  {briefingStatus === "ready"
+                    ? "Ollama is connected and generating AI briefings for each session."
+                    : briefingStatus === "processing"
+                      ? "LLM briefing is being generated. This may take a moment."
+                      : briefingStatus === "error"
+                        ? "Briefing generation failed. Verify Ollama is running and the model is pulled."
+                        : "LLM is not enabled. Category digests use source metadata only."}
+                </p>
+                {briefingStatus === "disabled" || !briefingStatus ? (
+                  <div className="mt-3 border border-orbit-border bg-orbit-bg-elevated px-3 py-2">
+                    <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                      to enable
+                    </p>
+                    <p className="mt-1 font-mono text-[0.64rem] leading-[1.6] text-orbit-text">
+                      SPARKORBIT_BRIEFING_PROVIDER=ollama
+                    </p>
+                    <p className="mt-1 text-[0.68rem] leading-[1.6] text-orbit-muted">
+                      Set this environment variable before starting the backend.
+                      Requires Ollama running locally with a pulled model.
+                    </p>
+                  </div>
+                ) : null}
               </div>
             </section>
 

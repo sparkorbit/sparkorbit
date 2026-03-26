@@ -264,6 +264,26 @@ def extract_arxiv_id(*values: Any) -> str | None:
     return None
 
 
+_ARXIV_RSS_ABSTRACT_PREFIX_PATTERNS = (
+    re.compile(
+        r"^\s*(?:arXiv:\s*[0-9]{4}\.[0-9]{4,5}(?:v\d+)?\s+)?Announce Type:\s*[^\n]*?\s+Abstract:\s*",
+        re.I,
+    ),
+    re.compile(r"^\s*Abstract:\s*", re.I),
+)
+
+
+def strip_arxiv_rss_abstract_boilerplate(value: str | None) -> str | None:
+    text = normalize_text_value(value)
+    if not text:
+        return None
+    cleaned = text
+    for pattern in _ARXIV_RSS_ABSTRACT_PREFIX_PATTERNS:
+        cleaned = pattern.sub("", cleaned, count=1)
+    cleaned = cleaned.strip()
+    return cleaned or None
+
+
 def prefixed_tag_values(tags: list[str], prefix: str) -> list[str]:
     values: list[str] = []
     for tag in tags:
@@ -359,7 +379,43 @@ def ld_value(objects: list[dict[str, Any]], *keys: str) -> str | None:
     return None
 
 
-def extract_body_text(soup: BeautifulSoup) -> str:
+def collect_container_text_chunks(container: Any) -> list[str]:
+    chunks: list[str] = []
+    seen: set[str] = set()
+    for node in container.find_all(["h1", "h2", "h3", "p", "li", "blockquote"]):
+        text = normalize_space(node.get_text(" ", strip=True))
+        if text and text not in seen:
+            chunks.append(text)
+            seen.add(text)
+    if chunks:
+        return chunks
+    text = normalize_space(container.get_text(" ", strip=True))
+    if text:
+        return [text]
+    return []
+
+
+def extract_body_text(
+    soup: BeautifulSoup,
+    content_selectors: list[str] | tuple[str, ...] | None = None,
+) -> str:
+    if content_selectors:
+        selector_chunks: list[str] = []
+        selector_seen: set[str] = set()
+        for selector in content_selectors:
+            try:
+                containers = soup.select(selector)
+            except Exception:
+                continue
+            for container in containers:
+                for chunk in collect_container_text_chunks(container):
+                    if chunk in selector_seen:
+                        continue
+                    selector_chunks.append(chunk)
+                    selector_seen.add(chunk)
+        if selector_chunks:
+            return " ".join(selector_chunks)
+
     for container in (
         soup.find("article"),
         soup.find("main"),
@@ -368,23 +424,18 @@ def extract_body_text(soup: BeautifulSoup) -> str:
     ):
         if not container:
             continue
-        chunks: list[str] = []
-        seen: set[str] = set()
-        for node in container.find_all(["h1", "h2", "h3", "p", "li", "blockquote"]):
-            text = normalize_space(node.get_text(" ", strip=True))
-            if text and text not in seen:
-                chunks.append(text)
-                seen.add(text)
-        if not chunks:
-            text = normalize_space(container.get_text(" ", strip=True))
-            if text:
-                return text
+        chunks = collect_container_text_chunks(container)
         if chunks:
             return " ".join(chunks)
     return ""
 
 
-def extract_detail_fields(soup: BeautifulSoup, fallback_title: str | None, fallback_date: str | None) -> dict[str, Any]:
+def extract_detail_fields(
+    soup: BeautifulSoup,
+    fallback_title: str | None,
+    fallback_date: str | None,
+    body_selectors: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     ld_objects = iter_ld_objects(soup)
     h1 = soup.find("h1")
     title = (
@@ -435,7 +486,7 @@ def extract_detail_fields(soup: BeautifulSoup, fallback_title: str | None, fallb
         canonical_url = normalize_space(canonical_tag.get("href"))
     hero_image_url = meta_content(soup, ("property", "og:image"), ("name", "twitter:image"))
     parsed_published_at = parse_date(published_at) or fallback_date
-    body_text = extract_body_text(soup)
+    body_text = extract_body_text(soup, body_selectors)
     return {
         "title": normalize_space(title) or fallback_title,
         "description": description,
@@ -773,7 +824,7 @@ register(SourceConfig("github_paddlepaddle_repos", "company_cn", "api", "https:/
 register(SourceConfig("github_bytedance_repos", "company_cn", "api", "https://api.github.com/orgs/bytedance/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "bytedance"), {"org": "bytedance"}))
 register(SourceConfig("github_mindspore_repos", "company_cn", "api", "https://api.github.com/orgs/mindspore-ai/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "mindspore"), {"org": "mindspore-ai"}))
 register(SourceConfig("anthropic_news", "company", "scrape", "https://www.anthropic.com/news", "news", "html_listing_with_detail", ("company", "anthropic"), {"include_prefixes": ["/news/", "/81k-interviews"], "exclude_exact": ["/news"], "note": "Headline, category/date teaser on list; detail fetch adds full body and meta."}))
-register(SourceConfig("deepmind_blog", "company", "scrape", "https://deepmind.google/blog/", "blog", "html_listing_with_detail", ("company", "deepmind"), {"include_contains": ["/blog/"], "exclude_exact": ["/blog/", "/blog"], "note": "List page gives links; detail pages carry stronger meta and body text."}))
+register(SourceConfig("deepmind_blog", "company", "scrape", "https://deepmind.google/blog/", "blog", "html_listing_with_detail", ("company", "deepmind"), {"include_contains": ["/blog/"], "exclude_exact": ["/blog/", "/blog"], "detail_body_selectors": ["main .rich-text"], "note": "List page gives links; detail pages carry stronger meta and body text."}))
 register(SourceConfig("mistral_news", "company", "scrape", "https://mistral.ai/news/", "news", "html_listing_with_detail", ("company", "mistral"), {"include_prefixes": ["/news/"], "exclude_exact": ["/news/", "/news"], "note": "List page exposes product/update cards; detail fetch adds fuller descriptions."}))
 register(SourceConfig("stability_news", "company", "scrape", "https://stability.ai/news-updates", "news", "html_listing_with_detail", ("company", "stability"), {"include_prefixes": ["/news-updates/"], "exclude_exact": ["/news-updates"], "note": "Squarespace news listing; detail pages provide cleaner title/body than list cards."}))
 register(SourceConfig("groq_newsroom", "company", "scrape", "https://groq.com/newsroom", "news", "html_listing_with_detail", ("company", "groq"), {"include_prefixes": ["/newsroom/"], "exclude_exact": ["/newsroom"], "note": "Newsroom cards are visible on the list page; detail pages add full body text."}))
@@ -862,6 +913,9 @@ def fetch_rss_source(client: httpx.Client, config: SourceConfig, run_id: str, li
                 media_urls.append(detail_fields["hero_image_url"])
             if detail_fields.get("canonical_url"):
                 url = detail_fields["canonical_url"]
+        if config.name.startswith("arxiv_rss_"):
+            description = strip_arxiv_rss_abstract_boilerplate(description)
+            body_text = strip_arxiv_rss_abstract_boilerplate(body_text) or description
         result.documents.append(
             make_document(
                 run_id=run_id,
@@ -1896,7 +1950,12 @@ def fetch_html_listing_with_detail(client: httpx.Client, config: SourceConfig, r
         detail_fetch_id = f"fetch_detail_{index:03d}"
         result.raw_responses.append(RawResponse(filename=f"{detail_fetch_id}.html", body=detail_response.content))
         detail_soup = BeautifulSoup(detail_response.text, "html.parser")
-        detail_fields = extract_detail_fields(detail_soup, candidate.get("title_hint"), candidate.get("published_at_hint"))
+        detail_fields = extract_detail_fields(
+            detail_soup,
+            candidate.get("title_hint"),
+            candidate.get("published_at_hint"),
+            body_selectors=config.extra.get("detail_body_selectors"),
+        )
         if config.name == "deepseek_updates" and not detail_fields.get("published_at"):
             detail_fields["published_at"] = (
                 candidate.get("published_at_hint")

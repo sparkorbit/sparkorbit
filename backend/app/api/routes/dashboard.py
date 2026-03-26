@@ -102,7 +102,7 @@ async def stream_dashboard(
     )
 
 
-@router.get("/digests/{digest_id}")
+@router.get("/digests/{digest_id:path}")
 def read_digest(
     digest_id: str,
     session: str = "active",
@@ -114,7 +114,7 @@ def read_digest(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/documents/{document_id}")
+@router.get("/documents/{document_id:path}")
 def read_document(
     document_id: str,
     session: str = "active",

@@ -90,6 +90,8 @@ export type DashboardBriefing = {
   };
 };
 
+export type BriefingStatus = "ready" | "processing" | "disabled" | "error";
+
 export type DashboardResponse = {
   brand: {
     name: string;
@@ -101,6 +103,7 @@ export type DashboardResponse = {
     title: string;
     headline: string;
     briefing?: DashboardBriefing | null;
+    briefing_status?: BriefingStatus;
     digests: DigestItem[];
   };
   feeds: FeedPanel[];

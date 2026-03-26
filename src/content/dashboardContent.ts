@@ -21,6 +21,7 @@ export type DigestItem = {
 export type FeedItem = {
   documentId: string;
   referenceUrl: string;
+  timestamp: string | null;
   source: string;
   type: string;
   title: string;

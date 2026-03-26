@@ -12,7 +12,62 @@ const SOURCE_CATEGORY_LABELS: Record<string, string> = {
   company: "Company",
   company_kr: "Company KR",
   company_cn: "Company CN",
-  benchmark: "Rank Feed",
+  benchmark: "Model Rankings",
+};
+
+const SOURCE_CATEGORY_TITLE_LABELS: Record<string, string> = {
+  papers: "Paper",
+  models: "Model",
+  community: "Community",
+  company: "Company",
+  company_kr: "Company KR",
+  company_cn: "Company CN",
+  benchmark: "Benchmark",
+};
+
+const SOURCE_DISPLAY_NAMES: Record<string, string> = {
+  amazon_science: "Amazon Science",
+  anthropic_news: "Anthropic News",
+  apple_ml: "Apple ML",
+  arxiv_rss_cs_ai: "ARXIV - AI",
+  arxiv_rss_cs_cl: "ARXIV - Language AI",
+  arxiv_rss_cs_cr: "ARXIV - Security",
+  arxiv_rss_cs_cv: "ARXIV - Vision",
+  arxiv_rss_cs_ir: "ARXIV - Search and Retrieval",
+  arxiv_rss_cs_lg: "ARXIV - Machine Learning",
+  arxiv_rss_cs_ro: "ARXIV - Robotics",
+  arxiv_rss_stat_ml: "ARXIV - Statistics and ML",
+  deepmind_blog: "Google DeepMind News",
+  deepseek_updates: "DeepSeek Updates",
+  github_bytedance_repos: "ByteDance GitHub",
+  github_curated_repos: "GitHub Curated Repos",
+  github_mindspore_repos: "MindSpore GitHub",
+  github_paddlepaddle_repos: "PaddlePaddle GitHub",
+  github_tencent_hunyuan_repos: "Tencent Hunyuan GitHub",
+  google_ai_blog: "Google AI News",
+  groq_newsroom: "Groq News",
+  hf_blog: "Hugging Face Blog",
+  hf_daily_papers: "Hugging Face Daily Papers",
+  hf_models_likes: "Hugging Face Top Liked Models",
+  hf_models_new: "Hugging Face New Models",
+  hf_trending_models: "Hugging Face Trending Models",
+  hn_topstories: "Hacker News Top Stories",
+  kakao_tech_rss: "Kakao Tech",
+  lg_ai_research_blog: "LG AI Research Blog",
+  lmarena_overview: "Model Rankings",
+  microsoft_research: "Microsoft Research",
+  mistral_news: "Mistral AI News",
+  naver_cloud_blog_rss: "NAVER Cloud Blog",
+  nvidia_deep_learning: "NVIDIA Deep Learning",
+  open_llm_leaderboard: "Open LLM Leaderboard",
+  openai_news_rss: "OpenAI News",
+  qwen_blog_rss: "Qwen Blog",
+  reddit_localllama: "Reddit - LocalLLaMA",
+  reddit_machinelearning: "Reddit - MachineLearning",
+  salesforce_ai_research_rss: "Salesforce AI Research",
+  samsung_research_posts: "Samsung Research",
+  stability_news: "Stability AI News",
+  upstage_blog: "Upstage Blog",
 };
 
 const DOC_TYPE_LABELS: Record<string, string> = {
@@ -65,8 +120,8 @@ export const EMPTY_ARENA_BOARDS: readonly SessionArenaBoard[] = [];
 
 export const EMPTY_DASHBOARD: DashboardResponse = {
   brand: {
-    name: "BLACKSITE",
-    tagline: "Link Offline",
+    name: "AI World Monitor",
+    tagline: "AI World Monitor",
   },
   status: "error",
   session: {
@@ -87,7 +142,7 @@ export const EMPTY_DASHBOARD: DashboardResponse = {
         note: "No active cache or link is disconnected.",
       },
       {
-        label: "sweeps",
+        label: "summaries",
         value: "no",
         note: "Materialized view has not been read yet.",
       },
@@ -100,7 +155,7 @@ export const EMPTY_DASHBOARD: DashboardResponse = {
       },
       {
         name: "enricher",
-        role: "Populates summaries and sweeps.",
+        role: "Builds summaries after collection.",
         status: "waiting",
       },
       {
@@ -123,20 +178,12 @@ export const EMPTY_DASHBOARD: DashboardResponse = {
     loading: null,
   },
   summary: {
-    title: "Signal Sweep",
-    headline: "Waiting for link handshake.",
+    title: "Today in AI",
+    headline: "Waiting to connect.",
     digests: [],
   },
   feeds: [],
 };
-
-export function buildPanelSessionLabel(sessionDate: string, windowLabel: string) {
-  const compactDate =
-    sessionDate.length >= 10
-      ? sessionDate.slice(5).replace("-", ".")
-      : sessionDate;
-  return `${compactDate} / ${windowLabel}`;
-}
 
 export function compactText(value: string | null | undefined, maxLength = 160) {
   if (!value) {
@@ -177,7 +224,7 @@ function formatMappedValue(
   value: string | null | undefined,
   labels: Record<string, string>,
 ) {
-  const normalized = value?.trim();
+  const normalized = typeof value === "string" ? value.trim() : "";
   if (!normalized) {
     return "-";
   }
@@ -186,6 +233,43 @@ function formatMappedValue(
 
 export function formatSourceCategory(value: string | null | undefined) {
   return formatMappedValue(value, SOURCE_CATEGORY_LABELS);
+}
+
+export function formatSourceCategoryTitle(value: string | null | undefined) {
+  return formatMappedValue(value, SOURCE_CATEGORY_TITLE_LABELS);
+}
+
+export function formatReadableSourceName(value: string | null | undefined) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    return "-";
+  }
+  return SOURCE_DISPLAY_NAMES[normalized] ?? humanizeCode(normalized.replace(/_rss\b/g, ""));
+}
+
+export function formatReadableSourceTitle(
+  sourceCategory: string | null | undefined,
+  source: string | null | undefined,
+) {
+  const readableSource = formatReadableSourceName(source);
+  if (readableSource === "-") {
+    return formatSourceCategoryTitle(sourceCategory);
+  }
+  return readableSource;
+}
+
+export function formatDisplayDate(value: string | null | undefined) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    return "";
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    return `${match[1]}.${match[2]}.${match[3]}`;
+  }
+
+  return compactText(normalized, 10);
 }
 
 export function formatDocType(value: string | null | undefined) {

@@ -30,8 +30,30 @@ async function fetchJson<T>(path: string, init?: RequestInit) {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed: ${response.status}`);
+    const raw = await response.text();
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as {
+          detail?: unknown;
+          error?: unknown;
+          message?: unknown;
+        };
+        if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+          throw new Error(parsed.detail.trim());
+        }
+        if (typeof parsed.error === "string" && parsed.error.trim()) {
+          throw new Error(parsed.error.trim());
+        }
+        if (typeof parsed.message === "string" && parsed.message.trim()) {
+          throw new Error(parsed.message.trim());
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name !== "SyntaxError") {
+          throw error;
+        }
+      }
+    }
+    throw new Error(raw || `Request failed: ${response.status}`);
   }
 
   return (await response.json()) as T;
