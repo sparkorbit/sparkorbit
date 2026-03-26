@@ -51,7 +51,6 @@ import {
   fetchJobProgress,
   fetchLeaderboards,
   openJobProgressStream,
-  reloadSession,
 } from "./lib/dashboardApi";
 import type {
   DashboardLoadingBlock,
@@ -63,46 +62,9 @@ import type {
   JobProgressSnapshot,
 } from "./types/jobProgress";
 
-const NOON_AUTO_RELOAD_STORAGE_KEY = "orbit-noon-auto-reload-date";
-const NOON_AUTO_RELOAD_HOUR = 12;
 const GITHUB_STAR_PROMPT_STORAGE_KEY = "sparkorbit-github-star-prompt-v1";
 const GITHUB_STAR_PROMPT_DELAY_MS = 60 * 1000;
 const GITHUB_REPO_URL = "https://github.com/sparkorbit/sparkorbit";
-
-function buildLocalDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function hasPassedNoon(date: Date) {
-  return date.getHours() >= NOON_AUTO_RELOAD_HOUR;
-}
-
-function readNoonAutoReloadDate() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    return window.localStorage.getItem(NOON_AUTO_RELOAD_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeNoonAutoReloadDate(dateKey: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(NOON_AUTO_RELOAD_STORAGE_KEY, dateKey);
-  } catch {
-    // ignore storage failures
-  }
-}
 
 function readGitHubStarPromptState() {
   if (typeof window === "undefined") {
@@ -382,7 +344,6 @@ function App() {
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
     null,
   );
-  const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [workspaceVersion, setWorkspaceVersion] = useState(0);
   const [uiSettings, setUiSettings] = useState<UiSettings>(loadUiSettings);
@@ -469,8 +430,6 @@ function App() {
           : "Failed to connect to BFF API.",
       );
       return null;
-    } finally {
-      setIsLoadingDashboard(false);
     }
   }
 
@@ -570,7 +529,10 @@ function App() {
           if (isDisposed) {
             return;
           }
-          if (progress?.status === "ready" || progress?.status === "partial_error") {
+          if (
+            progress?.status === "ready" ||
+            progress?.status === "partial_error"
+          ) {
             setActiveJob(null);
             await loadDashboardData("active", { preserveCurrent: true });
           } else {
@@ -610,7 +572,6 @@ function App() {
             ? compactText(error.message, 180)
             : "Failed to connect to BFF API.",
         );
-        setIsLoadingDashboard(false);
       }
     }
 
@@ -725,7 +686,6 @@ function App() {
     };
   }, []);
 
-
   function resetWorkspaceLayout() {
     detailRequestVersionRef.current += 1;
     resetPanelWorkspaceStorage();
@@ -823,87 +783,6 @@ function App() {
       );
     }
   }
-
-  async function handleReloadSession() {
-    jobStreamRef.current?.();
-    jobStreamRef.current = null;
-    detailRequestVersionRef.current += 1;
-    setActiveJob(null);
-    setJobProgress(null);
-    setDashboardError(null);
-    setDetailState(null);
-    setDetailError(null);
-    setSelectedDigestId(null);
-    setSelectedDocumentId(null);
-    try {
-      const result = await reloadSession({
-        profile: "full",
-        run_label: "redis-session",
-      });
-      recordPayloadSnapshot({
-        key: "reload-start",
-        title: "reload start",
-        path: "/api/sessions/reload",
-        transport: "http",
-        payload: result,
-      });
-      if (result.job_id && result.poll_path) {
-        const nextActiveJob: ActiveJobResponse = {
-          job_id: result.job_id,
-          poll_path: result.poll_path,
-          surface: "dashboard",
-          job_type: "session_reload",
-          status: result.status,
-        };
-        setActiveJob(nextActiveJob);
-        startJobStream(nextActiveJob);
-        await loadJobProgressData(nextActiveJob);
-      }
-    } catch (error) {
-      setDashboardError(
-        error instanceof Error
-          ? compactText(error.message, 180)
-          : "Reload request failed.",
-      );
-    }
-  }
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const maybeAutoReloadAtNoon = () => {
-      if (
-        isLoadingDashboard ||
-        activeJob !== null ||
-        dashboard.status === "collecting"
-      ) {
-        return;
-      }
-
-      const now = new Date();
-      if (!hasPassedNoon(now)) {
-        return;
-      }
-
-      const todayKey = buildLocalDateKey(now);
-      if (readNoonAutoReloadDate() === todayKey) {
-        return;
-      }
-
-      writeNoonAutoReloadDate(todayKey);
-      void handleReloadSession();
-    };
-
-    maybeAutoReloadAtNoon();
-    const timerId = window.setInterval(maybeAutoReloadAtNoon, 60_000);
-
-    return () => {
-      window.clearInterval(timerId);
-    };
-  }, [dashboard.status, isLoadingDashboard, activeJob]);
-
   const hasUsableDashboard =
     dashboard.session.sessionId !== EMPTY_DASHBOARD.session.sessionId;
   const loadingSnapshot = normalizeLoadingSnapshot(
@@ -916,9 +795,9 @@ function App() {
 
   const resolvedArenaOverview =
     leaderboardOverview ?? dashboard.session.arenaOverview;
-  const arenaBoards = (resolvedArenaOverview?.boards ?? EMPTY_ARENA_BOARDS).filter(
-    (board) => board.id !== "open_llm_leaderboard",
-  );
+  const arenaBoards = (
+    resolvedArenaOverview?.boards ?? EMPTY_ARENA_BOARDS
+  ).filter((board) => board.id !== "open_llm_leaderboard");
 
   const infoItems = dashboard.feeds
     .filter((feed) => feed.eyebrow !== "Benchmark")
@@ -952,8 +831,7 @@ function App() {
           items: [...feed.items]
             .sort(
               (a, b) =>
-                parseNoteMetric(b.note, "↓") -
-                parseNoteMetric(a.note, "↓"),
+                parseNoteMetric(b.note, "↓") - parseNoteMetric(a.note, "↓"),
             )
             .map((item) => ({
               ...item,
@@ -982,8 +860,7 @@ function App() {
       }
 
       const isEngagementSorted =
-        feed.id === "github_curated_repos" ||
-        feed.id.startsWith("reddit_");
+        feed.id === "github_curated_repos" || feed.id.startsWith("reddit_");
 
       const resolvedFeed = isEngagementSorted
         ? {
@@ -1103,7 +980,7 @@ function App() {
                 />
               ),
             }
-        : undefined;
+          : undefined;
 
   const mainPanel = (
     <LeaderboardPanel
