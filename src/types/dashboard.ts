@@ -4,6 +4,7 @@ import type {
   RuntimeItem,
   SessionMetric,
 } from "../content/dashboardContent";
+import type { JobProgressSnapshot } from "./jobProgress";
 import type { SessionDocument } from "./sessionDocument";
 
 export type DashboardStatus =
@@ -13,26 +14,6 @@ export type DashboardStatus =
   | "ready"
   | "partial_error"
   | "error";
-
-export type LoadingStepStatus = "pending" | "active" | "complete" | "error";
-
-export type LoadingStep = {
-  id: string;
-  label: string;
-  detail: string;
-  status: LoadingStepStatus;
-};
-
-export type DashboardLoading = {
-  stage: string;
-  stageLabel: string;
-  detail: string;
-  progressCurrent: number;
-  progressTotal: number;
-  percent: number;
-  currentSource: string | null;
-  steps: LoadingStep[];
-};
 
 export type SessionArenaBoardEntry = {
   rank: number | string | null;
@@ -76,9 +57,9 @@ export type DashboardSession = {
   reloadRule: string;
   metrics: SessionMetric[];
   runtime: RuntimeItem[];
+  loading: JobProgressSnapshot;
   rules: string[];
   arenaOverview: SessionArenaOverview | null;
-  loading: DashboardLoading | null;
 };
 
 export type DashboardBriefing = {
@@ -132,6 +113,7 @@ export type SessionReloadStateStatus = DashboardStatus | "idle";
 export type SessionReloadStateResponse = {
   session_id: string | null;
   status: SessionReloadStateStatus;
-  loading: DashboardLoading | null;
   error: string | null;
+  job_id?: string | null;
+  poll_path?: string | null;
 };

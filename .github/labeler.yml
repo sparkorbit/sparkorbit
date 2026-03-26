@@ -1,0 +1,41 @@
+frontend:
+  - changed-files:
+    - any-glob-to-any-file:
+      - src/**
+      - index.html
+      - vite.config.ts
+      - frontend/**
+
+backend:
+  - changed-files:
+    - any-glob-to-any-file:
+      - backend/**
+
+pipeline:
+  - changed-files:
+    - any-glob-to-any-file:
+      - pipelines/source_fetch/**
+
+llm:
+  - changed-files:
+    - any-glob-to-any-file:
+      - pipelines/llm_enrich/**
+      - docs/prompt_packs/**
+
+docker:
+  - changed-files:
+    - any-glob-to-any-file:
+      - docker-compose*.yml
+      - "**/Dockerfile"
+      - scripts/docker-up.sh
+
+docs:
+  - changed-files:
+    - any-glob-to-any-file:
+      - docs/**
+      - "*.md"
+
+tests:
+  - changed-files:
+    - any-glob-to-any-file:
+      - tests/**

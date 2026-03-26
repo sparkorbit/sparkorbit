@@ -4,6 +4,10 @@ import type {
   LeaderboardsResponse,
   SessionReloadStateResponse,
 } from "../types/dashboard";
+import type {
+  ActiveJobResponse,
+  JobProgressSnapshot,
+} from "../types/jobProgress";
 import type { SessionDocument } from "../types/sessionDocument";
 
 const API_BASE_URL =
@@ -16,9 +20,6 @@ function buildUrl(path: string) {
   return `${API_BASE_URL}${path}`;
 }
 
-function buildStreamUrl(path: string) {
-  return buildUrl(path);
-}
 
 async function fetchJson<T>(path: string, init?: RequestInit) {
   const response = await fetch(buildUrl(path), {
@@ -98,16 +99,14 @@ export function reloadSession(payload?: {
   );
 }
 
-export function fetchReloadState() {
-  return fetchJson<SessionReloadStateResponse>("/api/sessions/reload");
-}
-
-export function openDashboardStream(session = "active") {
-  return new EventSource(
-    buildStreamUrl(`/api/dashboard/stream?session=${encodeURIComponent(session)}`),
+export function fetchActiveJob(surface = "dashboard") {
+  return fetchJson<ActiveJobResponse | null>(
+    `/api/jobs/active?surface=${encodeURIComponent(surface)}`,
   );
 }
 
-export function openReloadStream() {
-  return new EventSource(buildStreamUrl("/api/sessions/reload/stream"));
+export function fetchJobProgress(jobId: string) {
+  return fetchJson<JobProgressSnapshot>(
+    `/api/jobs/${encodeURIComponent(jobId)}`,
+  );
 }

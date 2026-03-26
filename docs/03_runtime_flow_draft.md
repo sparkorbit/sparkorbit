@@ -5,14 +5,14 @@
 # SparkOrbit Docs - 03. Runtime Flow
 
 > Current implemented backend / serving flow
-> Last updated: 2026-03-25
+> Last updated: 2026-03-26
 
 > Note
-> 파일명은 `_draft`를 유지하지만, 현재 내용은 실제 구현된 `backend/app + Redis + frontend stream` 흐름을 설명한다.
+> 파일명은 `_draft`를 유지하지만, 현재 내용은 실제 구현된 `backend/app + Redis + frontend polling` 흐름을 설명한다.
 
 ## Purpose
 
-이 문서는 현재 저장소에 실제로 구현된 `backend/app + Redis + frontend stream` 흐름을 설명한다.
+이 문서는 현재 저장소에 실제로 구현된 `backend/app + Redis + frontend polling` 흐름을 설명한다.
 
 - source 수집 자체는 [05. Data Collection Pipeline](./05_data_collection_pipeline.md)에 정리한다.
 - 여기서는 그 run output를 어떻게 Redis session으로 publish하고, frontend가 어떻게 읽는지에 집중한다.
@@ -25,11 +25,12 @@
 | **session runtime** | `backend/app/services/session_service.py` | bootstrap, reload, publish, summarize, dashboard rebuild |
 | **summary provider** | `backend/app/services/summary_provider.py` | `noop` / `heuristic` provider abstraction |
 | **FastAPI app** | `backend/app/main.py` | `/api/*` 라우터와 app wiring |
-| **dashboard routes** | `backend/app/api/routes/dashboard.py` | dashboard, digest, document, dashboard SSE |
-| **session routes** | `backend/app/api/routes/sessions.py` | reload start, state, reload SSE |
+| **dashboard routes** | `backend/app/api/routes/dashboard.py` | dashboard, digest, document |
+| **job routes** | `backend/app/api/routes/jobs.py` | active job 조회, progress polling |
+| **session routes** | `backend/app/api/routes/sessions.py` | reload start |
 | **leaderboard routes** | `backend/app/api/routes/leaderboards.py` | leaderboard overview 응답 |
 | **Redis client** | `backend/app/core/store.py` | RedisLike abstraction + socket client |
-| **React frontend** | `src/App.tsx` | dashboard stream, reload stream, fullscreen loading |
+| **React frontend** | `src/App.tsx` | dashboard fetch, job polling, fullscreen loading |
 | **dashboard workspace** | `src/components/dashboard/PanelWorkspace.tsx` | main, info, summary layout |
 | **docker compose** | `docker-compose.yml` | `redis + backend + worker + frontend` local runtime |
 
@@ -58,28 +59,30 @@ sequenceDiagram
     participant COLLECT as pipelines/source_fetch
     participant RUN as run outputs
 
-    UI->>API: GET /api/dashboard/stream?session=active
-    API->>REDIS: read active session
+    UI->>API: GET /api/jobs/active?surface=dashboard
+    API->>REDIS: read active job id
 
-    alt active session exists
-        API-->>UI: dashboard SSE payload
-    else no active session
-        API->>REDIS: write bootstrap_state
-        API->>COLLECT: run_collection(progress_callback)
-        COLLECT->>RUN: raw + normalized + logs
-        API->>REDIS: publish doc/feed/dashboard
-        API->>REDIS: update active session
-        API->>REDIS: summarize + digest
-        API-->>UI: loading SSE -> dashboard SSE
+    alt active job exists
+        UI->>API: GET /api/jobs/{job_id}
+        API-->>UI: job progress snapshot
+    else no active job
+        UI->>API: GET /api/dashboard?session=active
+        API->>REDIS: read active session
+        API-->>UI: dashboard payload
     end
 
-    UI->>API: POST /api/sessions/reload
-    API->>REDIS: write reload_state
-    API-->>UI: 202 accepted
-    UI->>API: GET /api/sessions/reload/stream
+    Note over API,REDIS: bootstrap thread creates job:{id}:state when there is no active session
     API->>COLLECT: run_collection(progress_callback)
-    API->>REDIS: update reload_state / session keys
-    API-->>UI: reload progress SSE
+    COLLECT->>RUN: raw + normalized + logs
+    API->>REDIS: publish doc/feed/dashboard
+    API->>REDIS: summarize + label + digest + briefing
+    API->>REDIS: update job:{id}:state
+
+    UI->>API: POST /api/sessions/reload
+    API->>REDIS: write job:{id}:state + active:dashboard
+    API-->>UI: 202 accepted + job_id
+    UI->>API: GET /api/jobs/{job_id}
+    API-->>UI: reload progress snapshot
 ```
 
 ## Session Model
@@ -112,9 +115,10 @@ frontend와 backend는 아래 stage 이름을 공유한다.
 | `writing_artifacts` | normalized, manifest, log 기록 |
 | `publishing_documents` | `doc:{document_id}` publish |
 | `publishing_views` | `feed:{source}`, `dashboard`, `active` 갱신 |
-| `published` | publish 완료, summary 대기 |
 | `summarizing_documents` | 선택 문서 summary provider 실행 |
+| `offline_labeling` | company filter + paper domain 같은 오래 걸리는 coarse task |
 | `building_digests` | category digest 생성 |
+| `building_briefing` | session briefing 생성 |
 | `ready` | 모든 단계 완료 |
 | `partial_error` | 일부 summary 실패 후 종료 |
 | `error` | 실행 실패 |
@@ -127,8 +131,8 @@ frontend와 backend는 아래 stage 이름을 공유한다.
 |-----|-----|------|
 | `sparkorbit:session:active` | none | 현재 active session id |
 | `sparkorbit:session:recent` | none | 최근 session id 목록. rollover 시 오래된 session prune 기준 |
-| `sparkorbit:session:bootstrap_state` | 15m | 홈페이지 최초 진입 bootstrap 진행 상태 |
-| `sparkorbit:session:reload_state` | 15m | manual reload 진행 상태 |
+| `sparkorbit:job:{job_id}:state` | 15m | bootstrap/reload/long task 진행 상태 snapshot |
+| `sparkorbit:job:active:{surface}` | 15m | 현재 화면을 막는 active job id |
 | `sparkorbit:queue:session_enrich` | queue semantics | existing run publish 후 worker가 읽는 큐 |
 
 ### Session Keys
@@ -137,7 +141,7 @@ frontend와 backend는 아래 stage 이름을 공유한다.
 
 | Key pattern | Value |
 |-------------|-------|
-| `sparkorbit:session:{sid}:meta` | session meta + loading stage + counts |
+| `sparkorbit:session:{sid}:meta` | session meta + terminal loading snapshot |
 | `sparkorbit:session:{sid}:run_manifest` | `run_manifest.json` |
 | `sparkorbit:session:{sid}:source_manifest` | `source_manifest.ndjson` rows |
 | `sparkorbit:session:{sid}:doc:{document_id}` | normalized document + `llm` block |
@@ -202,33 +206,25 @@ cluster/event 레이어는 아직 없다.
 | `GET` | `/api/leaderboards?session=active|{id}` | leaderboard overview |
 | `GET` | `/api/digests/{id}?session=...` | one digest + referenced documents |
 | `GET` | `/api/documents/{document_id}?session=...` | full normalized document |
-| `GET` | `/api/sessions/reload` | current reload state |
 | `POST` | `/api/sessions/reload` | new reload run start |
-
-### SSE Endpoints
-
-| Method | Path | Role |
-|--------|------|------|
-| `GET` | `/api/dashboard/stream?session=active|{id}` | homepage bootstrap + active dashboard live updates |
-| `GET` | `/api/sessions/reload/stream` | reload progress live updates |
-
-frontend는 기본적으로 SSE를 우선 사용하고, 필요할 때만 JSON fallback을 사용한다.
+| `GET` | `/api/jobs/active?surface=dashboard` | active job lookup |
+| `GET` | `/api/jobs/{job_id}` | progress polling snapshot |
 
 ## Frontend Reading Rules
 
 ### Initial Load
 
-1. 앱 시작 시 `reload_state`를 먼저 확인해 ongoing reload가 있는지 본다.
-2. 없으면 dashboard SSE에 연결한다.
-3. active session이 없으면 backend가 bootstrap을 자동 시작한다.
-4. fullscreen loader는 SSE payload의 `loading` block을 그대로 렌더링한다.
+1. 앱 시작 시 `/api/jobs/active?surface=dashboard`를 먼저 확인해 ongoing bootstrap/reload가 있는지 본다.
+2. active job이 있으면 `/api/jobs/{job_id}`를 `1.5s` 간격으로 polling한다.
+3. active job이 없으면 `/api/dashboard?session=active`를 읽는다.
+4. fullscreen loader는 job payload의 `loading` block을 그대로 렌더링한다.
 
 ### Reload Resume
 
 1. `reload session` 버튼 클릭
 2. fullscreen loader 표시
-3. reload SSE 수신
-4. 브라우저 새로고침 시에도 `GET /api/sessions/reload`로 state를 복구
+3. reload progress polling 시작
+4. 브라우저 새로고침 시에도 `GET /api/jobs/active?surface=dashboard`로 state를 복구
 5. `ready` 또는 `partial_error`가 되면 일반 dashboard로 복귀
 
 ### Drill-down
@@ -244,12 +240,14 @@ backend는 모든 live progress를 아래 모양으로 frontend에 내려준다.
 ```json
 {
   "stage": "fetching_sources",
-  "stageLabel": "Source 수집",
+  "stage_label": "Collect Sources",
   "detail": "Fetching reddit_machinelearning (4/18).",
-  "progressCurrent": 3,
-  "progressTotal": 18,
   "percent": 22,
-  "currentSource": "reddit_machinelearning",
+  "source_counts": { "completed": 3, "total": 18, "active": 6, "error": 0, "skipped": 0 },
+  "current_work_item": { "kind": "source", "id": "reddit_machinelearning", "label": "reddit_machinelearning" },
+  "active_work_items": [
+    { "kind": "source", "id": "reddit_machinelearning", "label": "reddit_machinelearning" }
+  ],
   "steps": [
     { "id": "prepare", "label": "Prepare", "status": "complete" },
     { "id": "collect", "label": "Collect", "status": "active" }
@@ -270,7 +268,7 @@ frontend는 이 값을 재계산하지 않고 가능한 그대로 사용한다.
 
 ## Current Constraints
 
-- Redis pub/sub가 아니라 Redis state + SSE polling loop로 live update를 구현한다.
+- Redis pub/sub가 아니라 Redis state + HTTP polling으로 live update를 구현한다.
 - reload와 bootstrap은 한 번에 하나만 돌도록 process-local lock을 둔다.
 - 새로고침 방지는 브라우저 제한이 있어 `beforeunload` 경고 + reload state 복구를 함께 사용한다.
 - summary provider 기본값은 `noop`이라 외부 모델을 붙이지 않으면 digest는 placeholder/heuristic 중심으로 보일 수 있다.

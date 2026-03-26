@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import json
 import subprocess
-import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -574,11 +573,22 @@ def _fetch_one_source(
         if excluded_count:
             result.notes.append(f"Excluded {excluded_count} document(s) without a displayable URL/reference.")
 
+        notes_text = " ".join(result.notes).lower()
+        if "rate limit" in notes_text and not result.raw_items:
+            source_status = "skipped"
+        elif result.documents:
+            source_status = "ok"
+        elif result.raw_items:
+            source_status = "excluded"
+        else:
+            source_status = "ok"
+
         duration_ms = int((perf_counter() - source_started_at) * 1000)
         return {
             "ok": True,
             "source": source,
             "result": result,
+            "source_status": source_status,
             "duration_ms": duration_ms,
             "fetch_duration_ms": fetch_duration_ms,
             "normalize_duration_ms": normalize_duration_ms,
@@ -607,22 +617,12 @@ def run_collection(
     timeout: float,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], Path]:
-    progress_lock = threading.Lock()
-
-    def emit_progress(**payload: Any) -> None:
-        if progress_callback is None:
-            return
-        with progress_lock:
-            progress_callback(payload)
-
     run_id = utc_run_id(run_label)
     run_dir = Path(output_dir) / run_id
     paths = ensure_dirs(run_dir)
     selected_sources = resolve_sources(sources)
     applied_limit = effective_limit(limit)
     started_at = now_utc_iso()
-    total_sources = len(selected_sources)
-
     run_manifest: dict[str, Any] = {
         "run_id": run_id,
         "limit": applied_limit,
@@ -640,43 +640,78 @@ def run_collection(
     request_log_rows: list[dict[str, Any]] = []
     error_rows: list[dict[str, Any]] = []
 
-    emit_progress(
-        stage="starting",
-        run_id=run_id,
-        total_sources=total_sources,
-        completed_sources=0,
-        current_source=None,
-        detail=f"Preparing {total_sources} source(s) for parallel collection.",
-    )
+    total_sources = len(selected_sources)
+    print(f"[collect] run={run_id}  sources={total_sources}  limit={applied_limit}")
+
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "type": "identity",
+                "run_id": run_id,
+            }
+        )
+        progress_callback(
+            {
+                "type": "stage",
+                "stage": "starting",
+                "detail": "Preparing collection run.",
+                "force": True,
+            }
+        )
+        progress_callback(
+            {
+                "type": "stage",
+                "stage": "fetching_sources",
+                "detail": f"Queued {total_sources} sources for collection.",
+                "progress_current": 0,
+                "progress_total": total_sources,
+                "force": True,
+            }
+        )
 
     # --- parallel fetch phase ---
-    completed_count = 0
     fetch_results: dict[str, dict[str, Any]] = {}
+    completed_count = 0
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_source = {
-            executor.submit(
-                _fetch_one_source, source, run_id, applied_limit, timeout,
-            ): source
-            for source in selected_sources
-        }
+        future_to_source = {}
+        for source in selected_sources:
+            future = executor.submit(
+                _fetch_one_source,
+                source,
+                run_id,
+                applied_limit,
+                timeout,
+            )
+            future_to_source[future] = source
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "type": "source_started",
+                        "source": source.name,
+                        "label": source.name,
+                        "total": total_sources,
+                    }
+                )
         for future in as_completed(future_to_source):
             outcome = future.result()
             source = outcome["source"]
             fetch_results[source.name] = outcome
             completed_count += 1
-            status_tag = "ok" if outcome["ok"] else "fail"
-            emit_progress(
-                stage="fetching_sources",
-                run_id=run_id,
-                total_sources=total_sources,
-                completed_sources=completed_count,
-                current_source=None,
-                source_index=completed_count,
-                detail=f"Done {completed_count}/{total_sources} sources (latest: {source.name} {status_tag})",
-            )
+            tag = "ok" if outcome["ok"] else "err"
+            print(f"[collect] {completed_count}/{total_sources}  {source.name}  {tag}  {outcome['duration_ms']}ms")
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "type": "source_finished",
+                        "source": source.name,
+                        "label": source.name,
+                        "status": outcome.get("source_status", "error" if not outcome["ok"] else "ok"),
+                    }
+                )
 
     # --- sequential persist phase (maintains source order) ---
+    persisted_sources = 0
     for source in selected_sources:
         outcome = fetch_results[source.name]
         if outcome["ok"]:
@@ -699,15 +734,7 @@ def run_collection(
 
             persist_duration_ms = int((perf_counter() - persist_started_at) * 1000)
             request_summary = summarize_request_traces(result.request_traces)
-            notes_text = " ".join(result.notes).lower()
-            if "rate limit" in notes_text and not result.raw_items:
-                status = "skipped"
-            elif result.documents:
-                status = "ok"
-            elif result.raw_items:
-                status = "excluded"
-            else:
-                status = "ok"
+            status = outcome.get("source_status", "ok")
             manifest_entry = {
                 "source": source.name,
                 "endpoint": source.endpoint,
@@ -792,14 +819,18 @@ def run_collection(
             )
             run_manifest["error_count"] += 1
 
-    emit_progress(
-        stage="writing_artifacts",
-        run_id=run_id,
-        total_sources=total_sources,
-        completed_sources=len(source_manifest_entries),
-        current_source=None,
-        detail="Writing manifests, normalized outputs, and contract report.",
-    )
+        persisted_sources += 1
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "type": "stage",
+                    "stage": "writing_artifacts",
+                    "detail": f"Writing canonical artifacts ({persisted_sources}/{total_sources}).",
+                    "progress_current": persisted_sources,
+                    "progress_total": total_sources,
+                }
+            )
+
     append_ndjson(paths["root"] / "source_manifest.ndjson", source_manifest_entries)
     append_ndjson(paths["logs"] / "fetch.ndjson", fetch_log_rows)
     append_ndjson(paths["logs"] / "requests.ndjson", request_log_rows)
@@ -820,4 +851,21 @@ def run_collection(
         if line.strip()
     ] if metrics_path.exists() else []
     write_json(paths["normalized"] / "contract_report.json", build_contract_report(documents, metrics))
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "type": "stage",
+                "stage": "writing_artifacts",
+                "detail": f"Canonical artifacts ready for run {run_id}.",
+                "progress_current": total_sources,
+                "progress_total": total_sources,
+                "force": True,
+            }
+        )
+    print(
+        f"[collect] done  ok={run_manifest['success_count']}"
+        f"  skip={run_manifest['skipped_count']}"
+        f"  err={run_manifest['error_count']}"
+        f"  docs={len(documents)}"
+    )
     return run_manifest, run_dir

@@ -13,13 +13,12 @@ def create_app(store: Any | None = None):
     from fastapi.middleware.cors import CORSMiddleware
 
     from .api.routes.dashboard import router as dashboard_router
+    from .api.routes.jobs import router as jobs_router
     from .api.routes.leaderboards import router as leaderboards_router
     from .api.routes.sessions import router as sessions_router
     from .core.constants import ACTIVE_SESSION_KEY
-    from .services.session_service import (
-        begin_homepage_bootstrap,
-        run_homepage_bootstrap,
-    )
+    from .services.job_progress import get_active_job_id
+    from .services.session_service import run_homepage_bootstrap
 
     resolved_store = store or RedisStore()
     app = FastAPI(title="SparkOrbit Backend", version="0.1.0")
@@ -33,6 +32,7 @@ def create_app(store: Any | None = None):
     )
     api_router = APIRouter(prefix="/api")
     api_router.include_router(dashboard_router)
+    api_router.include_router(jobs_router)
     api_router.include_router(leaderboards_router)
     api_router.include_router(sessions_router)
 
@@ -46,8 +46,7 @@ def create_app(store: Any | None = None):
     def _eager_bootstrap() -> None:
         if resolved_store.get(ACTIVE_SESSION_KEY):
             return
-        _bootstrap_state, should_start = begin_homepage_bootstrap(resolved_store)
-        if not should_start:
+        if get_active_job_id(resolved_store, "dashboard"):
             return
         run_homepage_bootstrap(resolved_store)
 
