@@ -27,6 +27,7 @@ export type FeedItem = {
   title: string;
   meta: string;
   note: string;
+  engagementLabel?: string;
 };
 
 export type FeedPanel = {

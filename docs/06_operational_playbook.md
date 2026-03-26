@@ -36,6 +36,8 @@
 
 ## 2. Environment Setup
 
+Node 기반 frontend tooling (`npm install`, `npm run build`, `npm run dev`) 은 Node `^20.19.0 || >=22.12.0` 를 요구한다. 전체 앱 Docker 빌드는 `frontend/Dockerfile` 에서 `node:22-alpine` 을 사용하므로 Linux, macOS, Windows host에서 동일하게 동작한다. `@rolldown/binding-*`, `@tailwindcss/oxide-*` 같은 플랫폼별 바이너리는 root direct dependency로 고정하지 않고 transitive optional dependency로만 둔다.
+
 Collection 작업 루트:
 
 ```bash
@@ -140,6 +142,8 @@ curl http://localhost:11434/api/tags
 ```bash
 bash scripts/docker-up.sh
 ```
+
+macOS/Windows에서 Bash 스크립트 대신 Docker Desktop/Engine만으로 실행하고 싶다면 아래 `docker compose up --build` 경로를 그대로 사용하면 된다.
 
 LLM bundle을 포함하면 첫 실행은 `qwen3.5:4b` model pull까지 같이 진행하므로 몇 분 걸릴 수 있다.
 

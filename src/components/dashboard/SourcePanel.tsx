@@ -93,6 +93,7 @@ export function SourcePanel({
             const resolvedTitle = decodeHtmlEntities(item.title);
             const resolvedNote = decodeHtmlEntities(item.note);
             const resolvedTimestamp = formatDisplayDate(item.timestamp);
+            const engagementLabel = item.engagementLabel || "";
             const isSelected = selectedDocumentId === item.documentId;
             const isOdd = index % 2 === 1;
 
@@ -133,11 +134,21 @@ export function SourcePanel({
                       <h3 className="orbit-line-clamp-1 orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.74rem] font-semibold leading-[1.3] text-orbit-text">
                         {resolvedTitle}
                       </h3>
-                      {resolvedTimestamp ? (
-                        <span className="shrink-0 font-mono text-[0.44rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
-                          {resolvedTimestamp}
-                        </span>
-                      ) : null}
+                      <div className="flex shrink-0 items-baseline gap-1.5">
+                        {engagementLabel ? (
+                          <span
+                            className="font-mono text-[0.44rem] tabular-nums tracking-[0.08em]"
+                            style={{ color: catColor, opacity: 0.85 }}
+                          >
+                            {engagementLabel}
+                          </span>
+                        ) : null}
+                        {resolvedTimestamp ? (
+                          <span className="font-mono text-[0.44rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
+                            {resolvedTimestamp}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                   ) : (
                     <div className="min-w-0 flex-1 px-3 py-2.5">
@@ -145,11 +156,21 @@ export function SourcePanel({
                         <h3 className="orbit-line-clamp-2 orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.78rem] font-semibold leading-[1.35] text-orbit-text">
                           {resolvedTitle}
                         </h3>
-                        {resolvedTimestamp ? (
-                          <span className="mt-0.5 shrink-0 font-mono text-[0.46rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
-                            {resolvedTimestamp}
-                          </span>
-                        ) : null}
+                        <div className="mt-0.5 flex shrink-0 flex-col items-end gap-0.5">
+                          {engagementLabel ? (
+                            <span
+                              className="font-mono text-[0.46rem] tabular-nums tracking-[0.08em]"
+                              style={{ color: catColor, opacity: 0.85 }}
+                            >
+                              {engagementLabel}
+                            </span>
+                          ) : null}
+                          {resolvedTimestamp ? (
+                            <span className="font-mono text-[0.46rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
+                              {resolvedTimestamp}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                       {resolvedNote ? (
                         <p className="orbit-line-clamp-1 orbit-wrap-anywhere mt-1 text-[0.64rem] leading-[1.5] text-orbit-muted">

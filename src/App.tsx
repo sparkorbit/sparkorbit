@@ -26,6 +26,7 @@ import type { DigestItem } from "./content/dashboardContent";
 import {
   EMPTY_ARENA_BOARDS,
   EMPTY_DASHBOARD,
+  EMPTY_LOADING,
   compactText,
   formatReadableSourceTitle,
 } from "./features/dashboard/display";
@@ -51,6 +52,7 @@ import {
   reloadSession,
 } from "./lib/dashboardApi";
 import type {
+  DashboardLoadingBlock,
   DashboardResponse,
   SessionArenaOverview,
 } from "./types/dashboard";
@@ -160,7 +162,7 @@ function buildJobErrorSnapshot(
   activeJob: ActiveJobResponse | null,
 ): JobProgressSnapshot {
   const now = new Date().toISOString();
-  const fallback = current ?? EMPTY_DASHBOARD.session.loading;
+  const fallback = current ?? EMPTY_LOADING;
 
   return {
     ...fallback,
@@ -177,6 +179,61 @@ function buildJobErrorSnapshot(
       message,
       type: "JobProgressError",
     },
+  };
+}
+
+function isJobProgressSnapshot(
+  loading: JobProgressSnapshot | DashboardLoadingBlock,
+): loading is JobProgressSnapshot {
+  return "stage_label" in loading;
+}
+
+function normalizeLoadingSnapshot(
+  loading: JobProgressSnapshot | DashboardLoadingBlock,
+): JobProgressSnapshot {
+  if (isJobProgressSnapshot(loading)) {
+    return loading;
+  }
+
+  const total = Math.max(loading.progressTotal ?? 0, 0);
+  const completed = Math.max(loading.progressCurrent ?? 0, 0);
+  const activeSource = loading.currentSource?.trim() || null;
+
+  return {
+    ...EMPTY_LOADING,
+    status: "running",
+    stage: loading.stage,
+    stage_label: loading.stageLabel,
+    detail: loading.detail,
+    percent: loading.percent,
+    steps: loading.steps.map((step) => ({
+      id: step.id,
+      label: step.label,
+      status: step.status,
+    })),
+    source_counts: {
+      completed,
+      total,
+      active: activeSource ? 1 : 0,
+      error: 0,
+      skipped: 0,
+    },
+    current_work_item: activeSource
+      ? {
+          kind: "source",
+          id: activeSource,
+          label: activeSource,
+        }
+      : null,
+    active_work_items: activeSource
+      ? [
+          {
+            kind: "source",
+            id: activeSource,
+            label: activeSource,
+          },
+        ]
+      : [],
   };
 }
 
@@ -783,7 +840,9 @@ function App() {
   const sessionLabel = dashboard.session.sessionDate;
   const hasUsableDashboard =
     dashboard.session.sessionId !== EMPTY_DASHBOARD.session.sessionId;
-  const loadingSnapshot = jobProgress ?? dashboard.session.loading;
+  const loadingSnapshot = normalizeLoadingSnapshot(
+    jobProgress ?? dashboard.session.loading,
+  );
   const shouldShowFullscreenLoading =
     activeJob !== null ||
     dashboard.status === "collecting" ||

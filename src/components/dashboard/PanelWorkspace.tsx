@@ -1320,13 +1320,11 @@ function PanelBoard({
 function WorkspaceSection({
   eyebrow,
   title,
-  itemCount,
   action,
   children,
 }: {
   eyebrow: string;
   title: string;
-  itemCount?: number;
   action?: ReactNode;
   children: ReactNode;
 }) {
@@ -1338,11 +1336,6 @@ function WorkspaceSection({
             {eyebrow}
           </p>
           <div className="flex items-center gap-2">
-            {itemCount != null && itemCount > 0 ? (
-              <span className="shrink-0 border border-orbit-border px-1.5 py-0.5 font-mono text-[0.5rem] uppercase tracking-widest text-orbit-muted">
-                {itemCount} panels
-              </span>
-            ) : null}
             {action}
           </div>
         </div>
@@ -1538,8 +1531,7 @@ export function PanelWorkspace({
         <div className="min-h-0 overflow-hidden xl:col-start-3 xl:row-start-1 xl:row-span-3">
           <WorkspaceSection
             eyebrow={infoPanelOverride ? "Selected Source" : "Browse Sources"}
-            title={infoPanelOverride?.title ?? "Choose a Source Panel"}
-            itemCount={infoPanelOverride ? undefined : visibleInfoItems.length}
+            title={infoPanelOverride?.title ?? "Side Panel"}
             action={
               infoItems.length > 0 ? (
                 <button

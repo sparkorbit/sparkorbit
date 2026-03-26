@@ -987,6 +987,83 @@ def build_feed_meta(document: dict[str, Any]) -> str:
     )
 
 
+def _build_engagement_label(document: dict[str, Any]) -> str:
+    doc_type = document.get("doc_type")
+    source = str(document.get("source") or "")
+    engagement = document.get("engagement") or {}
+
+    if doc_type in {"model", "model_trending"} or source.startswith("hf_"):
+        likes = int(to_number(engagement.get("likes")))
+        if source == "hf_trending_models":
+            score = engagement.get("trending_score")
+            if score is not None:
+                return f"trending {int(to_number(score))}"
+            if likes:
+                return f"liked {likes:,}"
+        elif source == "hf_models_likes":
+            if likes:
+                return f"liked {likes:,}"
+        elif source == "hf_models_new":
+            downloads = int(to_number(engagement.get("downloads")))
+            if downloads:
+                return f"downloads {downloads:,}"
+            if likes:
+                return f"liked {likes:,}"
+        elif likes:
+            return f"liked {likes:,}"
+
+    if doc_type == "repo":
+        stars = int(to_number(engagement.get("stars")))
+        if stars:
+            return f"stars {stars:,}"
+
+    if doc_type in {"story", "post"}:
+        score = int(to_number(engagement.get("score") or engagement.get("ups")))
+        if score:
+            return f"score {score:,}"
+
+    return ""
+
+
+def _engagement_sort_value(document: dict[str, Any]) -> float:
+    source = str(document.get("source") or "")
+    engagement = document.get("engagement") or {}
+
+    if source == "hf_trending_models":
+        return to_number(engagement.get("trending_score")) or to_number(engagement.get("likes"))
+    if source == "hf_models_likes":
+        return to_number(engagement.get("likes"))
+    if source == "hf_models_new":
+        return to_number(engagement.get("downloads")) or to_number(engagement.get("likes"))
+
+    doc_type = document.get("doc_type")
+    if doc_type == "repo":
+        return to_number(engagement.get("stars"))
+    if doc_type in {"story", "post"}:
+        return to_number(engagement.get("score") or engagement.get("ups"))
+
+    return 0.0
+
+
+_ENGAGEMENT_SORTED_SOURCES = frozenset({
+    "hf_models_likes", "hf_trending_models", "hf_models_new",
+    "github_curated_repos",
+})
+
+
+def sort_documents_for_feed(
+    documents: Iterable[dict[str, Any]],
+    source: str,
+) -> list[dict[str, Any]]:
+    if source in _ENGAGEMENT_SORTED_SOURCES:
+        return sorted(
+            documents,
+            key=lambda d: (_engagement_sort_value(d), document_timestamp(d)),
+            reverse=True,
+        )
+    return sort_documents(documents)
+
+
 def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
     return {
         "documentId": document["document_id"],
@@ -1000,6 +1077,7 @@ def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
         "title": str(document.get("title") or "-"),
         "meta": build_feed_meta(document),
         "note": build_document_note(document),
+        "engagementLabel": _build_engagement_label(document),
     }
 
 
@@ -2243,11 +2321,14 @@ def build_dashboard_payload(
         return (_FEED_CATEGORY_ORDER.get(cat, 99), source)
 
     for source, document_ids in sorted(feed_lists.items(), key=_feed_sort_key):
-        documents = sort_documents(
-            document
-            for document_id in document_ids
-            if (document := documents_by_id.get(document_id)) is not None
-            and not _is_generic_title(document.get("title"))
+        documents = sort_documents_for_feed(
+            (
+                document
+                for document_id in document_ids
+                if (document := documents_by_id.get(document_id)) is not None
+                and not _is_generic_title(document.get("title"))
+            ),
+            source=source,
         )
         if not documents:
             continue

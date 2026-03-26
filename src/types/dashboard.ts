@@ -49,6 +49,24 @@ export type SessionArenaOverview = {
   boards: SessionArenaBoard[];
 };
 
+export type DashboardLoadingBlockStep = {
+  id: string;
+  label: string;
+  detail?: string | null;
+  status: string;
+};
+
+export type DashboardLoadingBlock = {
+  stage: string;
+  stageLabel: string;
+  detail: string;
+  progressCurrent: number;
+  progressTotal: number;
+  percent: number;
+  currentSource: string | null;
+  steps: DashboardLoadingBlockStep[];
+};
+
 export type DashboardSession = {
   title: string;
   sessionId: string;
@@ -57,7 +75,7 @@ export type DashboardSession = {
   reloadRule: string;
   metrics: SessionMetric[];
   runtime: RuntimeItem[];
-  loading: JobProgressSnapshot;
+  loading: JobProgressSnapshot | DashboardLoadingBlock;
   rules: string[];
   arenaOverview: SessionArenaOverview | null;
 };

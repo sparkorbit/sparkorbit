@@ -118,7 +118,7 @@ const BENCHMARK_KIND_LABELS: Record<string, string> = {
 
 export const EMPTY_ARENA_BOARDS: readonly SessionArenaBoard[] = [];
 
-const EMPTY_LOADING: JobProgressSnapshot = {
+export const EMPTY_LOADING: JobProgressSnapshot = {
   job_id: null,
   surface: "dashboard",
   job_type: "session_loading",
