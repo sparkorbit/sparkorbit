@@ -49,6 +49,7 @@ import {
   fetchDocument,
   fetchJobProgress,
   fetchLeaderboards,
+  openJobProgressStream,
   reloadSession,
 } from "./lib/dashboardApi";
 import type {
@@ -355,6 +356,7 @@ function App() {
   const currentDashboardSessionIdRef = useRef(
     EMPTY_DASHBOARD.session.sessionId,
   );
+  const jobStreamRef = useRef<(() => void) | null>(null);
 
   const rowHeightPx = resolveRowHeightPx(uiSettings.rowHeightMode);
 
@@ -445,6 +447,49 @@ function App() {
     }
   }
 
+  function startJobStream(job: ActiveJobResponse) {
+    jobStreamRef.current?.();
+    jobStreamRef.current = openJobProgressStream(
+      job.job_id,
+      (payload) => {
+        recordPayloadSnapshot({
+          key: "job-progress",
+          title: "job progress",
+          path: job.poll_path,
+          transport: "sse",
+          payload,
+        });
+        setJobProgress(payload);
+        if (payload.status === "ready" || payload.status === "partial_error") {
+          jobStreamRef.current = null;
+          setActiveJob(null);
+          void loadDashboardData("active", { preserveCurrent: true });
+        } else if (payload.status === "error") {
+          jobStreamRef.current = null;
+          setActiveJob(null);
+          if (
+            currentDashboardSessionIdRef.current !==
+            EMPTY_DASHBOARD.session.sessionId
+          ) {
+            setDashboardError(
+              compactText(
+                payload.error?.message ?? "The active job ended with an error.",
+                180,
+              ),
+            );
+          }
+        }
+      },
+      (message) => {
+        jobStreamRef.current = null;
+        setJobProgress((current) =>
+          buildJobErrorSnapshot(current, message, job),
+        );
+        setActiveJob(null);
+      },
+    );
+  }
+
   useEffect(() => {
     let isDisposed = false;
 
@@ -479,17 +524,8 @@ function App() {
           if (progress?.status === "ready" || progress?.status === "partial_error") {
             setActiveJob(null);
             await loadDashboardData("active", { preserveCurrent: true });
-          } else if (
-            progress?.status === "error" &&
-            dashboard.session.sessionId !== EMPTY_DASHBOARD.session.sessionId
-          ) {
-            setActiveJob(null);
-            setDashboardError(
-              compactText(
-                progress.error?.message ?? "The active job ended with an error.",
-                180,
-              ),
-            );
+          } else {
+            startJobStream(active);
           }
           return;
         }
@@ -514,6 +550,7 @@ function App() {
           return;
         }
         setActiveJob(retryActive);
+        startJobStream(retryActive);
         await loadJobProgressData(retryActive);
       } catch (error) {
         if (isDisposed) {
@@ -619,48 +656,12 @@ function App() {
   }, [activeJob, dashboard.session.sessionId, dashboard.status]);
 
   useEffect(() => {
-    if (!activeJob) {
-      return;
-    }
-
-    const currentJob = activeJob;
-    let isDisposed = false;
-
-    async function pollJob() {
-      const payload = await loadJobProgressData(currentJob);
-      if (isDisposed || !payload) {
-        return;
-      }
-
-      if (payload.status === "ready" || payload.status === "partial_error") {
-        setActiveJob(null);
-        await loadDashboardData("active", { preserveCurrent: true });
-        return;
-      }
-
-      if (payload.status === "error") {
-        setActiveJob(null);
-        if (dashboard.session.sessionId !== EMPTY_DASHBOARD.session.sessionId) {
-          setDashboardError(
-            compactText(
-              payload.error?.message ?? "The active job ended with an error.",
-              180,
-            ),
-          );
-        }
-      }
-    }
-
-    void pollJob();
-    const intervalId = window.setInterval(() => {
-      void pollJob();
-    }, 1500);
-
     return () => {
-      isDisposed = true;
-      window.clearInterval(intervalId);
+      jobStreamRef.current?.();
+      jobStreamRef.current = null;
     };
-  }, [activeJob, dashboard.session.sessionId]);
+  }, []);
+
 
   function resetWorkspaceLayout() {
     detailRequestVersionRef.current += 1;
@@ -761,6 +762,8 @@ function App() {
   }
 
   async function handleReloadSession() {
+    jobStreamRef.current?.();
+    jobStreamRef.current = null;
     detailRequestVersionRef.current += 1;
     setActiveJob(null);
     setJobProgress(null);
@@ -790,6 +793,7 @@ function App() {
           status: result.status,
         };
         setActiveJob(nextActiveJob);
+        startJobStream(nextActiveJob);
         await loadJobProgressData(nextActiveJob);
       }
     } catch (error) {

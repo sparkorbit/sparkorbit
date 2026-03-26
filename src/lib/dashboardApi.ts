@@ -110,3 +110,102 @@ export function fetchJobProgress(jobId: string) {
     `/api/jobs/${encodeURIComponent(jobId)}`,
   );
 }
+
+export function openDashboardStream(
+  onUpdate: (dashboard: DashboardResponse) => void,
+  onStreamError: (message: string) => void,
+): () => void {
+  const es = new EventSource(buildUrl("/api/dashboard/stream"));
+  let closed = false;
+
+  es.onmessage = (event) => {
+    if (closed) return;
+    try {
+      const data = JSON.parse(event.data as string) as DashboardResponse;
+      onUpdate(data);
+    } catch {
+      // ignore parse errors
+    }
+  };
+
+  es.addEventListener("error", (event) => {
+    if (closed) return;
+    closed = true;
+    es.close();
+    try {
+      const data = JSON.parse((event as MessageEvent).data as string) as {
+        detail?: string;
+      };
+      onStreamError(data.detail ?? "Dashboard stream error.");
+    } catch {
+      onStreamError("Dashboard stream error.");
+    }
+  });
+
+  es.onerror = () => {
+    if (closed) return;
+    closed = true;
+    es.close();
+    onStreamError("Dashboard stream connection lost.");
+  };
+
+  return () => {
+    closed = true;
+    es.close();
+  };
+}
+
+export function openJobProgressStream(
+  jobId: string,
+  onUpdate: (snapshot: JobProgressSnapshot) => void,
+  onStreamError: (message: string) => void,
+): () => void {
+  const es = new EventSource(
+    buildUrl(`/api/jobs/${encodeURIComponent(jobId)}/stream`),
+  );
+  let closed = false;
+
+  es.onmessage = (event) => {
+    if (closed) return;
+    try {
+      const data = JSON.parse(event.data as string) as JobProgressSnapshot;
+      onUpdate(data);
+      if (
+        data.status === "ready" ||
+        data.status === "partial_error" ||
+        data.status === "error"
+      ) {
+        closed = true;
+        es.close();
+      }
+    } catch {
+      // ignore parse errors
+    }
+  };
+
+  es.addEventListener("stream_error", (event) => {
+    if (closed) return;
+    closed = true;
+    es.close();
+    try {
+      const data = JSON.parse((event as MessageEvent).data as string) as {
+        detail?: string;
+      };
+      onStreamError(data.detail ?? "Job stream error.");
+    } catch {
+      onStreamError("Job stream error.");
+    }
+  });
+
+  es.onerror = () => {
+    if (closed) return;
+    closed = true;
+    es.close();
+    onStreamError("Job stream connection lost.");
+  };
+
+  return () => {
+    closed = true;
+    es.close();
+  };
+}
