@@ -52,6 +52,7 @@ type PanelBoardProps = {
   maxDynamicColumns?: number;
   minColumnWidthPx?: number;
   allowColumnResize?: boolean;
+  allowRowResize?: boolean;
   rowHeightPx?: number;
   onRemoveItem?: (itemId: string) => void;
 };
@@ -515,15 +516,18 @@ function InfoPanelVisibilityModal({
                       <button
                         key={group.label}
                         type="button"
-                        className="border px-2 py-1 font-mono text-[0.54rem] font-semibold uppercase tracking-[0.12em] transition-colors duration-150 hover:brightness-110"
+                        className={[
+                          "border px-2 py-1 font-mono text-[0.54rem] font-semibold uppercase tracking-[0.12em] transition-colors duration-150",
+                          "hover:brightness-110",
+                        ].join(" ")}
                         style={{
-                          borderColor: `color-mix(in srgb, ${groupAccent} 50%, var(--color-orbit-border))`,
-                          backgroundColor: `color-mix(in srgb, ${groupAccent} 10%, var(--color-orbit-panel))`,
+                          borderColor: `color-mix(in srgb, ${groupAccent} 38%, var(--color-orbit-border))`,
+                          backgroundColor: `color-mix(in srgb, ${groupAccent} 12%, var(--color-orbit-panel))`,
                           color: groupAccent,
                         }}
                         onClick={() => onShowOnlyGroup(group.label)}
                       >
-                        {group.label} {group.items.length}
+                        {group.label}
                       </button>
                     );
                   })}
@@ -757,6 +761,7 @@ function PanelBoard({
   maxDynamicColumns = DEFAULT_MAX_DYNAMIC_COLUMNS,
   minColumnWidthPx = MIN_COLUMN_WIDTH_PX,
   allowColumnResize = true,
+  allowRowResize = true,
   rowHeightPx = DEFAULT_GRID_ROW_HEIGHT_PX,
   onRemoveItem,
 }: PanelBoardProps) {
@@ -1040,14 +1045,14 @@ function PanelBoard({
                   <div className="flex h-full min-h-0 flex-col">
                     <div
                       className={[
-                        "flex h-8 min-w-0 items-stretch justify-between border-b transition-colors duration-150",
+                        "flex h-10 min-w-0 items-stretch justify-between border-b transition-colors duration-150",
                         activeDragId === item.id || swapTargetId === item.id
                           ? "border-orbit-accent"
                           : "border-orbit-border group-hover:border-orbit-border-strong",
                       ].join(" ")}
                       style={{
                         backgroundColor: item.accentColor
-                          ? `color-mix(in srgb, ${item.accentColor} 8%, var(--color-orbit-bg))`
+                          ? `color-mix(in srgb, ${item.accentColor} 18%, var(--color-orbit-bg))`
                           : "var(--color-orbit-bg)",
                       }}
                     >
@@ -1062,7 +1067,7 @@ function PanelBoard({
                         <span className="flex min-w-0 items-center gap-2 overflow-hidden">
                           {parsedTitle.tag ? (
                             <span
-                              className="shrink-0 border px-1.5 py-0.5 font-mono text-[0.48rem] font-semibold uppercase tracking-[0.14em]"
+                              className="shrink-0 border px-2 py-1 font-mono text-[0.52rem] font-semibold uppercase tracking-[0.14em]"
                               style={{
                                 borderColor:
                                   activeDragId === item.id ||
@@ -1092,7 +1097,7 @@ function PanelBoard({
                           {displayTitle ? (
                             <span
                               className={[
-                                "orbit-token-ellipsis font-display text-[0.78rem] font-semibold tracking-[-0.01em]",
+                                "orbit-token-ellipsis font-display text-[0.88rem] font-semibold tracking-[-0.01em]",
                                 activeDragId === item.id ||
                                 swapTargetId === item.id
                                   ? "text-orbit-accent"
@@ -1156,53 +1161,55 @@ function PanelBoard({
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  className="absolute inset-x-0 bottom-0 z-20 flex h-2 cursor-row-resize items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-                  title="Drag to resize height. Double-click to reset"
-                  onDoubleClick={() => {
-                    setSizes((current) => ({
-                      ...current,
-                      [item.id]: {
-                        ...current[item.id],
-                        rowSpan: item.defaultRowSpan ?? DEFAULT_ROW_SPAN,
-                      },
-                    }));
-                  }}
-                  onPointerDown={(event) => {
-                    event.preventDefault();
-
-                    const startY = event.clientY;
-                    const startRowSpan = size.rowSpan;
-
-                    const onPointerMove = (moveEvent: PointerEvent) => {
-                      const nextRowSpan = clamp(
-                        startRowSpan +
-                          Math.round((moveEvent.clientY - startY) / rowStepPx),
-                        MIN_ROW_SPAN,
-                        MAX_ROW_SPAN,
-                      );
-
+                {allowRowResize ? (
+                  <button
+                    type="button"
+                    className="absolute inset-x-0 bottom-0 z-20 flex h-2 cursor-row-resize items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                    title="Drag to resize height. Double-click to reset"
+                    onDoubleClick={() => {
                       setSizes((current) => ({
                         ...current,
                         [item.id]: {
                           ...current[item.id],
-                          rowSpan: nextRowSpan,
+                          rowSpan: item.defaultRowSpan ?? DEFAULT_ROW_SPAN,
                         },
                       }));
-                    };
+                    }}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
 
-                    const onPointerUp = () => {
-                      window.removeEventListener("pointermove", onPointerMove);
-                      window.removeEventListener("pointerup", onPointerUp);
-                    };
+                      const startY = event.clientY;
+                      const startRowSpan = size.rowSpan;
 
-                    window.addEventListener("pointermove", onPointerMove);
-                    window.addEventListener("pointerup", onPointerUp);
-                  }}
-                >
-                  <span className="mx-auto block h-px w-8 bg-orbit-border-strong opacity-60" />
-                </button>
+                      const onPointerMove = (moveEvent: PointerEvent) => {
+                        const nextRowSpan = clamp(
+                          startRowSpan +
+                            Math.round((moveEvent.clientY - startY) / rowStepPx),
+                          MIN_ROW_SPAN,
+                          MAX_ROW_SPAN,
+                        );
+
+                        setSizes((current) => ({
+                          ...current,
+                          [item.id]: {
+                            ...current[item.id],
+                            rowSpan: nextRowSpan,
+                          },
+                        }));
+                      };
+
+                      const onPointerUp = () => {
+                        window.removeEventListener("pointermove", onPointerMove);
+                        window.removeEventListener("pointerup", onPointerUp);
+                      };
+
+                      window.addEventListener("pointermove", onPointerMove);
+                      window.addEventListener("pointerup", onPointerUp);
+                    }}
+                  >
+                    <span className="mx-auto block h-px w-8 bg-orbit-border-strong opacity-60" />
+                  </button>
+                ) : null}
 
                 {allowColumnResize && columnCount > 1 ? (
                   <button
@@ -1523,12 +1530,12 @@ export function PanelWorkspace({
 
   return (
     <div className="h-full overflow-hidden bg-orbit-bg p-1.5 md:p-2">
-      <div className="grid h-full min-h-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,3fr)] xl:grid-rows-3">
-        <div className="min-h-0 overflow-hidden xl:col-start-1 xl:col-span-2 xl:row-start-1 xl:row-span-2">
+      <div className="grid h-full min-h-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,3fr)] xl:grid-rows-[5fr_4fr]">
+        <div className="min-h-0 overflow-hidden xl:col-start-1 xl:col-span-2 xl:row-start-1">
           {mainPanel ?? <DefaultMainPanel />}
         </div>
 
-        <div className="min-h-0 overflow-hidden xl:col-start-3 xl:row-start-1 xl:row-span-3">
+        <div className="min-h-0 overflow-hidden xl:col-start-3 xl:row-start-1 xl:row-span-2">
           <WorkspaceSection
             eyebrow={infoPanelOverride ? "Selected Source" : "Browse Sources"}
             title={infoPanelOverride?.title ?? "Side Panel"}
@@ -1562,6 +1569,8 @@ export function PanelWorkspace({
                 }
                 maxDynamicColumns={3}
                 minColumnWidthPx={320}
+                allowColumnResize={false}
+                allowRowResize={false}
                 rowHeightPx={rowHeightPx}
                 onRemoveItem={hideInfoItem}
               />
@@ -1570,7 +1579,7 @@ export function PanelWorkspace({
         </div>
 
         {bottomPanel ? (
-          <div className="min-h-0 overflow-hidden xl:col-start-1 xl:col-span-2 xl:row-start-3">
+          <div className="min-h-0 overflow-hidden xl:col-start-1 xl:col-span-2 xl:row-start-2">
             {bottomPanel}
           </div>
         ) : null}

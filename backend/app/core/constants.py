@@ -40,7 +40,7 @@ SESSION_RETAIN_COUNT = env_int(
     minimum=1,
 )
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 DEFAULT_RUN_LABEL = "redis-session"
 HOMEPAGE_BOOTSTRAP_RUN_LABEL = "homepage-entry"
 

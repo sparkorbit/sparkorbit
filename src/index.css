@@ -166,13 +166,9 @@ body {
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  border: 1px solid rgb(90 133 80 / 0.88);
-  background: rgb(7 10 7 / 0.98);
-  box-shadow:
-    inset 0 1px 0 rgb(214 245 208 / 0.06),
-    inset 0 -1px 0 rgb(0 0 0 / 0.45),
-    inset 0 0 0 1px rgb(141 252 84 / 0.06),
-    0 10px 28px rgb(0 0 0 / 0.22);
+  border: 1px solid var(--color-orbit-border);
+  background: var(--color-orbit-bg);
+  box-shadow: inset 0 1px 0 rgb(214 245 208 / 0.03);
 }
 
 .orbit-leaderboard-entry > * {
@@ -182,21 +178,23 @@ body {
 
 .orbit-leaderboard-entry__rank {
   display: inline-flex;
-  min-width: 2.35rem;
+  min-width: 2.2rem;
   align-items: center;
   justify-content: center;
-  padding: 0.34rem 0.52rem;
-  align-self: start;
-  border: 1px solid rgb(90 133 80 / 0.92);
-  background: rgb(6 8 6 / 0.96);
-  box-shadow:
-    inset 0 1px 0 rgb(214 245 208 / 0.05),
-    0 0 0 1px rgb(141 252 84 / 0.04);
+  align-self: stretch;
+  padding: 0.35rem 0.5rem;
+  border-right: 1px solid var(--color-orbit-border);
+  background: color-mix(in srgb, var(--color-orbit-accent) 6%, var(--color-orbit-bg));
   font-variant-numeric: tabular-nums;
 }
 
 .orbit-leaderboard-entry__body {
-  text-shadow: 0 0 10px rgb(141 252 84 / 0.03);
+  text-shadow: none;
+}
+
+.orbit-leaderboard-board__header {
+  border-bottom: 1px solid var(--color-orbit-border);
+  background: color-mix(in srgb, var(--color-orbit-accent) 8%, var(--color-orbit-bg));
 }
 
 .orbit-hacker-reveal {

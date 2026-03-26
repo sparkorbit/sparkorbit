@@ -22,7 +22,7 @@ import { SourcePanel } from "./components/dashboard/SourcePanel";
 import { SummaryPanel } from "./components/dashboard/SummaryPanel";
 import { resetPanelWorkspaceStorage } from "./components/dashboard/panelWorkspaceStorage";
 import { categoryAccentColor, shell } from "./components/dashboard/styles";
-import type { DigestItem } from "./content/dashboardContent";
+import type { DigestItem, FeedPanel } from "./content/dashboardContent";
 import {
   EMPTY_ARENA_BOARDS,
   EMPTY_DASHBOARD,
@@ -850,27 +850,127 @@ function App() {
 
   const resolvedArenaOverview =
     leaderboardOverview ?? dashboard.session.arenaOverview;
-  const arenaBoards = resolvedArenaOverview?.boards ?? EMPTY_ARENA_BOARDS;
+  const arenaBoards = (resolvedArenaOverview?.boards ?? EMPTY_ARENA_BOARDS).filter(
+    (board) => board.id !== "open_llm_leaderboard",
+  );
 
   const infoItems = dashboard.feeds
-    .filter((feed) => feed.eyebrow !== "Benchmark")
-    .map((feed) => ({
-      id: feed.id,
-      label: feed.eyebrow,
-      title: feed.title,
-      meta: `${feed.items.length} items`,
-      detail: buildFeedSourceSummary(feed) ?? undefined,
-      accentColor: categoryAccentColor(feed.eyebrow),
-      node: (
-        <SourcePanel
-          panelData={feed}
-          selectedDocumentId={selectedDocumentId}
-          onSelectItem={handleSelectDocument}
-        />
-      ),
-      defaultRowSpan: 1,
-      defaultColSpan: 1,
-    }));
+    .filter(
+      (feed) =>
+        feed.eyebrow !== "Benchmark" &&
+        feed.id !== "hf_models_new" &&
+        feed.id !== "hf_models_likes",
+    )
+    .flatMap((feed) => {
+      const parseMetric = (meta: string, key: string) => {
+        const match = meta.match(new RegExp(`${key}\\s+([\\d,]+)`));
+        return match ? Number(match[1].replace(/,/g, "")) : 0;
+      };
+
+      if (feed.id.startsWith("hn_")) {
+        const sorted: FeedPanel = {
+          ...feed,
+          items: [...feed.items].sort((a, b) => {
+            const dateA = a.timestamp ?? "";
+            const dateB = b.timestamp ?? "";
+            const dayA = dateA.slice(0, 10);
+            const dayB = dateB.slice(0, 10);
+            if (dayA !== dayB) return dayB.localeCompare(dayA);
+            const scoreA = parseMetric(a.engagementLabel ?? a.meta, "score");
+            const scoreB = parseMetric(b.engagementLabel ?? b.meta, "score");
+            return scoreB - scoreA;
+          }),
+        };
+        return [{
+          id: sorted.id,
+          label: sorted.eyebrow,
+          title: sorted.title,
+          meta: "",
+          detail: buildFeedSourceSummary(sorted) ?? undefined,
+          accentColor: categoryAccentColor(sorted.eyebrow),
+          node: (
+            <SourcePanel
+              panelData={sorted}
+              selectedDocumentId={selectedDocumentId}
+              onSelectItem={handleSelectDocument}
+            />
+          ),
+          defaultRowSpan: 1,
+          defaultColSpan: 1,
+        }];
+      }
+
+      if (feed.id === "hf_trending_models") {
+        const byLikes: FeedPanel = {
+          ...feed,
+          id: "hf_trending_by_likes",
+          title: "[Model] HF Trending by Likes",
+          items: [...feed.items]
+            .sort(
+              (a, b) =>
+                parseMetric(b.meta, "♥") - parseMetric(a.meta, "♥"),
+            )
+            .map((item) => ({
+              ...item,
+              engagementLabel: `liked ${parseMetric(item.meta, "♥").toLocaleString()}`,
+            })),
+        };
+
+        const byDownloads: FeedPanel = {
+          ...feed,
+          id: "hf_trending_by_downloads",
+          title: "[Model] HF Trending by Downloads",
+          items: [...feed.items]
+            .sort(
+              (a, b) =>
+                parseMetric(b.meta, "downloads") -
+                parseMetric(a.meta, "downloads"),
+            )
+            .map((item) => ({
+              ...item,
+              engagementLabel: `downloads ${parseMetric(item.meta, "downloads").toLocaleString()}`,
+            })),
+        };
+
+        return [byLikes, byDownloads].map((splitFeed) => ({
+          id: splitFeed.id,
+          label: splitFeed.eyebrow,
+          title: splitFeed.title,
+          meta: "",
+          detail: buildFeedSourceSummary(splitFeed) ?? undefined,
+          accentColor: categoryAccentColor(splitFeed.eyebrow),
+          node: (
+            <SourcePanel
+              panelData={splitFeed}
+              selectedDocumentId={selectedDocumentId}
+              onSelectItem={handleSelectDocument}
+            />
+          ),
+          defaultRowSpan: 1,
+          defaultColSpan: 1,
+        }));
+      }
+
+      return [
+        {
+          id: feed.id,
+          label: feed.eyebrow,
+          title: feed.title,
+          meta: "",
+          detail: buildFeedSourceSummary(feed) ?? undefined,
+          accentColor: categoryAccentColor(feed.eyebrow),
+          node: (
+            <SourcePanel
+              panelData={feed}
+              selectedDocumentId={selectedDocumentId}
+              onSelectItem={handleSelectDocument}
+            />
+          ),
+          defaultRowSpan: 1,
+          defaultColSpan: 1,
+        },
+      ];
+    });
 
   const summaryPanel = (
     <SummaryPanel

@@ -16,14 +16,6 @@ type LeaderboardPanelProps = {
 
 const MAX_ENTRIES = 10;
 
-function toFiniteNumber(value: number | string | null | undefined): number | null {
-  if (value == null) {
-    return null;
-  }
-  const numeric = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
 function stripArenaName(value: string | null | undefined) {
   const normalized = (value || "").trim();
   if (!normalized) {
@@ -46,26 +38,6 @@ function resolveBoardTitle(board: SessionArenaBoard) {
   );
 }
 
-function formatHumanScore(value: number | string | null | undefined) {
-  const rating = toFiniteNumber(value);
-  if (rating == null) {
-    return null;
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(Math.round(rating));
-}
-
-function resolveHumanScore(entry: SessionArenaBoardEntry) {
-  const rating = toFiniteNumber(entry.rating);
-  if (rating != null && rating > 0) {
-    return formatHumanScore(rating);
-  }
-
-  return null;
-}
-
 function EntryCard({
   entry,
   delayMs = 0,
@@ -73,41 +45,34 @@ function EntryCard({
   entry: SessionArenaBoardEntry;
   delayMs?: number;
 }) {
-  const humanScore = resolveHumanScore(entry);
-
   return (
     <article
       className="orbit-leaderboard-entry orbit-hacker-reveal"
       style={{ "--hacker-delay": `${delayMs}ms` } as CSSProperties}
     >
       <div className="orbit-hacker-reveal__content flex min-w-0 items-center gap-0">
-        <div className="flex w-6 shrink-0 items-center justify-center self-stretch">
-          <span className="font-mono text-[0.56rem] tabular-nums text-orbit-muted">
+        <div className="orbit-leaderboard-entry__rank">
+          <span className="font-mono text-[0.64rem] font-semibold tabular-nums text-orbit-accent">
             {entry.rank ?? "—"}
           </span>
         </div>
 
-        <div className="orbit-leaderboard-entry__body min-w-0 flex-1 border-l border-orbit-border px-2 py-2">
-          <div className="flex min-w-0 items-baseline justify-between gap-2">
+        <div className="orbit-leaderboard-entry__body min-w-0 flex-1 px-2.5 py-1.5">
+          <div className="flex min-w-0 items-baseline gap-2">
             {entry.url ? (
               <a
                 href={entry.url}
                 target="_blank"
                 rel="noreferrer"
-                className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.76rem] font-semibold leading-snug text-orbit-text hover:text-orbit-accent"
+                className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.78rem] font-semibold leading-snug text-orbit-text hover:text-orbit-accent"
               >
                 {entry.modelName ?? "—"}
               </a>
             ) : (
-              <h3 className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.76rem] font-semibold leading-snug text-orbit-text">
+              <h3 className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.78rem] font-semibold leading-snug text-orbit-text">
                 {entry.modelName ?? "—"}
               </h3>
             )}
-            {humanScore ? (
-              <span className="shrink-0 font-mono text-[0.58rem] tabular-nums text-orbit-accent">
-                {humanScore}
-              </span>
-            ) : null}
           </div>
 
           {entry.organization ? (
@@ -129,11 +94,11 @@ function BoardCard({
   const entries = buildLeaderboardEntries(board).slice(0, MAX_ENTRIES);
 
   return (
-    <article className="flex h-full min-h-0 w-[24rem] flex-none snap-start flex-col border border-orbit-border bg-orbit-bg sm:w-[26rem] lg:w-[28rem] xl:w-[30rem]">
-      <div className="border-b border-orbit-border px-3 py-2.5">
+    <article className="flex h-full min-h-0 w-[20.5rem] flex-none snap-start flex-col border border-orbit-border bg-orbit-bg sm:w-[21.5rem] lg:w-[22.5rem] xl:w-[23rem]">
+      <div className="orbit-leaderboard-board__header px-3 py-2.5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <h3 className="orbit-wrap-anywhere font-display text-[0.88rem] font-semibold text-orbit-text">
+            <h3 className="orbit-wrap-anywhere font-display text-[1rem] font-semibold leading-tight text-orbit-text md:text-[1.08rem]">
               {resolveBoardTitle(board)}
             </h3>
           </div>
@@ -142,7 +107,7 @@ function BoardCard({
               href={board.referenceUrl}
               target="_blank"
               rel="noreferrer"
-              className="shrink-0 border border-orbit-border bg-orbit-panel px-2 py-1 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-orbit-muted transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
+              className="shrink-0 border border-orbit-border-strong bg-orbit-bg px-2 py-1 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-orbit-text transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
             >
               open
             </a>
@@ -181,8 +146,8 @@ export function LeaderboardPanel({
   const errorMessage = leaderboardError ?? dashboardError;
 
   return (
-    <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel p-4 md:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orbit-border pb-3">
+    <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel p-3 md:p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orbit-border pb-2.5">
         <div className="min-w-0 flex-1">
           <h1 className="orbit-wrap-anywhere font-display text-[1.12rem] font-semibold text-orbit-text md:text-[1.32rem]">
             AI Model Leaderboard
@@ -212,7 +177,7 @@ export function LeaderboardPanel({
         </div>
       ) : null}
 
-      <div className="mt-4 min-h-0 flex-1">
+      <div className="mt-3 min-h-0 flex-1">
         {errorMessage && arenaBoards.length === 0 ? (
           <div className="flex h-full items-center justify-center border border-orbit-border bg-orbit-bg px-4 py-6">
             <p className="max-w-lg text-center text-[0.72rem] leading-[1.6] text-orbit-muted">
