@@ -148,6 +148,12 @@ Got ideas or questions? [Open an issue](https://github.com/sparkorbit/sparkorbit
 
 ***
 
+## Known Issues
+
+- **LLM processing can be unstable** — local LLM summarization (Ollama) may occasionally fail or produce unexpected results depending on your GPU, available VRAM, and model load. If it hangs or errors out, try reloading or restarting with `--without-llm`. The core dashboard works fine without it. We're actively checking and improving stability on this.
+
+***
+
 <details>
 <summary><b>What can I search to find this project?</b></summary>
 <br/>
