@@ -17,7 +17,7 @@ function formatSnapshotTime(value: string) {
     return value;
   }
 
-  return date.toLocaleTimeString("ko-KR", {
+  return date.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -95,7 +95,7 @@ export function PayloadDebugPanel({
                 BFF Response Trace
               </h2>
               <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                dashboard, reload, digest, document, leaderboard 응답의 마지막 payload를 보관합니다.
+                Retains the last payload from dashboard, reload, digest, document, and leaderboard responses.
               </p>
             </div>
 
@@ -169,7 +169,7 @@ export function PayloadDebugPanel({
                       trace idle
                     </p>
                     <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                      아직 기록된 payload가 없습니다. stream이나 detail fetch가 들어오면 여기에 저장됩니다.
+                      No payloads recorded yet. Incoming streams or detail fetches will appear here.
                     </p>
                   </div>
                 </div>

@@ -1,11 +1,13 @@
 import type { CSSProperties } from "react";
 
 import type { DigestItem } from "../../content/dashboardContent";
+import type { DashboardBriefing } from "../../types/dashboard";
 import { DashboardPanel } from "./DashboardPanel";
 
 type SummaryPanelProps = {
   title: string;
   digests: readonly DigestItem[];
+  briefing?: DashboardBriefing | null;
   sessionLabel?: string;
   selectedDigestId?: string | null;
   onSelectDigest?: (digest: DigestItem) => void;
@@ -15,6 +17,7 @@ type SummaryPanelProps = {
 export function SummaryPanel({
   title,
   digests,
+  briefing,
   selectedDigestId,
   onSelectDigest,
   style,
@@ -29,6 +32,23 @@ export function SummaryPanel({
           {title}
         </h2>
       </div>
+      {briefing?.body_en ? (
+        <section className="mb-2 border border-orbit-accent/60 bg-orbit-bg-elevated px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent">
+              Daily Briefing
+            </span>
+            {briefing.run_meta?.prompt_version ? (
+              <span className="inline-flex border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.5rem] uppercase tracking-widest text-orbit-muted">
+                {briefing.run_meta.prompt_version}
+              </span>
+            ) : null}
+          </div>
+          <p className="orbit-wrap-anywhere mt-2 whitespace-pre-line text-[0.72rem] leading-[1.6] text-orbit-text">
+            {briefing.body_en}
+          </p>
+        </section>
+      ) : null}
       <div className="grid min-h-0 flex-1 gap-2">
         {digests.map((digest) => {
           const isSelected = selectedDigestId === digest.id;

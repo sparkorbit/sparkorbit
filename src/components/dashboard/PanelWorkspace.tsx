@@ -388,7 +388,7 @@ function InfoPanelVisibilityModal({
                 Info Panel Cards
               </h2>
               <p className="mt-1.5 text-[0.68rem] leading-[1.45] text-orbit-muted">
-                아이템을 눌러 카드 표시 여부를 토글하고 적용합니다.
+                Click items to toggle card visibility, then apply.
               </p>
             </div>
 
@@ -410,7 +410,7 @@ function InfoPanelVisibilityModal({
                   no cards
                 </p>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  현재 정보 패널에서 제어할 카드가 없습니다.
+                  No cards available to control in the info panel.
                 </p>
               </div>
             </div>
@@ -798,7 +798,7 @@ function PanelBoard({
                         onPointerDown={(event) =>
                           beginPanelDrag(event, item.id)
                         }
-                        title="grab해서 slot 위치를 reroute합니다"
+                        title="Grab to reroute slot position"
                       >
                         <span className="flex min-w-0 items-center gap-2 overflow-hidden">
                           <span
@@ -854,8 +854,8 @@ function PanelBoard({
                               ? "border-orbit-accent text-orbit-accent"
                               : "border-orbit-border text-orbit-muted hover:border-orbit-accent hover:bg-orbit-panel hover:text-orbit-accent",
                           ].join(" ")}
-                          aria-label={`${item.title ?? item.label ?? item.id} 카드 닫기`}
-                          title="카드를 숨깁니다"
+                          aria-label={`Close ${item.title ?? item.label ?? item.id} card`}
+                          title="Hide this card"
                           onPointerDown={(event) => event.stopPropagation()}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -893,7 +893,7 @@ function PanelBoard({
                 <button
                   type="button"
                   className="absolute inset-x-0 bottom-0 z-20 flex h-2 cursor-row-resize items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-                  title="drag해서 row span을 조절합니다. 더블클릭하면 기본값으로 돌아갑니다"
+                  title="Drag to adjust row span. Double-click to reset to default"
                   onDoubleClick={() => {
                     setSizes((current) => ({
                       ...current,
@@ -942,7 +942,7 @@ function PanelBoard({
                   <button
                     type="button"
                     className="absolute bottom-0 right-0 top-7 z-20 flex w-2 cursor-col-resize items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-                    title="drag해서 col span을 조절합니다. 더블클릭하면 기본값으로 돌아갑니다"
+                    title="Drag to adjust col span. Double-click to reset to default"
                     onDoubleClick={() => {
                       setSizes((current) => ({
                         ...current,
@@ -1106,8 +1106,8 @@ function DefaultMainPanel() {
             Idle Surface
           </p>
           <p className="mt-3 text-[0.84rem] leading-[1.65] text-orbit-muted">
-            메인 시각화, trace 결과, drill-down, operator 작업 화면은 이
-            영역으로 모입니다.
+            Main visualizations, trace results, drill-downs, and operator
+            workspaces are routed to this surface.
           </p>
         </div>
       </div>
@@ -1200,8 +1200,8 @@ export function PanelWorkspace({
           items={unassignedItems}
           orderStorageKey={PANEL_WORKSPACE_STORAGE.unassignedOrder}
           sizeStorageKey={PANEL_WORKSPACE_STORAGE.unassignedSize}
-          emptyTitle="남은 패널 없음"
-          emptyDescription="분류 대기 중인 패널이 없습니다."
+          emptyTitle="No remaining panels"
+          emptyDescription="No panels awaiting classification."
           rowHeightPx={rowHeightPx}
         />
       </WorkspaceSection>
@@ -1237,12 +1237,12 @@ export function PanelWorkspace({
                 orderStorageKey={PANEL_WORKSPACE_STORAGE.infoOrder}
                 sizeStorageKey={PANEL_WORKSPACE_STORAGE.infoSize}
                 emptyTitle={
-                  hiddenInfoItems.length > 0 ? "숨긴 카드만 남음" : "trace 없음"
+                  hiddenInfoItems.length > 0 ? "Only hidden cards remain" : "No traces"
                 }
                 emptyDescription={
                   hiddenInfoItems.length > 0
-                    ? "헤더의 cards 버튼에서 숨긴 카드를 다시 보이게 할 수 있습니다."
-                    : "사이드 채널에 연결된 패널이 아직 없습니다."
+                    ? "Use the cards button in the header to restore hidden cards."
+                    : "No panels connected to the side channel yet."
                 }
                 maxDynamicColumns={3}
                 minColumnWidthPx={320}

@@ -195,7 +195,7 @@ function App() {
         setDashboardError(
           error instanceof Error
             ? compactText(error.message, 180)
-            : "BFF API에 연결하지 못했습니다.",
+            : "Failed to connect to BFF API.",
         );
         return EMPTY_DASHBOARD;
       } finally {
@@ -263,7 +263,7 @@ function App() {
           setDashboardError(
             error instanceof Error
               ? compactText(error.message, 180)
-              : "dashboard stream payload를 해석하지 못했습니다.",
+              : "Failed to parse dashboard stream payload.",
           );
         } finally {
           setIsLoadingDashboard(false);
@@ -342,7 +342,7 @@ function App() {
           isTerminal = true;
           setDashboardError(
             compactText(
-              payload.error ?? "probe cycle 중 fault가 발생했습니다.",
+              payload.error ?? "Fault occurred during probe cycle.",
               180,
             ),
           );
@@ -354,7 +354,7 @@ function App() {
         setDashboardError(
           error instanceof Error
             ? compactText(error.message, 180)
-            : "reload stream payload를 해석하지 못했습니다.",
+            : "Failed to parse reload stream payload.",
         );
         setBlockingLoadingState(null);
         setIsReloading(false);
@@ -366,7 +366,7 @@ function App() {
       if (isDisposed || isTerminal) {
         return;
       }
-      setDashboardError("reload stream 연결이 끊어졌습니다.");
+      setDashboardError("Reload stream connection lost.");
       setBlockingLoadingState(null);
       setIsReloading(false);
       reloadStream.close();
@@ -426,7 +426,7 @@ function App() {
         setLeaderboardError(
           error instanceof Error
             ? compactText(error.message, 180)
-            : "leaderboard API를 불러오지 못했습니다.",
+            : "Failed to fetch leaderboard API.",
         );
       } finally {
         if (!isDisposed) {
@@ -475,7 +475,7 @@ function App() {
       setDashboardError(
         error instanceof Error
           ? compactText(error.message, 180)
-          : "digest detail을 불러오지 못했습니다.",
+          : "Failed to fetch digest detail.",
       );
     }
   }
@@ -506,7 +506,7 @@ function App() {
       setDashboardError(
         error instanceof Error
           ? compactText(error.message, 180)
-          : "document detail을 불러오지 못했습니다.",
+          : "Failed to fetch document detail.",
       );
     }
   }
@@ -535,7 +535,7 @@ function App() {
       setDashboardError(
         error instanceof Error
           ? compactText(error.message, 180)
-          : "reload 요청에 실패했습니다.",
+          : "Reload request failed.",
       );
       setBlockingLoadingState(null);
       setIsReloading(false);
@@ -605,6 +605,7 @@ function App() {
     <SummaryPanel
       title={dashboard.summary.title}
       digests={dashboard.summary.digests}
+      briefing={dashboard.summary.briefing}
       sessionLabel={panelSessionLabel}
       selectedDigestId={selectedDigestId}
       onSelectDigest={handleSelectDigest}
