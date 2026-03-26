@@ -6,11 +6,15 @@ export function ConsoleHeader({
   title,
   subtitle,
   repoUrl,
+  isReloading,
+  onOpenReloadConfirm,
   onOpenSettings,
 }: {
   title: string;
   subtitle: string;
   repoUrl?: string;
+  isReloading?: boolean;
+  onOpenReloadConfirm?: () => void;
   onOpenSettings: () => void;
 }) {
   return (
@@ -53,15 +57,37 @@ export function ConsoleHeader({
           </div>
         </div>
 
-        <button
-          type="button"
-          aria-label="settings"
-          title="settings"
-          className="group inline-flex h-9 shrink-0 items-center justify-center border border-orbit-border-strong bg-orbit-panel px-3 font-mono text-[0.56rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:border-orbit-accent hover:bg-orbit-bg hover:text-orbit-text"
-          onClick={onOpenSettings}
-        >
-          setup
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {onOpenReloadConfirm ? (
+            <button
+              type="button"
+              aria-label="reload"
+              title="reload"
+              disabled={isReloading}
+              className="group inline-flex h-9 shrink-0 items-center justify-center border border-orbit-border-strong bg-orbit-panel px-3 font-mono text-[0.56rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:border-orbit-accent hover:bg-orbit-bg hover:text-orbit-text disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={onOpenReloadConfirm}
+            >
+              {isReloading ? (
+                <span className="flex items-center gap-1">
+                  <span className="orbit-processing-bar h-1.5! w-1!" />
+                  <span className="orbit-processing-bar orbit-processing-bar--delay-1 h-1.5! w-1!" />
+                  <span className="orbit-processing-bar orbit-processing-bar--delay-2 h-1.5! w-1!" />
+                </span>
+              ) : (
+                "reload"
+              )}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-label="settings"
+            title="settings"
+            className="group inline-flex h-9 shrink-0 items-center justify-center border border-orbit-border-strong bg-orbit-panel px-3 font-mono text-[0.56rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:border-orbit-accent hover:bg-orbit-bg hover:text-orbit-text"
+            onClick={onOpenSettings}
+          >
+            setup
+          </button>
+        </div>
       </div>
     </header>
   );
@@ -403,6 +429,81 @@ export function LlmReadyNotice({
               onClick={onConfirm}
             >
               check
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+export function ReloadConfirmModal({
+  isOpen,
+  onConfirm,
+  onCancel,
+}: {
+  isOpen: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, onCancel]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-78 flex items-center justify-center bg-orbit-bg/80 p-4"
+      onClick={onCancel}
+    >
+      <aside
+        className="orbit-hacker-reveal pointer-events-auto relative w-full max-w-sm overflow-hidden border border-orbit-border-strong bg-orbit-bg-elevated shadow-[0_18px_48px_rgba(0,0,0,0.4)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          aria-hidden="true"
+          className="orbit-grid pointer-events-none absolute inset-0 opacity-15"
+        />
+        <div
+          aria-hidden="true"
+          className="orbit-scanlines pointer-events-none absolute inset-0 opacity-10"
+        />
+
+        <div className="orbit-hacker-reveal__content relative z-10">
+          <div className="border-b border-orbit-border-strong bg-orbit-bg px-4 py-3">
+            <span className="inline-flex border border-orbit-accent/50 bg-orbit-panel px-2 py-0.5 font-mono text-[0.54rem] uppercase tracking-[0.16em] text-orbit-accent">
+              reload
+            </span>
+            <h2 className="mt-2 font-display text-[1rem] font-semibold text-orbit-text">
+              Reload all data sources?
+            </h2>
+            <p className="mt-2 text-[0.76rem] leading-[1.62] text-orbit-muted">
+              This will re-collect all sources and run the LLM pipeline
+              (summaries and classification). Expect around 3 minutes to
+              complete.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 px-4 py-3">
+            <button
+              type="button"
+              className="inline-flex border border-orbit-border bg-orbit-bg px-3 py-2 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted transition-colors duration-150 hover:border-orbit-border-strong hover:text-orbit-text"
+              onClick={onCancel}
+            >
+              cancel
+            </button>
+            <button
+              type="button"
+              className="inline-flex border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg"
+              onClick={onConfirm}
+            >
+              confirm
             </button>
           </div>
         </div>

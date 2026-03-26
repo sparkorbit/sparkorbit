@@ -11,6 +11,7 @@ import {
   ConsoleHeader,
   GitHubStarPrompt,
   LlmReadyNotice,
+  ReloadConfirmModal,
   SettingsModal,
 } from "./components/app/AppChrome";
 import { FullscreenLoading } from "./components/app/FullscreenLoading";
@@ -53,6 +54,7 @@ import {
   fetchLeaderboards,
   openDashboardStream,
   openJobProgressStream,
+  reloadSession,
 } from "./lib/dashboardApi";
 import type {
   DashboardLoadingBlock,
@@ -404,6 +406,7 @@ function App() {
     null,
   );
   const [isLlmReadyNoticeOpen, setIsLlmReadyNoticeOpen] = useState(false);
+  const [isReloadConfirmOpen, setIsReloadConfirmOpen] = useState(false);
   const detailRequestVersionRef = useRef(0);
   const currentDashboardSessionIdRef = useRef(
     EMPTY_DASHBOARD.session.sessionId,
@@ -495,6 +498,30 @@ function App() {
           : "Failed to read job progress.";
       setJobProgress((current) => buildJobErrorSnapshot(current, message, job));
       return null;
+    }
+  }
+
+  async function handleReload() {
+    if (activeJob !== null) return;
+    try {
+      const response = await reloadSession();
+      if (response.job_id) {
+        const job: ActiveJobResponse = {
+          job_id: response.job_id,
+          poll_path: response.poll_path ?? `/api/jobs/${response.job_id}`,
+          surface: "dashboard",
+          status: response.status,
+        };
+        setJobProgress(null);
+        setActiveJob(job);
+        startJobStream(job);
+      }
+    } catch (error) {
+      setDashboardError(
+        error instanceof Error
+          ? compactText(error.message, 180)
+          : "Failed to start reload.",
+      );
     }
   }
 
@@ -928,8 +955,7 @@ function App() {
     jobProgress ?? dashboard.session.loading,
   );
   const shouldShowFullscreenLoading =
-    (!hasUsableDashboard &&
-      (activeJob !== null || dashboard.status === "collecting")) ||
+    activeJob !== null ||
     dashboard.status === "collecting" ||
     (!hasUsableDashboard && jobProgress?.status === "error");
   const isGitHubStarPromptTimerReady =
@@ -1279,6 +1305,8 @@ function App() {
         title={dashboard.brand.name}
         subtitle={dashboard.brand.tagline}
         repoUrl={GITHUB_REPO_URL}
+        isReloading={activeJob !== null}
+        onOpenReloadConfirm={() => setIsReloadConfirmOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
@@ -1316,6 +1344,14 @@ function App() {
         isOpen={isLlmReadyNoticeOpen}
         modelName={dashboard.summary.llm.modelName}
         onConfirm={handleConfirmLlmReadyNotice}
+      />
+      <ReloadConfirmModal
+        isOpen={isReloadConfirmOpen}
+        onConfirm={() => {
+          setIsReloadConfirmOpen(false);
+          void handleReload();
+        }}
+        onCancel={() => setIsReloadConfirmOpen(false)}
       />
       {payloadDebugOverlay}
     </div>
