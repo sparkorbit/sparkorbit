@@ -40,6 +40,13 @@ export type SessionDocumentLlm = Record<string, unknown> & {
   };
 };
 
+export type SessionDocumentDisplayTime = {
+  label: string | null;
+  value: string | null;
+  field: string | null;
+  semantics: string | null;
+};
+
 export type SessionDocument = {
   document_id: string;
   run_id: string;
@@ -84,6 +91,7 @@ export type SessionDocument = {
     priority_reason?: string | null;
   };
   benchmark: SessionDocumentBenchmark;
+  display_time: SessionDocumentDisplayTime;
   reference: SessionDocumentReference;
   llm: SessionDocumentLlm;
   metadata: Record<string, unknown>;

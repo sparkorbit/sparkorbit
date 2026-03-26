@@ -612,6 +612,9 @@ def sanitize_document_for_monitor(document: Any) -> Any:
             is_error = any(p.search(raw) for p in _HTML_ERROR_PATTERNS)
             next_document[text_field] = None if is_error else (stripped or None)
 
+    next_document = normalize_monitor_time_fields(next_document)
+    next_document["display_time"] = resolve_document_display_time(next_document)
+
     source = str(document.get("source") or "")
     if not source.startswith("arxiv_rss_"):
         return next_document
@@ -666,7 +669,6 @@ SOURCE_DISPLAY_NAMES = {
     "groq_newsroom": "Groq News",
     "hf_blog": "Hugging Face Blog",
     "hf_daily_papers": "Hugging Face Daily Papers",
-    "hf_models_likes": "Hugging Face Top Liked Models",
     "hf_models_new": "Hugging Face New Models",
     "hf_trending_models": "Hugging Face Trending Models",
     "hn_topstories": "Hacker News Top Stories",
@@ -808,17 +810,131 @@ def format_benchmark_score(benchmark: dict[str, Any]) -> str:
     return f"{label} {score}{suffix}"
 
 
+DISPLAY_TIME_LABELS = {
+    "published": "Published",
+    "updated": "Updated",
+    "created": "Created",
+    "snapshot": "Snapshot",
+    "submission": "Submitted",
+    "observed": "Observed",
+}
+
+
+def _normalize_time_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _display_time_label(semantics: Any) -> str:
+    normalized = str(semantics or "").strip().lower()
+    return DISPLAY_TIME_LABELS.get(normalized, DISPLAY_TIME_LABELS["observed"])
+
+
+def normalize_monitor_time_fields(document: dict[str, Any]) -> dict[str, Any]:
+    semantics = str(document.get("time_semantics") or "").strip().lower()
+    if semantics != "updated":
+        return document
+
+    # Legacy monitor payloads sometimes copied an update timestamp into
+    # published_at. Clear that field so the serving layer cannot label it
+    # as Published.
+    document["published_at"] = None
+    if not _normalize_time_text(document.get("updated_at")):
+        document["updated_at"] = (
+            _normalize_time_text(document.get("sort_at"))
+            or _normalize_time_text(document.get("fetched_at"))
+        )
+    return document
+
+
+def resolve_document_display_time(document: dict[str, Any]) -> dict[str, Any]:
+    benchmark = document.get("benchmark") or {}
+    semantics = str(document.get("time_semantics") or "").strip().lower() or "observed"
+    semantics_label = _display_time_label(semantics)
+
+    snapshot_at = _normalize_time_text(benchmark.get("snapshot_at"))
+    published_at = _normalize_time_text(document.get("published_at"))
+    updated_at = _normalize_time_text(document.get("updated_at"))
+    sort_at = _normalize_time_text(document.get("sort_at"))
+    fetched_at = _normalize_time_text(document.get("fetched_at"))
+
+    if semantics == "snapshot":
+        candidates = [
+            ("benchmark.snapshot_at", snapshot_at),
+            ("sort_at", sort_at),
+            ("updated_at", updated_at),
+            ("published_at", published_at),
+            ("fetched_at", fetched_at),
+        ]
+    elif semantics == "updated":
+        candidates = [
+            ("updated_at", updated_at),
+            ("sort_at", sort_at),
+            ("published_at", published_at),
+            ("fetched_at", fetched_at),
+        ]
+    else:
+        candidates = [
+            ("published_at", published_at),
+            ("sort_at", sort_at),
+            ("updated_at", updated_at),
+            ("fetched_at", fetched_at),
+        ]
+
+    for field_name, value in candidates:
+        if not value:
+            continue
+        if field_name == "benchmark.snapshot_at":
+            label = DISPLAY_TIME_LABELS["snapshot"]
+        elif field_name == "updated_at":
+            label = DISPLAY_TIME_LABELS["updated"]
+        elif field_name == "fetched_at":
+            label = DISPLAY_TIME_LABELS["observed"]
+        else:
+            label = semantics_label
+        return {
+            "label": label,
+            "value": value,
+            "field": field_name,
+            "semantics": semantics,
+        }
+
+    return {
+        "label": None,
+        "value": None,
+        "field": None,
+        "semantics": semantics,
+    }
+
+
 def build_document_badge(document: dict[str, Any]) -> str:
     metadata = document.get("metadata") or {}
     doc_type = str(document.get("doc_type") or "")
-    if doc_type == "repo" and metadata.get("full_name"):
-        return str(metadata.get("full_name"))
+    source = str(document.get("source") or "")
+    category = str(document.get("source_category") or "")
 
-    author = document.get("author") or (document.get("authors") or [None])[0]
-    if author:
-        return str(author)
+    # Company feeds: use readable source name (e.g. "Anthropic News"), not author
+    if category in {"company", "company_kr", "company_cn"} and doc_type not in {"repo", "release"}:
+        return prettify_source_name(source)
 
+    # Community: show domain/subreddit, not username
+    if source == "hn_topstories":
+        return str(metadata.get("domain") or "").strip() or "Hacker News"
+    if source.startswith("reddit_"):
+        domain = str(metadata.get("domain") or "").strip()
+        if domain.startswith("self."):
+            return f"r/{domain.split('.', 1)[1]}"
+        if not domain or domain == "reddit.com":
+            return prettify_source_name(source)
+        return domain
+
+    # Models: show pipeline tag
     if doc_type in {"model", "model_trending"}:
+        pipeline = str(metadata.get("pipeline_tag") or "").strip()
+        if pipeline:
+            return pipeline
         model_id = str(
             document.get("source_item_id") or document.get("title") or ""
         ).strip()
@@ -827,11 +943,19 @@ def build_document_badge(document: dict[str, Any]) -> str:
             if owner:
                 return owner
 
+    if doc_type == "repo" and metadata.get("full_name"):
+        return str(metadata.get("full_name"))
+
+    # Papers: keep author
+    author = document.get("author") or (document.get("authors") or [None])[0]
+    if author:
+        return str(author)
+
     benchmark = document.get("benchmark") or {}
     if doc_type in {"benchmark", "benchmark_panel"} and benchmark.get("board_name"):
         return str(benchmark.get("board_name"))
 
-    return prettify_source_name(str(document.get("source") or ""))
+    return prettify_source_name(source)
 
 
 def document_timestamp(document: dict[str, Any]) -> str:
@@ -927,6 +1051,33 @@ def default_llm_state() -> dict[str, Any]:
 
 def build_document_note(document: dict[str, Any]) -> str:
     document = sanitize_document_for_monitor(document)
+    doc_type = str(document.get("doc_type") or "")
+
+    # Models: show structured info instead of repeating the title
+    if doc_type in {"model", "model_trending"}:
+        metadata = document.get("metadata") or {}
+        engagement = document.get("engagement") or {}
+        parts = []
+        pipeline = str(metadata.get("pipeline_tag") or "").strip()
+        if pipeline:
+            parts.append(pipeline)
+        num_params = metadata.get("numParameters") or metadata.get("num_parameters")
+        if num_params:
+            params_b = int(num_params) / 1_000_000_000
+            if params_b >= 1:
+                parts.append(f"{params_b:.1f}B params")
+            else:
+                params_m = int(num_params) / 1_000_000
+                parts.append(f"{params_m:.0f}M params")
+        likes = int(to_number(engagement.get("likes")))
+        downloads = int(to_number(engagement.get("downloads")))
+        if likes:
+            parts.append(f"♥ {likes:,}")
+        if downloads:
+            parts.append(f"↓ {downloads:,}")
+        if parts:
+            return " · ".join(parts)
+
     llm = document.get("llm") or {}
     reference = document.get("reference") or {}
     title = str(document.get("title") or "")
@@ -944,26 +1095,193 @@ def build_document_note(document: dict[str, Any]) -> str:
     return ""
 
 
+PAPER_DOMAIN_DISPLAY_NAMES = {
+    "agents": "Agents",
+    "diffusion": "Diffusion",
+    "efficient_inference": "Efficient Inference",
+    "evaluation": "Evaluation",
+    "finetuning": "Finetuning",
+    "llm": "LLM",
+    "nlp": "NLP",
+    "others": "Other Papers",
+    "rag_retrieval": "RAG / Retrieval",
+    "rlhf_alignment": "RLHF / Alignment",
+    "robotics_embodied": "Robotics",
+    "safety": "Safety",
+    "video": "Video",
+    "vlm": "VLM",
+}
+
+COMPANY_DOMAIN_DISPLAY_NAMES = {
+    "benchmark_eval": "Benchmark",
+    "model_release": "Model Release",
+    "open_source": "Open Source",
+    "others": "Other Updates",
+    "partnership_ecosystem": "Partnership",
+    "policy_safety": "Policy & Safety",
+    "product_update": "Product Update",
+    "technical_research": "Technical Research",
+    "unknown": "Company Update",
+}
+
+
+def _format_curated_label(
+    value: Any, mapping: dict[str, str], *, fallback: str | None = None
+) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return fallback
+    if normalized in mapping:
+        return mapping[normalized]
+    return prettify_source_name(normalized)
+
+
+def _resolve_primary_author_label(document: dict[str, Any]) -> str | None:
+    authors = _normalize_string_list(document.get("authors"))
+    candidate = authors[0] if authors else document.get("author")
+    if not candidate:
+        return None
+
+    normalized = str(candidate).strip()
+    if not normalized:
+        return None
+
+    parts = [part.strip() for part in re.split(r",|;|\band\b", normalized) if part.strip()]
+    if len(parts) > 1:
+        return f"{parts[0]} et al."
+    return normalized
+
+
+def _resolve_authorish_name(value: Any) -> str | None:
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    if isinstance(value, dict):
+        for key in ("name", "writer", "author"):
+            candidate = str(value.get(key) or "").strip()
+            if candidate:
+                return candidate
+    return None
+
+
+def _top_display_labels(values: Iterable[str | None], *, limit: int = 2) -> list[str]:
+    counter: Counter[str] = Counter()
+    for value in values:
+        normalized = str(value or "").strip()
+        if normalized:
+            counter[normalized] += 1
+    return [value for value, _ in counter.most_common(limit)]
+
+
+def _build_paper_feed_meta(document: dict[str, Any]) -> str:
+    labels = document.get("labels") or {}
+    domain = _format_curated_label(
+        labels.get("paper_domain"),
+        PAPER_DOMAIN_DISPLAY_NAMES,
+        fallback="Paper",
+    )
+    author = _resolve_primary_author_label(document)
+    parts = [part for part in (domain, author) if part]
+    return " · ".join(parts)
+
+
+def _build_community_feed_meta(document: dict[str, Any]) -> str:
+    doc_type = str(document.get("doc_type") or "")
+    source = str(document.get("source") or "")
+    engagement = document.get("engagement") or {}
+    metadata = document.get("metadata") or {}
+
+    if doc_type == "repo":
+        language = str(metadata.get("language") or "").strip()
+        license_name = str(metadata.get("license") or "").strip()
+        topics = metadata.get("topics") or []
+        topic = None
+        if isinstance(topics, list):
+            for raw_topic in topics:
+                candidate = str(raw_topic or "").strip()
+                if candidate:
+                    topic = prettify_source_name(candidate)
+                    break
+        parts = [part for part in (language, license_name, topic) if part]
+        return " · ".join(parts) or "Repository"
+
+    if doc_type == "release":
+        tag_name = str(metadata.get("tag_name") or "").strip()
+        reactions_total = int(to_number(metadata.get("reactions_total")))
+        parts = [f"Release {tag_name}" if tag_name else "Release"]
+        if reactions_total:
+            parts.append(f"{reactions_total:,} reactions")
+        return " · ".join(parts)
+
+    comments = int(to_number(engagement.get("comments")))
+    score = int(to_number(engagement.get("score") or engagement.get("ups")))
+
+    if source == "hn_topstories":
+        domain = str(metadata.get("domain") or "").strip()
+        parts = []
+        if domain:
+            parts.append(domain)
+        if comments:
+            parts.append(f"{comments:,} comments")
+        return " · ".join(parts) if parts else ""
+
+    if source.startswith("reddit_"):
+        parts = []
+        if comments:
+            parts.append(f"{comments:,} comments")
+        upvote_ratio = to_optional_number(engagement.get("upvote_ratio"))
+        if upvote_ratio is not None and upvote_ratio > 0:
+            parts.append(f"{int(round(upvote_ratio * 100))}% upvoted")
+        return " · ".join(parts) if parts else ""
+
+    return ""
+
+
+def _build_company_feed_meta(document: dict[str, Any]) -> str:
+    labels = document.get("labels") or {}
+    company = labels.get("company") or {}
+    domain = _format_curated_label(
+        company.get("company_domain"),
+        COMPANY_DOMAIN_DISPLAY_NAMES,
+        fallback=None,
+    )
+    # Panel title already shows the company name; only show domain label if available
+    return domain or ""
+
+
 def build_feed_meta(document: dict[str, Any]) -> str:
+    category = str(document.get("source_category") or "").strip()
     doc_type = document.get("doc_type")
     engagement = document.get("engagement") or {}
     metadata = document.get("metadata") or {}
+
+    if category == "papers":
+        return _build_paper_feed_meta(document)
+
+    if category == "community":
+        return _build_community_feed_meta(document)
+
+    if category in {"company", "company_kr", "company_cn"} and doc_type not in {"repo", "release"}:
+        return _build_company_feed_meta(document)
+
     if doc_type == "repo":
-        return " · ".join(
-            [
-                f"stars {int(to_number(engagement.get('stars')))}",
-                f"lang {metadata.get('language') or '-'}",
-                f"updated {document.get('updated_at') or document.get('published_at') or '-'}",
-            ]
-        )
+        parts = [
+            str(metadata.get("language") or "").strip(),
+            str(metadata.get("license") or "").strip(),
+        ]
+        return " · ".join(part for part in parts if part) or "Repository"
+
+    if doc_type == "release":
+        tag_name = str(metadata.get("tag_name") or "").strip()
+        reactions_total = int(to_number(metadata.get("reactions_total")))
+        parts = [f"Release {tag_name}" if tag_name else "Release"]
+        if reactions_total:
+            parts.append(f"{reactions_total:,} reactions")
+        return " · ".join(parts)
+
     if doc_type in {"model", "model_trending"}:
-        return " · ".join(
-            [
-                f"♥ {int(to_number(engagement.get('likes')))}",
-                f"downloads {int(to_number(engagement.get('downloads')))}",
-                f"pipeline {metadata.get('pipeline_tag') or '-'}",
-            ]
-        )
+        pipeline = str(metadata.get("pipeline_tag") or "").strip()
+        return pipeline or "Model"
     if doc_type in {"benchmark", "benchmark_panel"}:
         benchmark = document.get("benchmark") or {}
         return " · ".join(
@@ -987,6 +1305,107 @@ def build_feed_meta(document: dict[str, Any]) -> str:
     )
 
 
+def build_feed_panel_summary(
+    category: str, source: str, documents: list[dict[str, Any]]
+) -> str | None:
+    if not documents:
+        return None
+
+    if category == "papers":
+        top_domains = _top_display_labels(
+            _format_curated_label(
+                (doc.get("labels") or {}).get("paper_domain"),
+                PAPER_DOMAIN_DISPLAY_NAMES,
+            )
+            for doc in documents
+        )
+        summary = " / ".join(top_domains)
+        return (
+            f"{len(documents)} papers · {summary}"
+            if summary
+            else f"{len(documents)} papers"
+        )
+
+    if category == "community":
+        if source.startswith("github_"):
+            top_stars = max(
+                (
+                    int(to_number((doc.get("engagement") or {}).get("stars")))
+                    for doc in documents
+                ),
+                default=0,
+            )
+            repo_count = sum(1 for doc in documents if str(doc.get("doc_type") or "") == "repo")
+            release_count = sum(
+                1 for doc in documents if str(doc.get("doc_type") or "") == "release"
+            )
+            parts = [f"{len(documents)} items"]
+            if repo_count or release_count:
+                mix_parts = []
+                if repo_count:
+                    mix_parts.append(f"{repo_count} repos")
+                if release_count:
+                    mix_parts.append(f"{release_count} releases")
+                parts.append(" / ".join(mix_parts))
+            elif top_stars:
+                parts.append(f"top repo {top_stars:,} stars")
+            return " · ".join(parts)
+
+        if source == "hn_topstories":
+            top_comments = max(
+                (
+                    int(to_number((doc.get("engagement") or {}).get("comments")))
+                    for doc in documents
+                ),
+                default=0,
+            )
+            return (
+                f"{len(documents)} discussions · top {top_comments:,} comments"
+                if top_comments
+                else f"{len(documents)} discussions"
+            )
+
+        if source.startswith("reddit_"):
+            top_comments = max(
+                (
+                    int(to_number((doc.get("engagement") or {}).get("comments")))
+                    for doc in documents
+                ),
+                default=0,
+            )
+            return (
+                f"{len(documents)} discussions · top {top_comments:,} comments"
+                if top_comments
+                else f"{len(documents)} discussions"
+            )
+
+    if category in {"company", "company_kr", "company_cn"}:
+        top_domains = _top_display_labels(
+            _format_curated_label(
+                ((doc.get("labels") or {}).get("company") or {}).get("company_domain"),
+                COMPANY_DOMAIN_DISPLAY_NAMES,
+            )
+            for doc in documents
+        )
+        if top_domains:
+            return f"{len(documents)} updates · {' / '.join(top_domains)}"
+
+        repo_count = sum(1 for doc in documents if str(doc.get("doc_type") or "") == "repo")
+        release_count = sum(
+            1 for doc in documents if str(doc.get("doc_type") or "") == "release"
+        )
+        if repo_count or release_count:
+            mix_parts = []
+            if repo_count:
+                mix_parts.append(f"{repo_count} repos")
+            if release_count:
+                mix_parts.append(f"{release_count} releases")
+            return f"{len(documents)} items · {' / '.join(mix_parts)}"
+        return f"{len(documents)} updates · {prettify_source_name(source)}"
+
+    return None
+
+
 def _build_engagement_label(document: dict[str, Any]) -> str:
     doc_type = document.get("doc_type")
     source = str(document.get("source") or "")
@@ -998,9 +1417,6 @@ def _build_engagement_label(document: dict[str, Any]) -> str:
             score = engagement.get("trending_score")
             if score is not None:
                 return f"trending {int(to_number(score))}"
-            if likes:
-                return f"liked {likes:,}"
-        elif source == "hf_models_likes":
             if likes:
                 return f"liked {likes:,}"
         elif source == "hf_models_new":
@@ -1031,12 +1447,12 @@ def _engagement_sort_value(document: dict[str, Any]) -> float:
 
     if source == "hf_trending_models":
         return to_number(engagement.get("trending_score")) or to_number(engagement.get("likes"))
-    if source == "hf_models_likes":
-        return to_number(engagement.get("likes"))
     if source == "hf_models_new":
         return to_number(engagement.get("downloads")) or to_number(engagement.get("likes"))
 
     doc_type = document.get("doc_type")
+    if doc_type in {"model", "model_trending"}:
+        return to_number(engagement.get("likes")) or to_number(engagement.get("downloads"))
     if doc_type == "repo":
         return to_number(engagement.get("stars"))
     if doc_type in {"story", "post"}:
@@ -1046,8 +1462,7 @@ def _engagement_sort_value(document: dict[str, Any]) -> float:
 
 
 _ENGAGEMENT_SORTED_SOURCES = frozenset({
-    "hf_models_likes", "hf_trending_models", "hf_models_new",
-    "github_curated_repos",
+    "hf_trending_models", "hf_models_new",
 })
 
 
@@ -1065,19 +1480,24 @@ def sort_documents_for_feed(
 
 
 def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
+    display_document = sanitize_document_for_monitor(document)
+    display_time = display_document.get("display_time") or {}
+    ranking = display_document.get("ranking") or {}
     return {
-        "documentId": document["document_id"],
-        "referenceUrl": document.get("reference_url")
-        or document.get("canonical_url")
-        or document.get("url")
+        "documentId": display_document["document_id"],
+        "referenceUrl": display_document.get("reference_url")
+        or display_document.get("canonical_url")
+        or display_document.get("url")
         or "",
-        "timestamp": document_timestamp(document) or None,
-        "source": build_document_badge(document),
-        "type": prettify_doc_type(document.get("doc_type")),
-        "title": str(document.get("title") or "-"),
-        "meta": build_feed_meta(document),
-        "note": build_document_note(document),
-        "engagementLabel": _build_engagement_label(document),
+        "timestamp": display_time.get("value") or None,
+        "timestampLabel": display_time.get("label") or None,
+        "source": build_document_badge(display_document),
+        "type": prettify_doc_type(display_document.get("doc_type")),
+        "title": str(display_document.get("title") or "-"),
+        "meta": build_feed_meta(display_document),
+        "note": build_document_note(display_document),
+        "engagementLabel": _build_engagement_label(display_document),
+        "feedScore": to_number(ranking.get("feed_score")) or None,
     }
 
 
@@ -1419,7 +1839,7 @@ def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
             "loading": loading,
         },
         "summary": {
-            "title": "Today's Highlights",
+            "title": "Today in AI",
             "headline": error_message or detail,
             "digests": build_bootstrap_digest_items(status),
         },
@@ -2142,7 +2562,7 @@ def build_briefing_input(
     community_ids: set[str] = set()
     for doc in category_docs.get("community", [])[:5]:
         _append_community_doc(community, community_ids, doc)
-    for source in ("hf_daily_papers", "hf_trending_models", "hf_models_likes"):
+    for source in ("hf_daily_papers", "hf_trending_models", "hf_models_new"):
         for doc in source_docs.get(source, [])[:1]:
             _append_community_doc(community, community_ids, doc)
             if len(community) >= max_community:
@@ -2153,7 +2573,7 @@ def build_briefing_input(
         _append_community_doc(community, community_ids, doc)
         if len(community) >= max_community:
             break
-    for source in ("hf_daily_papers", "hf_trending_models", "hf_models_likes"):
+    for source in ("hf_daily_papers", "hf_trending_models", "hf_models_new"):
         for doc in source_docs.get(source, [])[1:]:
             _append_community_doc(community, community_ids, doc)
             if len(community) >= max_community:
@@ -2164,9 +2584,8 @@ def build_briefing_input(
     models: list[dict[str, Any]] = []
     model_ids: set[str] = set()
     for source, per_source_limit in (
-        ("hf_trending_models", 3),
+        ("hf_trending_models", 4),
         ("hf_models_new", 2),
-        ("hf_models_likes", 1),
     ):
         for doc in source_docs.get(source, [])[:per_source_limit]:
             document_id = str(doc.get("document_id") or "")
@@ -2338,12 +2757,14 @@ def build_dashboard_payload(
             continue
         category_documents.setdefault(category, []).extend(documents)
         manifest_entry = source_manifest_lookup.get(source, {})
+        panel_summary = build_feed_panel_summary(category, source, documents)
         feeds.append(
             {
                 "id": source,
                 "title": build_feed_panel_title(category, source),
                 "eyebrow": prettify_source_category_title(category),
-                "sourceNote": (manifest_entry.get("notes") or [None])[0]
+                "sourceNote": panel_summary
+                or (manifest_entry.get("notes") or [None])[0]
                 or f"{prettify_doc_type(top_document.get('doc_type'))} / {build_document_note(top_document)}",
                 "items": [build_feed_item(document) for document in documents],
             }
@@ -2389,7 +2810,7 @@ def build_dashboard_payload(
             session_id, meta, run_manifest, source_manifest, documents_by_id
         ),
         "summary": {
-            "title": "Today's Highlights",
+            "title": "Today in AI",
             "headline": f"{hottest_digest['domain']} / {hottest_digest['headline']}",
             "briefing": briefing if briefing and not briefing.get("error") else None,
             "briefing_status": _resolve_briefing_status(meta, briefing),

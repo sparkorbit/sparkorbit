@@ -46,6 +46,7 @@ def test_all_dashboard_feed_items_and_digests_resolve() -> None:
     assert dashboard_response.status_code == 200
 
     dashboard = dashboard_response.json()
+    assert dashboard.get("summary", {}).get("title") == "Today in AI"
     failures: list[str] = []
 
     for feed in dashboard.get("feeds", []):
@@ -114,3 +115,27 @@ def test_document_detail_must_use_visible_dashboard_session() -> None:
     assert active_response.status_code == 404
     assert pinned_response.status_code == 200
     assert pinned_response.json()["document_id"] == first_document_id
+
+
+def test_community_feeds_expose_and_sort_by_feed_score() -> None:
+    client = build_client()
+    dashboard_response = client.get("/api/dashboard?session=active")
+    assert dashboard_response.status_code == 200
+
+    dashboard = dashboard_response.json()
+    community_feeds = [
+        feed for feed in dashboard.get("feeds", []) if feed.get("eyebrow") == "Community"
+    ]
+
+    assert community_feeds, "expected at least one community feed"
+
+    for feed in community_feeds:
+        scores = []
+        for item in feed.get("items", []):
+            assert "feedScore" in item, f"community item missing feedScore in {feed.get('id')}"
+            score = item.get("feedScore")
+            scores.append(float(score or 0))
+        assert scores == sorted(scores, reverse=True), (
+            feed.get("id"),
+            scores,
+        )

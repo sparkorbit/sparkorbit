@@ -302,3 +302,59 @@ test("detail open button creates a real browser popup for sampled documents", as
       .toBeGreaterThan(0);
   }
 });
+
+test("quick groups reorder swaps groups when dropping on the target's trailing side", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: /manage panels/i })).toBeVisible();
+
+  await page.getByRole("button", { name: /manage panels/i }).click();
+  await expect(
+    page.getByRole("heading", { name: /Manage Source Panels/i }),
+  ).toBeVisible();
+
+  const chips = page.locator("[data-group-chip-label]");
+  const handles = page.getByRole("button", { name: /^Reorder /i });
+
+  await expect(handles).toHaveCount(await handles.count());
+  const chipCount = await chips.count();
+  expect(chipCount).toBeGreaterThanOrEqual(2);
+
+  const before = await chips.evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute("data-group-chip-label") || ""),
+  );
+
+  const fromHandle = handles.nth(0);
+  const targetChip = chips.nth(1);
+  const fromBox = await fromHandle.boundingBox();
+  const targetBox = await targetChip.boundingBox();
+
+  if (!fromBox || !targetBox) {
+    throw new Error("Could not resolve quick group drag positions");
+  }
+
+  await page.mouse.move(
+    fromBox.x + fromBox.width / 2,
+    fromBox.y + fromBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    targetBox.x + targetBox.width - 4,
+    targetBox.y + targetBox.height / 2,
+    { steps: 14 },
+  );
+  await page.mouse.up();
+
+  await expect
+    .poll(async () =>
+      chips.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-group-chip-label") || ""),
+      ),
+    )
+    .toEqual([
+      before[1],
+      before[0],
+      ...before.slice(2),
+    ]);
+});

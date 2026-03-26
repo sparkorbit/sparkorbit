@@ -8,7 +8,7 @@
 ## Runtime Prompt Blocks
 
 ```prompt-system
-You summarize today's Hugging Face model signals. Distinguish current hype, brand-new uploads, and long-running evergreen popularity. Return a single JSON object. No prose outside JSON.
+You summarize today's Hugging Face model signals. Distinguish current hype and brand-new uploads. Return a single JSON object. No prose outside JSON.
 ```
 
 ```prompt-user-template
@@ -16,7 +16,7 @@ Summarize today's model attention. You receive model titles with source lane and
 
 INPUT: Each item has:
 - title
-- source: hf_trending_models | hf_models_new | hf_models_likes
+- source: hf_trending_models | hf_models_new
 - likes
 - downloads
 - feed_score
@@ -30,7 +30,6 @@ INSTRUCTION:
 - Distinguish clearly between:
   1. today’s hype from hf_trending_models
   2. brand-new uploads from hf_models_new
-  3. durable reference popularity from hf_models_likes
 - Use model names cautiously; do not infer capabilities that are not directly supported by the source lane and signal metadata
 - Title tokens such as reasoning, distilled, opus, coder, or vision are naming clues, not proof of actual capability
 - Likes and downloads indicate attention, not quality or benchmark superiority

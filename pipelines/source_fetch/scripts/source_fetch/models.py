@@ -14,6 +14,8 @@ class SourceConfig:
     parser: str
     default_tags: tuple[str, ...] = ()
     extra: dict[str, Any] = field(default_factory=dict)
+    default_limit: int | None = None
+    max_age_days: int | None = None
 
 
 @dataclass

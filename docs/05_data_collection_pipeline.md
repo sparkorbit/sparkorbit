@@ -26,7 +26,7 @@
 
 이 파일이 공식 CLI entrypoint다.
 limit, sources, output_dir, timeout을 받아 `run_collection(...)`을 호출한다.
-기본 동작은 source당 최대 `20개`를 가져오도록 맞춘다.
+기본 동작은 source별 기본 limit를 사용한다. 일반 source는 `20개`, paper 계열 고밀도 source는 `24~30개`, `hn_topstories` 같은 저밀도 source는 더 낮게 가져온다. `--limit`을 주면 모든 source에 동일한 override가 적용된다.
 
 ## Code Layout
 

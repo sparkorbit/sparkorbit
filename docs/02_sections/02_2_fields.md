@@ -126,7 +126,7 @@ body_text:   "Qwen3Guard is designed to... (full article)"
 | 값 | 의미 | 해당 소스 |
 |----|------|-----------|
 | `papers` | 논문 | arxiv_rss_cs_ai, arxiv_rss_cs_lg, arxiv_rss_cs_cl, arxiv_rss_cs_cv, arxiv_rss_cs_ro, arxiv_rss_cs_ir, arxiv_rss_cs_cr, arxiv_rss_stat_ml, hf_daily_papers |
-| `models` | HF 모델 카드 | hf_models_likes, hf_models_new, hf_trending_models |
+| `models` | HF 모델 카드 | hf_models_new, hf_trending_models |
 | `community` | 커뮤니티/개발자 | hn_topstories, reddit_localllama, reddit_machinelearning, github_curated_repos |
 | `company` | 글로벌 기업 | openai_news_rss, google_ai_blog, microsoft_research, nvidia_deep_learning, apple_ml, amazon_science, hf_blog, anthropic_news, deepmind_blog, groq_newsroom, mistral_news, stability_news, salesforce_ai_research_rss |
 | `company_kr` | 한국 기업 | samsung_research_posts, kakao_tech_rss, lg_ai_research_blog, naver_cloud_blog_rss, upstage_blog |
@@ -144,7 +144,7 @@ body_text:   "Qwen3Guard is designed to... (full article)"
 | `news` | 뉴스/발표 | anthropic_news, mistral_news, stability_news, groq_newsroom |
 | `post` | 커뮤니티 게시글 | reddit_localllama, reddit_machinelearning |
 | `story` | HN 링크 포스트 | hn_topstories |
-| `model` | HF 모델 카드 | hf_models_likes, hf_models_new |
+| `model` | HF 모델 카드 | hf_models_new |
 | `model_trending` | HF 트렌딩 모델 | hf_trending_models |
 | `repo` | GitHub 리포지토리 | github_curated_repos, github_bytedance_repos, github_tencent_hunyuan_repos, github_paddlepaddle_repos, github_mindspore_repos |
 | `release` | GitHub 릴리즈 | github_curated_repos, github_paddlepaddle_repos |
@@ -161,7 +161,7 @@ body_text:   "Qwen3Guard is designed to... (full article)"
 | `full_text` | 본문 전체 또는 충분한 길이 | 대부분의 RSS/scrape/API 소스 |
 | `abstract` | 논문 초록 | arxiv_rss_cs_ai, arxiv_rss_cs_lg, hf_daily_papers |
 | `excerpt` | 본문 일부/요약 발췌 | deepmind_blog, openai_news_rss, samsung_research_posts |
-| `metadata_only` | 본문 없음, 메타데이터만 | hf_models_likes, hf_trending_models, github_*_repos |
+| `metadata_only` | 본문 없음, 메타데이터만 | hf_models_new, hf_trending_models, github_*_repos |
 | `metric_summary` | 수치 기반 요약 | open_llm_leaderboard |
 | `generated_panel` | 생성된 패널 텍스트 | lmarena_overview |
 | `empty` | 본문 없음 | hn_topstories (외부 링크만), github_mindspore_repos |
@@ -174,7 +174,7 @@ body_text:   "Qwen3Guard is designed to... (full article)"
 |----|------|-----------|
 | `published` | 게시/발행 시점 | 대부분의 소스 (블로그, 뉴스, 논문, 커뮤니티) |
 | `updated` | 최종 수정/push 시점 | github_*_repos |
-| `created` | 최초 생성 시점 | hf_models_likes |
+| `created` | 최초 생성 시점 | hf_models_new |
 | `snapshot` | 스냅샷 수집 시점 | lmarena_overview |
 | `submission` | 제출/등록 시점 | open_llm_leaderboard |
 
@@ -197,7 +197,6 @@ body_text:   "Qwen3Guard is designed to... (full article)"
 | **hn_topstories** | `score`, `comments` | score = 순수 upvote 수 (downvote 없음) |
 | **reddit_localllama** | `score`, `comments`, `upvote_ratio` | score = upvote − downvote. upvote_ratio가 0.5에 가까우면 논쟁적 |
 | **reddit_machinelearning** | `score`, `comments`, `upvote_ratio` | 위와 동일 |
-| **hf_models_likes** | `likes`, `downloads` | likes = 장기 인기, downloads = 누적 사용량 |
 | **hf_models_new** | `likes`, `downloads` | newly created 모델의 초기 신호 확인 |
 | **hf_trending_models** | `likes`, `downloads` | 위와 동일 |
 | **hf_daily_papers** | `comments` | HF papers 페이지 댓글 수 |
@@ -284,7 +283,6 @@ score > upvotes > likes > stars > votes > downloads > comments > read_count
 실전에서는:
 - `hf_models_new`는 **방금 생긴 모델**을 보는 lane
 - `hf_trending_models`는 **지금 반짝이는 모델**을 보는 lane
-- `hf_models_likes`는 **이미 검증된 장기 인기 모델**을 보는 lane
 
 이 세 축을 같이 보되, 기본 정렬은 `ranking.feed_score DESC`, 같은 점수 안에서는 `sort_at DESC`, 그 다음 보조 정렬로 `engagement_primary.value DESC`를 쓰는 편이 더 목적에 맞다.
 
@@ -335,7 +333,7 @@ score > upvotes > likes > stars > votes > downloads > comments > read_count
 |------|-----------|------|
 | `external_ids.arxiv_id` | arxiv_rss_cs_ai, arxiv_rss_cs_lg | `2503.12345` |
 | `external_ids.feed_entry_id` | RSS 기반 소스 전부 | feed entry의 고유 ID |
-| `external_ids.hf_model_id` | hf_models_likes, hf_trending_models | `deepseek-ai/DeepSeek-R1` |
+| `external_ids.hf_model_id` | hf_models_new, hf_trending_models | `deepseek-ai/DeepSeek-R1` |
 | `external_ids.hn_id` | hn_topstories | `12345678` |
 | `external_ids.reddit_id` | reddit_localllama, reddit_machinelearning | `t3_abc123` |
 | `external_ids.github_repo_id` | github_*_repos | `owner/repo` |
@@ -375,7 +373,6 @@ score > upvotes > likes > stars > votes > downloads > comments > read_count
 | `arxiv_rss_cs_ai` | `https://rss.arxiv.org/rss/cs.AI` | `https://arxiv.org/abs/{arxiv_id}` |
 | `arxiv_rss_cs_lg` | `https://rss.arxiv.org/rss/cs.LG` | `https://arxiv.org/abs/{arxiv_id}` |
 | `hf_daily_papers` | `https://huggingface.co/api/daily_papers` | `https://arxiv.org/abs/{arxiv_id}` |
-| `hf_models_likes` | `https://huggingface.co/api/models?sort=likes&limit=20` | `https://huggingface.co/{org}/{model}` |
 | `hf_models_new` | `https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=20` | `https://huggingface.co/{org}/{model}` |
 | `hf_trending_models` | `https://huggingface.co/api/trending?type=model` | `https://huggingface.co/{org}/{model}` |
 

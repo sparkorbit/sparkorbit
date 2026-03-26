@@ -500,7 +500,7 @@ LLM enrichment를 실행하지 않은 run에서는:
 | 필드 | 출처 | 설명 |
 |------|------|------|
 | `title` | `doc.title` (120자 제한) | 모델명 |
-| `source` | `doc.source` | `hf_trending_models`, `hf_models_new`, `hf_models_likes` |
+| `source` | `doc.source` | `hf_trending_models`, `hf_models_new` |
 | `likes` | `doc.engagement_primary.value` | 좋아요 수 |
 | `downloads` | `doc.engagement.downloads` | 다운로드 수 |
 | `feed_score` | `doc.ranking.feed_score` | 정렬 점수 |
@@ -509,7 +509,7 @@ LLM enrichment를 실행하지 않은 run에서는:
 | `freshness` | `doc.discovery.freshness_bucket` | 신선도 버킷 |
 | `trend_rank` | `doc.metadata.trending_position` | 트렌딩 순위 |
 
-선별: hf_trending 3, hf_new 2, hf_likes 1 (soft limit). 최대 6건.
+선별: hf_trending 4, hf_new 2 (soft limit). 최대 6건.
 
 ### community 아이템
 
@@ -518,7 +518,7 @@ LLM enrichment를 실행하지 않은 run에서는:
 | `title` | `doc.title` (120자 제한) | 제목 |
 | `source` | `doc.source` | 수집 소스 |
 
-선별: community 카테고리 5건 + hf_daily/trending/likes 각 1건 + 나머지. 최대 8건.
+선별: community 카테고리 5건 + hf_daily/trending/new 각 1건 + 나머지. 최대 8건.
 
 ### session overview
 
@@ -631,7 +631,6 @@ def has_displayable_reference(document):
 | Source | 정렬 키 |
 |--------|---------|
 | `hf_trending_models` | `trend_rank ASC` → `feed_score DESC` → `likes DESC` → `downloads DESC` |
-| `hf_models_likes` | `likes DESC` → `downloads DESC` → `feed_score DESC` |
 | 기타 | `freshness_bucket 순서` → `feed_score DESC` → `downloads DESC` → `likes DESC` |
 
 ---

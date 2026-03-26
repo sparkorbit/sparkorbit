@@ -778,26 +778,34 @@ def wrap_raw_item(
     }
 
 
+DEFAULT_SOURCE_LIMIT = 20
+HIGH_VOLUME_SOURCE_LIMIT = 30
+PAPER_DAILY_LIMIT = 24
+LOW_SIGNAL_COMMUNITY_LIMIT = 10
+GITHUB_WATCHLIST_LIMIT = 10
+COMPANY_MAX_AGE_DAYS = 90
+
+
 RSS_SOURCES: list[SourceConfig] = [
-    SourceConfig("arxiv_rss_cs_ai", "papers", "rss", "https://rss.arxiv.org/rss/cs.AI", "paper", "rss", ("paper", "arxiv", "cs.AI")),
-    SourceConfig("arxiv_rss_cs_lg", "papers", "rss", "https://rss.arxiv.org/rss/cs.LG", "paper", "rss", ("paper", "arxiv", "cs.LG")),
-    SourceConfig("arxiv_rss_cs_cl", "papers", "rss", "https://rss.arxiv.org/rss/cs.CL", "paper", "rss", ("paper", "arxiv", "cs.CL")),
-    SourceConfig("arxiv_rss_cs_cv", "papers", "rss", "https://rss.arxiv.org/rss/cs.CV", "paper", "rss", ("paper", "arxiv", "cs.CV")),
-    SourceConfig("arxiv_rss_cs_ro", "papers", "rss", "https://rss.arxiv.org/rss/cs.RO", "paper", "rss", ("paper", "arxiv", "cs.RO")),
-    SourceConfig("arxiv_rss_cs_ir", "papers", "rss", "https://rss.arxiv.org/rss/cs.IR", "paper", "rss", ("paper", "arxiv", "cs.IR")),
-    SourceConfig("arxiv_rss_cs_cr", "papers", "rss", "https://rss.arxiv.org/rss/cs.CR", "paper", "rss", ("paper", "arxiv", "cs.CR")),
-    SourceConfig("arxiv_rss_stat_ml", "papers", "rss", "https://rss.arxiv.org/rss/stat.ML", "paper", "rss", ("paper", "arxiv", "stat.ML")),
-    SourceConfig("openai_news_rss", "company", "rss", "https://openai.com/news/rss.xml", "blog", "rss", ("company", "openai")),
-    SourceConfig("google_ai_blog", "company", "rss", "https://blog.google/technology/ai/rss/", "blog", "rss", ("company", "google")),
-    SourceConfig("microsoft_research", "company", "rss", "https://www.microsoft.com/en-us/research/feed/", "blog", "rss", ("company", "microsoft")),
-    SourceConfig("nvidia_deep_learning", "company", "rss", "https://blogs.nvidia.com/blog/category/deep-learning/feed/", "blog", "rss", ("company", "nvidia")),
-    SourceConfig("apple_ml", "company", "rss", "https://machinelearning.apple.com/rss.xml", "blog", "rss", ("company", "apple")),
-    SourceConfig("amazon_science", "company", "rss", "https://www.amazon.science/index.rss", "blog", "rss", ("company", "amazon")),
-    SourceConfig("hf_blog", "company", "rss", "https://huggingface.co/blog/feed.xml", "blog", "rss", ("company", "huggingface"), {"fetch_detail": True}),
-    SourceConfig("kakao_tech_rss", "company_kr", "rss", "https://tech.kakao.com/feed/", "blog", "rss", ("company", "kr", "kakao")),
-    SourceConfig("naver_cloud_blog_rss", "company_kr", "rss", "https://rss.blog.naver.com/n_cloudplatform.xml", "blog", "rss", ("company", "kr", "naver")),
-    SourceConfig("qwen_blog_rss", "company_cn", "rss", "https://qwenlm.github.io/blog/index.xml", "blog", "rss", ("company", "cn", "qwen")),
-    SourceConfig("salesforce_ai_research_rss", "company", "rss", "https://www.salesforce.com/blog/category/ai-research/feed/", "blog", "rss", ("company", "salesforce")),
+    SourceConfig("arxiv_rss_cs_ai", "papers", "rss", "https://rss.arxiv.org/rss/cs.AI", "paper", "rss", ("paper", "arxiv", "cs.AI"), default_limit=HIGH_VOLUME_SOURCE_LIMIT),
+    SourceConfig("arxiv_rss_cs_lg", "papers", "rss", "https://rss.arxiv.org/rss/cs.LG", "paper", "rss", ("paper", "arxiv", "cs.LG"), default_limit=HIGH_VOLUME_SOURCE_LIMIT),
+    SourceConfig("arxiv_rss_cs_cl", "papers", "rss", "https://rss.arxiv.org/rss/cs.CL", "paper", "rss", ("paper", "arxiv", "cs.CL"), default_limit=HIGH_VOLUME_SOURCE_LIMIT),
+    SourceConfig("arxiv_rss_cs_cv", "papers", "rss", "https://rss.arxiv.org/rss/cs.CV", "paper", "rss", ("paper", "arxiv", "cs.CV"), default_limit=HIGH_VOLUME_SOURCE_LIMIT),
+    SourceConfig("arxiv_rss_cs_ro", "papers", "rss", "https://rss.arxiv.org/rss/cs.RO", "paper", "rss", ("paper", "arxiv", "cs.RO"), default_limit=HIGH_VOLUME_SOURCE_LIMIT),
+    SourceConfig("arxiv_rss_cs_ir", "papers", "rss", "https://rss.arxiv.org/rss/cs.IR", "paper", "rss", ("paper", "arxiv", "cs.IR"), default_limit=HIGH_VOLUME_SOURCE_LIMIT),
+    SourceConfig("arxiv_rss_cs_cr", "papers", "rss", "https://rss.arxiv.org/rss/cs.CR", "paper", "rss", ("paper", "arxiv", "cs.CR"), default_limit=HIGH_VOLUME_SOURCE_LIMIT),
+    SourceConfig("arxiv_rss_stat_ml", "papers", "rss", "https://rss.arxiv.org/rss/stat.ML", "paper", "rss", ("paper", "arxiv", "stat.ML"), default_limit=HIGH_VOLUME_SOURCE_LIMIT),
+    SourceConfig("openai_news_rss", "company", "rss", "https://openai.com/news/rss.xml", "blog", "rss", ("company", "openai"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("google_ai_blog", "company", "rss", "https://blog.google/technology/ai/rss/", "blog", "rss", ("company", "google"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("microsoft_research", "company", "rss", "https://www.microsoft.com/en-us/research/feed/", "blog", "rss", ("company", "microsoft"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("nvidia_deep_learning", "company", "rss", "https://blogs.nvidia.com/blog/category/deep-learning/feed/", "blog", "rss", ("company", "nvidia"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("apple_ml", "company", "rss", "https://machinelearning.apple.com/rss.xml", "blog", "rss", ("company", "apple"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("amazon_science", "company", "rss", "https://www.amazon.science/index.rss", "blog", "rss", ("company", "amazon"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("hf_blog", "company", "rss", "https://huggingface.co/blog/feed.xml", "blog", "rss", ("company", "huggingface"), {"fetch_detail": True}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("kakao_tech_rss", "company_kr", "rss", "https://tech.kakao.com/feed/", "blog", "rss", ("company", "kr", "kakao"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("naver_cloud_blog_rss", "company_kr", "rss", "https://rss.blog.naver.com/n_cloudplatform.xml", "blog", "rss", ("company", "kr", "naver"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("qwen_blog_rss", "company_cn", "rss", "https://qwenlm.github.io/blog/index.xml", "blog", "rss", ("company", "cn", "qwen"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("salesforce_ai_research_rss", "company", "rss", "https://www.salesforce.com/blog/category/ai-research/feed/", "blog", "rss", ("company", "salesforce"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
 ]
 
 
@@ -808,28 +816,27 @@ def register(config: SourceConfig) -> None:
     SOURCE_REGISTRY[config.name] = config
 
 
-register(SourceConfig("hf_daily_papers", "papers", "api", "https://huggingface.co/api/daily_papers", "paper", "hf_daily_papers", ("paper", "huggingface")))
-register(SourceConfig("hf_models_likes", "models", "api", "https://huggingface.co/api/models?sort=likes&limit=20", "model", "hf_models_likes", ("model", "huggingface")))
-register(SourceConfig("hf_models_new", "models", "api", "https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=20", "model", "hf_models_likes", ("model", "huggingface", "new"), {"sort": "createdAt", "direction": "-1"}))
-register(SourceConfig("hf_trending_models", "models", "api", "https://huggingface.co/api/trending?type=model", "model_trending", "hf_trending", ("model", "huggingface", "trending")))
-register(SourceConfig("hn_topstories", "community", "api", "https://hacker-news.firebaseio.com/v0/topstories.json", "post", "hn_topstories", ("community", "hn")))
-register(SourceConfig("reddit_machinelearning", "community", "json", "https://www.reddit.com/r/MachineLearning/.json?limit=20", "post", "reddit_listing", ("community", "reddit", "machinelearning")))
-register(SourceConfig("reddit_localllama", "community", "json", "https://www.reddit.com/r/LocalLLaMA/.json?limit=20", "post", "reddit_listing", ("community", "reddit", "localllama")))
+register(SourceConfig("hf_daily_papers", "papers", "api", "https://huggingface.co/api/daily_papers", "paper", "hf_daily_papers", ("paper", "huggingface"), default_limit=PAPER_DAILY_LIMIT))
+register(SourceConfig("hf_models_new", "models", "api", "https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=20", "model", "hf_models_listing", ("model", "huggingface", "new"), {"sort": "createdAt", "direction": "-1"}, default_limit=DEFAULT_SOURCE_LIMIT))
+register(SourceConfig("hf_trending_models", "models", "api", "https://huggingface.co/api/trending?type=model", "model_trending", "hf_trending", ("model", "huggingface", "trending"), default_limit=DEFAULT_SOURCE_LIMIT))
+register(SourceConfig("hn_topstories", "community", "api", "https://hacker-news.firebaseio.com/v0/topstories.json", "post", "hn_topstories", ("community", "hn"), default_limit=LOW_SIGNAL_COMMUNITY_LIMIT))
+register(SourceConfig("reddit_machinelearning", "community", "json", "https://www.reddit.com/r/MachineLearning/.json?limit=20", "post", "reddit_listing", ("community", "reddit", "machinelearning"), default_limit=DEFAULT_SOURCE_LIMIT))
+register(SourceConfig("reddit_localllama", "community", "json", "https://www.reddit.com/r/LocalLLaMA/.json?limit=20", "post", "reddit_listing", ("community", "reddit", "localllama"), default_limit=DEFAULT_SOURCE_LIMIT))
 register(SourceConfig("open_llm_leaderboard", "benchmark", "api", "https://datasets-server.huggingface.co/rows?dataset=open-llm-leaderboard/contents&config=default&split=train&offset=0&length=20", "benchmark", "open_llm_leaderboard", ("benchmark", "leaderboard")))
-register(SourceConfig("samsung_research_posts", "company_kr", "api", "https://research.samsung.com/blogMain/list.json", "blog", "samsung_research_posts", ("company", "kr", "samsung")))
-register(SourceConfig("lg_ai_research_blog", "company_kr", "api", "https://www.lgresearch.ai/api/board/blog/list", "blog", "lg_ai_research_api", ("company", "kr", "lgai"), {"kind": "blog"}))
-register(SourceConfig("github_curated_repos", "community", "api", "https://api.github.com/repos", "repo", "github_watchlist_repos", ("community", "github"), {"repos": ["huggingface/transformers", "vllm-project/vllm", "openai/openai-python", "ggerganov/llama.cpp", "ollama/ollama", "langchain-ai/langchain"]}))
-register(SourceConfig("github_tencent_hunyuan_repos", "company_cn", "api", "https://api.github.com/orgs/Tencent-Hunyuan/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "tencent"), {"org": "Tencent-Hunyuan"}))
-register(SourceConfig("github_paddlepaddle_repos", "company_cn", "api", "https://api.github.com/orgs/PaddlePaddle/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "paddlepaddle"), {"org": "PaddlePaddle"}))
-register(SourceConfig("github_bytedance_repos", "company_cn", "api", "https://api.github.com/orgs/bytedance/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "bytedance"), {"org": "bytedance"}))
-register(SourceConfig("github_mindspore_repos", "company_cn", "api", "https://api.github.com/orgs/mindspore-ai/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "mindspore"), {"org": "mindspore-ai"}))
-register(SourceConfig("anthropic_news", "company", "scrape", "https://www.anthropic.com/news", "news", "html_listing_with_detail", ("company", "anthropic"), {"include_prefixes": ["/news/", "/81k-interviews"], "exclude_exact": ["/news"], "note": "Headline, category/date teaser on list; detail fetch adds full body and meta."}))
-register(SourceConfig("deepmind_blog", "company", "scrape", "https://deepmind.google/blog/", "blog", "html_listing_with_detail", ("company", "deepmind"), {"include_contains": ["/blog/"], "exclude_exact": ["/blog/", "/blog"], "detail_body_selectors": ["main .rich-text"], "note": "List page gives links; detail pages carry stronger meta and body text."}))
-register(SourceConfig("mistral_news", "company", "scrape", "https://mistral.ai/news/", "news", "html_listing_with_detail", ("company", "mistral"), {"include_prefixes": ["/news/"], "exclude_exact": ["/news/", "/news"], "note": "List page exposes product/update cards; detail fetch adds fuller descriptions."}))
-register(SourceConfig("stability_news", "company", "scrape", "https://stability.ai/news-updates", "news", "html_listing_with_detail", ("company", "stability"), {"include_prefixes": ["/news-updates/"], "exclude_exact": ["/news-updates"], "note": "Squarespace news listing; detail pages provide cleaner title/body than list cards."}))
-register(SourceConfig("groq_newsroom", "company", "scrape", "https://groq.com/newsroom", "news", "html_listing_with_detail", ("company", "groq"), {"include_prefixes": ["/newsroom/"], "exclude_exact": ["/newsroom"], "note": "Newsroom cards are visible on the list page; detail pages add full body text."}))
-register(SourceConfig("upstage_blog", "company_kr", "scrape", "https://www.upstage.ai/blog", "blog", "html_listing_with_detail", ("company", "kr", "upstage"), {"include_contains": ["/blog/"], "exclude_exact": ["/blog"], "note": "List page is rich enough for title/category/date hints; detail fetch adds body and meta."}))
-register(SourceConfig("deepseek_updates", "company_cn", "scrape", "https://api-docs.deepseek.com/updates/", "release_note", "html_listing_with_detail", ("company", "cn", "deepseek"), {"include_prefixes": ["/news/"], "exclude_exact": ["/updates/", "/updates"], "note": "Docs changelog page exposes release links and date hints; detail pages add changelog body."}))
+register(SourceConfig("samsung_research_posts", "company_kr", "api", "https://research.samsung.com/blogMain/list.json", "blog", "samsung_research_posts", ("company", "kr", "samsung"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("lg_ai_research_blog", "company_kr", "api", "https://www.lgresearch.ai/api/board/blog/list", "blog", "lg_ai_research_api", ("company", "kr", "lgai"), {"kind": "blog"}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("github_curated_repos", "community", "api", "https://api.github.com/repos", "repo", "github_watchlist_repos", ("community", "github"), {"repos": ["huggingface/transformers", "vllm-project/vllm", "openai/openai-python", "ggerganov/llama.cpp", "ollama/ollama", "langchain-ai/langchain", "sgl-project/sglang", "BerriAI/litellm", "microsoft/autogen", "run-llama/llama_index"]}, default_limit=GITHUB_WATCHLIST_LIMIT))
+register(SourceConfig("github_tencent_hunyuan_repos", "company_cn", "api", "https://api.github.com/orgs/Tencent-Hunyuan/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "tencent"), {"org": "Tencent-Hunyuan"}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("github_paddlepaddle_repos", "company_cn", "api", "https://api.github.com/orgs/PaddlePaddle/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "paddlepaddle"), {"org": "PaddlePaddle"}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("github_bytedance_repos", "company_cn", "api", "https://api.github.com/orgs/bytedance/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "bytedance"), {"org": "bytedance"}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("github_mindspore_repos", "company_cn", "api", "https://api.github.com/orgs/mindspore-ai/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "mindspore"), {"org": "mindspore-ai"}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("anthropic_news", "company", "scrape", "https://www.anthropic.com/news", "news", "html_listing_with_detail", ("company", "anthropic"), {"include_prefixes": ["/news/", "/81k-interviews"], "exclude_exact": ["/news"], "note": "Headline, category/date teaser on list; detail fetch adds full body and meta."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("deepmind_blog", "company", "scrape", "https://deepmind.google/blog/", "blog", "html_listing_with_detail", ("company", "deepmind"), {"include_contains": ["/blog/"], "exclude_exact": ["/blog/", "/blog"], "detail_body_selectors": ["main .rich-text"], "note": "List page gives links; detail pages carry stronger meta and body text."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("mistral_news", "company", "scrape", "https://mistral.ai/news/", "news", "html_listing_with_detail", ("company", "mistral"), {"include_prefixes": ["/news/"], "exclude_exact": ["/news/", "/news"], "note": "List page exposes product/update cards; detail fetch adds fuller descriptions."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("stability_news", "company", "scrape", "https://stability.ai/news-updates", "news", "html_listing_with_detail", ("company", "stability"), {"include_prefixes": ["/news-updates/"], "exclude_exact": ["/news-updates"], "note": "Squarespace news listing; detail pages provide cleaner title/body than list cards."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("groq_newsroom", "company", "scrape", "https://groq.com/newsroom", "news", "html_listing_with_detail", ("company", "groq"), {"include_prefixes": ["/newsroom/"], "exclude_exact": ["/newsroom"], "note": "Newsroom cards are visible on the list page; detail pages add full body text."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("upstage_blog", "company_kr", "scrape", "https://www.upstage.ai/blog", "blog", "html_listing_with_detail", ("company", "kr", "upstage"), {"include_contains": ["/blog/"], "exclude_exact": ["/blog"], "note": "List page is rich enough for title/category/date hints; detail fetch adds body and meta."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
+register(SourceConfig("deepseek_updates", "company_cn", "scrape", "https://api-docs.deepseek.com/updates/", "release_note", "html_listing_with_detail", ("company", "cn", "deepseek"), {"include_prefixes": ["/news/"], "exclude_exact": ["/updates/", "/updates"], "note": "Docs changelog page exposes release links and date hints; detail pages add changelog body."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
 register(SourceConfig("lmarena_overview", "benchmark", "scrape", "https://arena.ai/leaderboard", "benchmark_panel", "lmarena_overview", ("benchmark", "lmarena")))
 
 
@@ -1034,7 +1041,7 @@ def fetch_hf_daily_papers(client: httpx.Client, config: SourceConfig, run_id: st
     return result
 
 
-def fetch_hf_models_likes(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
+def fetch_hf_models_listing(client: httpx.Client, config: SourceConfig, run_id: str, limit: int) -> FetchResult:
     fetched_at = now_utc_iso()
     sort_key = config.extra.get("sort", "likes")
     direction = config.extra.get("direction", "-1")
@@ -1184,8 +1191,9 @@ def fetch_hf_trending(client: httpx.Client, config: SourceConfig, run_id: str, l
                 reference_url=f"https://huggingface.co/{repo_data.get('id')}" if repo_data.get("id") else None,
                 author=author_data.get("fullname") or repo_data.get("author"),
                 description=description,
-                published_at=parse_date(repo_data.get("lastModified")),
+                published_at=parse_date(repo_data.get("createdAt")),
                 updated_at=parse_date(repo_data.get("lastModified")),
+                sort_at=parse_date(repo_data.get("createdAt")) or parse_date(repo_data.get("lastModified")),
                 time_semantics="updated",
                 body_text=description or repo_data.get("pipeline_tag"),
                 tags=["model", "huggingface", "trending"],
@@ -1739,7 +1747,7 @@ def add_github_repo_document(
             canonical_url=repo.get("html_url"),
             reference_url=repo.get("html_url"),
             author=((repo.get("owner") or {}).get("login")),
-            published_at=parse_date(repo.get("updated_at")) or parse_date(repo.get("pushed_at")),
+            published_at=None,
             updated_at=parse_date(repo.get("updated_at")),
             sort_at=parse_date(repo.get("pushed_at")) or parse_date(repo.get("updated_at")),
             time_semantics="updated",
@@ -2261,7 +2269,7 @@ def fetch_lmarena_overview(client: httpx.Client, config: SourceConfig, run_id: s
 FETCHER_REGISTRY = {
     "rss": fetch_rss_source,
     "hf_daily_papers": fetch_hf_daily_papers,
-    "hf_models_likes": fetch_hf_models_likes,
+    "hf_models_listing": fetch_hf_models_listing,
     "hf_trending": fetch_hf_trending,
     "hn_topstories": fetch_hn_topstories,
     "reddit_listing": fetch_reddit_listing,

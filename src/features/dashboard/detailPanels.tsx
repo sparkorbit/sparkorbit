@@ -315,10 +315,55 @@ function buildDocumentBodyLabel(document: SessionDocument) {
   return "Content";
 }
 
+function getPrimaryDocumentDisplayTime(document: SessionDocument) {
+  const label = (document.display_time?.label || "").trim();
+  const value = formatDisplayDate(document.display_time?.value);
+
+  if (!label || !value) {
+    return null;
+  }
+
+  return { label, value };
+}
+
+function formatInlineDocumentDisplayTime(
+  timeInfo: ReturnType<typeof getPrimaryDocumentDisplayTime>,
+) {
+  if (!timeInfo) {
+    return "";
+  }
+
+  if (timeInfo.label === "Published") {
+    return timeInfo.value;
+  }
+
+  return `${timeInfo.label} ${timeInfo.value}`;
+}
+
+function getSecondaryUpdatedDisplayTime(
+  document: SessionDocument,
+  primaryTime: ReturnType<typeof getPrimaryDocumentDisplayTime>,
+) {
+  const updatedValue = formatDisplayDate(document.updated_at);
+  if (!updatedValue) {
+    return null;
+  }
+
+  if (primaryTime?.value === updatedValue) {
+    return null;
+  }
+
+  return {
+    label: "Updated",
+    value: updatedValue,
+  };
+}
+
 function buildDocumentMetaLine(document: SessionDocument) {
+  const primaryTime = getPrimaryDocumentDisplayTime(document);
   return [
     formatReadableSourceName(document.source),
-    formatDisplayDate(document.published_at) || formatDisplayDate(document.updated_at),
+    formatInlineDocumentDisplayTime(primaryTime),
   ]
     .filter((segment): segment is string => Boolean(segment))
     .join(" · ");
@@ -388,7 +433,7 @@ export function DigestDetailPanel({
                   </h3>
                   {digestUpdatedAt ? (
                     <p className="mt-2 font-mono text-[0.58rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                      {digestUpdatedAt}
+                      Updated {digestUpdatedAt}
                     </p>
                   ) : null}
                 </div>
@@ -413,21 +458,26 @@ export function DigestDetailPanel({
                 Related Items
               </p>
               <div className="mt-3 grid gap-2">
-                {payload.documents.map((document) => (
-                  <button
-                    key={document.document_id}
-                    type="button"
-                    data-related-document-id={document.document_id}
-                    className="border border-orbit-border bg-orbit-bg px-3 py-3 text-left transition-colors duration-150 hover:border-orbit-accent"
-                    onClick={() => onOpenDocument(document.document_id)}
-                  >
+                {payload.documents.map((document) => {
+                  const relatedTime = getPrimaryDocumentDisplayTime(document);
+                  const inlineRelatedTime =
+                    formatInlineDocumentDisplayTime(relatedTime);
+
+                  return (
+                    <button
+                      key={document.document_id}
+                      type="button"
+                      data-related-document-id={document.document_id}
+                      className="border border-orbit-border bg-orbit-bg px-3 py-3 text-left transition-colors duration-150 hover:border-orbit-accent"
+                      onClick={() => onOpenDocument(document.document_id)}
+                    >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.8rem] font-semibold text-orbit-text">
                         {document.title}
                       </p>
-                      {formatDisplayDate(document.published_at) ? (
+                      {inlineRelatedTime ? (
                         <span className="shrink-0 font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                          {formatDisplayDate(document.published_at)}
+                          {inlineRelatedTime}
                         </span>
                       ) : null}
                     </div>
@@ -442,8 +492,9 @@ export function DigestDetailPanel({
                         {buildDocumentPreview(document)}
                       </p>
                     ) : null}
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             </section>
           </HackerRevealCard>
@@ -461,11 +512,17 @@ export function DocumentDetailPanel({
   onClose: () => void;
 }) {
   const referenceUrl = getDocumentReferenceUrl(document);
+  const primaryTime = getPrimaryDocumentDisplayTime(document);
+  const secondaryUpdated = getSecondaryUpdatedDisplayTime(document, primaryTime);
   const contextFields = filterDetailFields([
     createDetailField("source", formatReadableSourceName(document.source)),
     createDetailField("type", formatDocType(document.doc_type)),
-    createDetailField("published", formatDisplayDate(document.published_at)),
-    createDetailField("updated", formatDisplayDate(document.updated_at)),
+    primaryTime
+      ? createDetailField(primaryTime.label.toLowerCase(), primaryTime.value)
+      : null,
+    secondaryUpdated
+      ? createDetailField(secondaryUpdated.label.toLowerCase(), secondaryUpdated.value)
+      : null,
     createDetailField("online", referenceUrl, { href: referenceUrl }),
   ]);
   const authorItems = buildDocumentAuthorItems(document);

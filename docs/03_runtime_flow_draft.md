@@ -233,6 +233,40 @@ cluster/event 레이어는 아직 없다.
 - source item 클릭 시 `/api/documents/{document_id}`를 호출하고, reference URL을 새 탭으로 연다.
 - leaderboards는 `session.arenaOverview` 또는 `/api/leaderboards` 응답을 메인 패널에서 렌더링한다.
 
+## Display Time Contract
+
+화면에 보이는 시간 라벨은 raw `published_at` fallback을 프론트엔드가 임의로 해석해서 만들지 않는다. backend serving layer가 문서별 `time_semantics` 를 기준으로 **display time** 을 먼저 결정하고, frontend는 그 값을 그대로 보여준다.
+
+- source feed item은 `timestamp` 와 `timestampLabel` 을 함께 받는다.
+- `/api/documents/{document_id}` 응답은 `display_time = { label, value, field, semantics }` 를 포함한다.
+- `published` source는 `Published`
+- `created` source는 `Created`
+- `updated` source는 `Updated`
+- `submission` source는 `Submitted`
+- `snapshot` source는 `Snapshot`
+- `fetched_at` fallback만 남은 경우는 `Observed`
+
+운영 규칙:
+
+- `sort_at` 는 정렬용 fallback이지 사람에게 그대로 `Published` 로 보이면 안 된다.
+- `updated` semantics source는 `published_at` 를 비워서 `Published` 오표기를 막는다.
+- source panel, digest related items, document detail은 같은 display-time resolution을 써야 한다.
+- 새 source를 추가할 때는 adapter의 `time_semantics` 와 dashboard/document panel의 표시 라벨이 함께 맞는지 확인한다.
+
+현재 표시 패널 점검표:
+
+- source feed panel: `feed.items[].timestamp` + `feed.items[].timestampLabel` 만 사용한다.
+- document detail panel: `document.display_time` 를 1차 표시값으로 쓰고, 별도 `updated_at` 은 실제로 다른 값일 때만 보조로 노출한다.
+- digest detail panel: 헤더의 digest 갱신 시각은 `digest.updatedAt`, 관련 문서 리스트는 각 문서의 `display_time` 을 사용한다.
+- leaderboard panel: source 문서 시간값을 직접 보여주지 않는다. benchmark snapshot은 문서 detail에서만 `Snapshot` 라벨로 노출한다.
+
+운영 체크 순서:
+
+1. adapter에서 `published_at`, `updated_at`, `sort_at`, `time_semantics` 를 의미에 맞게 채운다.
+2. backend serving layer에서 `display_time` 과 feed `timestampLabel` 이 기대 라벨로 내려오는지 확인한다.
+3. frontend 패널은 raw 시간 필드를 새로 해석하지 말고 backend가 확정한 표시값만 사용한다.
+4. 회귀 방지용 테스트로 dashboard feed, digest detail, document detail이 같은 계약을 공유하는지 검증한다.
+
 ## Loading UX Contract
 
 backend는 모든 live progress를 아래 모양으로 frontend에 내려준다.

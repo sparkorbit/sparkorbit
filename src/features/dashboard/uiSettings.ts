@@ -39,7 +39,7 @@ export const DEFAULT_UI_SETTINGS: UiSettings = {
   motionEnabled: true,
   overlaysEnabled: true,
   payloadDebugEnabled: false,
-  rowHeightMode: "standard",
+  rowHeightMode: "tall",
 };
 
 export function loadUiSettings(): UiSettings {

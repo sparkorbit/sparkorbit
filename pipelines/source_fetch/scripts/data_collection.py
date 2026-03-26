@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=None,
-        help="Max items per source. Default: 20.",
+        help="Global max items per source override. Default: use source-specific limits.",
     )
     parser.add_argument(
         "--output-dir",

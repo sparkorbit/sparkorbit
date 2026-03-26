@@ -5,16 +5,6 @@ import type {
 } from "../../types/dashboard";
 import type { JobProgressSnapshot } from "../../types/jobProgress";
 
-const SOURCE_CATEGORY_LABELS: Record<string, string> = {
-  papers: "Papers",
-  models: "Models",
-  community: "Community",
-  company: "Company",
-  company_kr: "Company KR",
-  company_cn: "Company CN",
-  benchmark: "Model Rankings",
-};
-
 const SOURCE_CATEGORY_TITLE_LABELS: Record<string, string> = {
   papers: "Paper",
   models: "Model",
@@ -48,7 +38,6 @@ const SOURCE_DISPLAY_NAMES: Record<string, string> = {
   groq_newsroom: "Groq News",
   hf_blog: "Hugging Face Blog",
   hf_daily_papers: "Hugging Face Daily Papers",
-  hf_models_likes: "Hugging Face Top Liked Models",
   hf_models_new: "Hugging Face New Models",
   hf_trending_models: "Hugging Face Trending Models",
   hn_topstories: "Hacker News Top Stories",
@@ -83,37 +72,6 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   release_note: "Release Note",
   benchmark: "Rank Row",
   benchmark_panel: "Rank Board",
-};
-
-const TEXT_SCOPE_LABELS: Record<string, string> = {
-  full_text: "Full Text",
-  abstract: "Abstract",
-  excerpt: "Excerpt",
-  metadata_only: "Metadata Only",
-  metric_summary: "Metric Readout",
-  generated_panel: "Generated Trace",
-  empty: "Empty",
-};
-
-const TIME_SEMANTICS_LABELS: Record<string, string> = {
-  published: "Published",
-  updated: "Updated",
-  created: "Created",
-  snapshot: "Snapshot",
-  submission: "Submission",
-};
-
-const TIMESTAMP_KIND_LABELS: Record<string, string> = {
-  published: "Published",
-  updated: "Updated",
-  created: "Created",
-  snapshot: "Snapshot",
-  submission: "Submission",
-};
-
-const BENCHMARK_KIND_LABELS: Record<string, string> = {
-  leaderboard_panel: "Rank Board",
-  leaderboard_model_row: "Rank Row",
 };
 
 export const EMPTY_ARENA_BOARDS: readonly SessionArenaBoard[] = [];
@@ -279,10 +237,6 @@ function formatMappedValue(
   return labels[normalized] ?? humanizeCode(normalized);
 }
 
-export function formatSourceCategory(value: string | null | undefined) {
-  return formatMappedValue(value, SOURCE_CATEGORY_LABELS);
-}
-
 export function formatSourceCategoryTitle(value: string | null | undefined) {
   return formatMappedValue(value, SOURCE_CATEGORY_TITLE_LABELS);
 }
@@ -322,22 +276,6 @@ export function formatDisplayDate(value: string | null | undefined) {
 
 export function formatDocType(value: string | null | undefined) {
   return formatMappedValue(value, DOC_TYPE_LABELS);
-}
-
-export function formatTextScope(value: string | null | undefined) {
-  return formatMappedValue(value, TEXT_SCOPE_LABELS);
-}
-
-export function formatTimeSemantics(value: string | null | undefined) {
-  return formatMappedValue(value, TIME_SEMANTICS_LABELS);
-}
-
-export function formatTimestampKind(value: string | null | undefined) {
-  return formatMappedValue(value, TIMESTAMP_KIND_LABELS);
-}
-
-export function formatBenchmarkKind(value: string | null | undefined) {
-  return formatMappedValue(value, BENCHMARK_KIND_LABELS);
 }
 
 function toNumber(value: unknown) {
@@ -451,16 +389,6 @@ export function formatDetailValue(value: unknown): string {
   return compactText(JSON.stringify(value), 180) || "-";
 }
 
-export function toRenderableStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((entry) => formatDetailValue(entry))
-    .filter((entry) => entry !== "-");
-}
-
 export function buildLeaderboardEntries(
   board: SessionArenaBoard | null,
 ): SessionArenaBoardEntry[] {
@@ -473,20 +401,4 @@ export function buildLeaderboardEntries(
   }
 
   return board.topModel.modelName ? [board.topModel] : [];
-}
-
-export function loadingStepClasses(
-  status: JobProgressSnapshot["steps"][number]["status"],
-) {
-  switch (status) {
-    case "active":
-      return "border-orbit-accent bg-orbit-panel text-orbit-text";
-    case "complete":
-      return "border-orbit-border-strong bg-orbit-bg text-orbit-accent";
-    case "error":
-      return "border-red-500/40 bg-red-950/20 text-red-200";
-    case "pending":
-    default:
-      return "border-orbit-border bg-orbit-bg text-orbit-muted";
-  }
 }

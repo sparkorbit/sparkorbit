@@ -9,6 +9,7 @@ import {
 
 import {
   ConsoleHeader,
+  GitHubStarPrompt,
   SettingsModal,
 } from "./components/app/AppChrome";
 import { FullscreenLoading } from "./components/app/FullscreenLoading";
@@ -63,6 +64,9 @@ import type {
 
 const NOON_AUTO_RELOAD_STORAGE_KEY = "orbit-noon-auto-reload-date";
 const NOON_AUTO_RELOAD_HOUR = 12;
+const GITHUB_STAR_PROMPT_STORAGE_KEY = "sparkorbit-github-star-prompt-v1";
+const GITHUB_STAR_PROMPT_DELAY_MS = 60 * 1000;
+const GITHUB_REPO_URL = "https://github.com/sparkorbit/sparkorbit";
 
 function buildLocalDateKey(date: Date) {
   const year = date.getFullYear();
@@ -94,6 +98,30 @@ function writeNoonAutoReloadDate(dateKey: string) {
 
   try {
     window.localStorage.setItem(NOON_AUTO_RELOAD_STORAGE_KEY, dateKey);
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function readGitHubStarPromptState() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    return window.localStorage.getItem(GITHUB_STAR_PROMPT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeGitHubStarPromptState(value: "accepted" | "dismissed") {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(GITHUB_STAR_PROMPT_STORAGE_KEY, value);
   } catch {
     // ignore storage failures
   }
@@ -154,6 +182,24 @@ function buildFeedSourceSummary(feed: DashboardResponse["feeds"][number]) {
     uniqueSources.length > 2 ? ` +${uniqueSources.length - 2}` : "";
 
   return `${visibleSources}${extraCount}`;
+}
+
+function buildInfoPanelMeta(feed: DashboardResponse["feeds"][number]) {
+  const count = feed.items.length;
+  return `${count} item${count === 1 ? "" : "s"}`;
+}
+
+function buildInfoPanelDetail(feed: DashboardResponse["feeds"][number]) {
+  if (
+    feed.eyebrow === "Paper" ||
+    feed.eyebrow === "Community" ||
+    feed.eyebrow === "Company" ||
+    feed.eyebrow === "Company KR" ||
+    feed.eyebrow === "Company CN"
+  ) {
+    return feed.sourceNote || buildFeedSourceSummary(feed) || undefined;
+  }
+  return undefined;
 }
 
 function buildJobErrorSnapshot(
@@ -347,6 +393,9 @@ function App() {
     PayloadDebugSnapshot[]
   >([]);
   const [isPayloadDebugOpen, setIsPayloadDebugOpen] = useState(false);
+  const [hasStarPromptDelayElapsed, setHasStarPromptDelayElapsed] =
+    useState(false);
+  const [isGitHubStarPromptOpen, setIsGitHubStarPromptOpen] = useState(false);
   const [activeJob, setActiveJob] = useState<ActiveJobResponse | null>(null);
   const [jobProgress, setJobProgress] = useState<JobProgressSnapshot | null>(
     null,
@@ -544,6 +593,20 @@ function App() {
       setIsPayloadDebugOpen(false);
     }
   }, [uiSettings.payloadDebugEnabled]);
+
+  useEffect(() => {
+    if (readGitHubStarPromptState()) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      setHasStarPromptDelayElapsed(true);
+    }, GITHUB_STAR_PROMPT_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, []);
 
   useEffect(() => {
     currentDashboardSessionIdRef.current = dashboard.session.sessionId;
@@ -837,7 +900,6 @@ function App() {
     };
   }, [dashboard.status, isLoadingDashboard, activeJob]);
 
-  const sessionLabel = dashboard.session.sessionDate;
   const hasUsableDashboard =
     dashboard.session.sessionId !== EMPTY_DASHBOARD.session.sessionId;
   const loadingSnapshot = normalizeLoadingSnapshot(
@@ -855,52 +917,14 @@ function App() {
   );
 
   const infoItems = dashboard.feeds
-    .filter(
-      (feed) =>
-        feed.eyebrow !== "Benchmark" &&
-        feed.id !== "hf_models_new" &&
-        feed.id !== "hf_models_likes",
-    )
+    .filter((feed) => feed.eyebrow !== "Benchmark")
     .flatMap((feed) => {
-      const parseMetric = (meta: string, key: string) => {
-        const match = meta.match(new RegExp(`${key}\\s+([\\d,]+)`));
-        return match ? Number(match[1].replace(/,/g, "")) : 0;
-      };
-
-      if (feed.id.startsWith("hn_")) {
-        const sorted: FeedPanel = {
-          ...feed,
-          items: [...feed.items].sort((a, b) => {
-            const dateA = a.timestamp ?? "";
-            const dateB = b.timestamp ?? "";
-            const dayA = dateA.slice(0, 10);
-            const dayB = dateB.slice(0, 10);
-            if (dayA !== dayB) return dayB.localeCompare(dayA);
-            const scoreA = parseMetric(a.engagementLabel ?? a.meta, "score");
-            const scoreB = parseMetric(b.engagementLabel ?? b.meta, "score");
-            return scoreB - scoreA;
-          }),
-        };
-        return [{
-          id: sorted.id,
-          label: sorted.eyebrow,
-          title: sorted.title,
-          meta: "",
-          detail: buildFeedSourceSummary(sorted) ?? undefined,
-          accentColor: categoryAccentColor(sorted.eyebrow),
-          node: (
-            <SourcePanel
-              panelData={sorted}
-              selectedDocumentId={selectedDocumentId}
-              onSelectItem={handleSelectDocument}
-            />
-          ),
-          defaultRowSpan: 1,
-          defaultColSpan: 1,
-        }];
-      }
-
       if (feed.id === "hf_trending_models") {
+        const parseNoteMetric = (note: string, key: string) => {
+          const match = note.match(new RegExp(`${key}\\s+([\\d,]+)`));
+          return match ? Number(match[1].replace(/,/g, "")) : 0;
+        };
+
         const byLikes: FeedPanel = {
           ...feed,
           id: "hf_trending_by_likes",
@@ -908,11 +932,12 @@ function App() {
           items: [...feed.items]
             .sort(
               (a, b) =>
-                parseMetric(b.meta, "♥") - parseMetric(a.meta, "♥"),
+                parseNoteMetric(b.note, "♥") - parseNoteMetric(a.note, "♥"),
             )
             .map((item) => ({
               ...item,
-              engagementLabel: `liked ${parseMetric(item.meta, "♥").toLocaleString()}`,
+              timestamp: null,
+              engagementLabel: `liked ${parseNoteMetric(item.note, "♥").toLocaleString()}`,
             })),
         };
 
@@ -923,12 +948,13 @@ function App() {
           items: [...feed.items]
             .sort(
               (a, b) =>
-                parseMetric(b.meta, "downloads") -
-                parseMetric(a.meta, "downloads"),
+                parseNoteMetric(b.note, "↓") -
+                parseNoteMetric(a.note, "↓"),
             )
             .map((item) => ({
               ...item,
-              engagementLabel: `downloads ${parseMetric(item.meta, "downloads").toLocaleString()}`,
+              timestamp: null,
+              engagementLabel: `downloads ${parseNoteMetric(item.note, "↓").toLocaleString()}`,
             })),
         };
 
@@ -936,8 +962,8 @@ function App() {
           id: splitFeed.id,
           label: splitFeed.eyebrow,
           title: splitFeed.title,
-          meta: "",
-          detail: buildFeedSourceSummary(splitFeed) ?? undefined,
+          meta: buildInfoPanelMeta(splitFeed),
+          detail: buildInfoPanelDetail(splitFeed),
           accentColor: categoryAccentColor(splitFeed.eyebrow),
           node: (
             <SourcePanel
@@ -951,17 +977,31 @@ function App() {
         }));
       }
 
+      const isEngagementSorted =
+        feed.id === "github_curated_repos" ||
+        feed.id.startsWith("reddit_");
+
+      const resolvedFeed = isEngagementSorted
+        ? {
+            ...feed,
+            items: feed.items.map((item) => ({
+              ...item,
+              timestamp: null,
+            })),
+          }
+        : feed;
+
       return [
         {
-          id: feed.id,
-          label: feed.eyebrow,
-          title: feed.title,
-          meta: "",
-          detail: buildFeedSourceSummary(feed) ?? undefined,
-          accentColor: categoryAccentColor(feed.eyebrow),
+          id: resolvedFeed.id,
+          label: resolvedFeed.eyebrow,
+          title: resolvedFeed.title,
+          meta: buildInfoPanelMeta(resolvedFeed),
+          detail: buildInfoPanelDetail(resolvedFeed),
+          accentColor: categoryAccentColor(resolvedFeed.eyebrow),
           node: (
             <SourcePanel
-              panelData={feed}
+              panelData={resolvedFeed}
               selectedDocumentId={selectedDocumentId}
               onSelectItem={handleSelectDocument}
             />
@@ -970,6 +1010,16 @@ function App() {
           defaultColSpan: 1,
         },
       ];
+    })
+    .sort((a, b) => {
+      // Ensure HF Trending Likes/Downloads always come before other Model panels
+      const priorityIds = ["hf_trending_by_likes", "hf_trending_by_downloads"];
+      const aIdx = priorityIds.indexOf(a.id);
+      const bIdx = priorityIds.indexOf(b.id);
+      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+      if (aIdx !== -1) return -1;
+      if (bIdx !== -1) return 1;
+      return 0;
     });
 
   const summaryPanel = (
@@ -1053,7 +1103,6 @@ function App() {
 
   const mainPanel = (
     <LeaderboardPanel
-      sessionLabel={sessionLabel}
       arenaBoards={arenaBoards}
       isLoadingLeaderboards={isLoadingLeaderboards}
       leaderboardError={leaderboardError}
@@ -1081,6 +1130,40 @@ function App() {
     />
   ) : null;
 
+  useEffect(() => {
+    if (
+      !hasStarPromptDelayElapsed ||
+      isGitHubStarPromptOpen ||
+      shouldShowFullscreenLoading ||
+      isSettingsOpen ||
+      readGitHubStarPromptState()
+    ) {
+      return;
+    }
+
+    setIsGitHubStarPromptOpen(true);
+  }, [
+    hasStarPromptDelayElapsed,
+    isGitHubStarPromptOpen,
+    isSettingsOpen,
+    shouldShowFullscreenLoading,
+  ]);
+
+  function handleAcceptGitHubStarPrompt() {
+    writeGitHubStarPromptState("accepted");
+    setIsGitHubStarPromptOpen(false);
+    window.open(GITHUB_REPO_URL, "_blank", "noopener,noreferrer");
+  }
+
+  function handleLaterGitHubStarPrompt() {
+    setIsGitHubStarPromptOpen(false);
+  }
+
+  function handleDismissGitHubStarPrompt() {
+    writeGitHubStarPromptState("dismissed");
+    setIsGitHubStarPromptOpen(false);
+  }
+
   return (
     <div
       data-orbit-motion={uiSettings.motionEnabled ? "on" : "off"}
@@ -1091,6 +1174,7 @@ function App() {
       <ConsoleHeader
         title={dashboard.brand.name}
         subtitle={dashboard.brand.tagline}
+        repoUrl={GITHUB_REPO_URL}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
@@ -1112,12 +1196,15 @@ function App() {
 
       <SettingsModal
         isOpen={isSettingsOpen}
-        settings={uiSettings}
         briefingStatus={dashboard?.summary?.briefing_status}
         onClose={() => setIsSettingsOpen(false)}
-        onUpdateSettings={setUiSettings}
-        onResetWorkspace={resetWorkspaceLayout}
         onRestoreDefaults={restoreDefaultSettings}
+      />
+      <GitHubStarPrompt
+        isOpen={isGitHubStarPromptOpen}
+        onAccept={handleAcceptGitHubStarPrompt}
+        onLater={handleLaterGitHubStarPrompt}
+        onDismissForever={handleDismissGitHubStarPrompt}
       />
       {payloadDebugOverlay}
     </div>

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PANEL_WORKSPACE_STORAGE } from "./panelWorkspaceStorage";
@@ -12,7 +12,6 @@ const MIN_ROW_SPAN = 1;
 const DEFAULT_ROW_SPAN = 1;
 const DEFAULT_COL_SPAN = 1;
 const MAX_ROW_SPAN = 8;
-const WINDOW_BAR_HEIGHT_PX = 28;
 
 type PanelWorkspaceItem = {
   id: string;
@@ -65,15 +64,7 @@ type PanelPlacement = {
   rowSpan: number;
 };
 
-type DragState = {
-  id: string;
-  pointerX: number;
-  pointerY: number;
-  offsetX: number;
-  offsetY: number;
-  width: number;
-  height: number;
-};
+type GroupDropPlacement = "before" | "after";
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -100,35 +91,6 @@ function parseTaggedPanelTitle(title: string | undefined, label?: string) {
 function parseTrackSize(value: string) {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function swapItems(order: string[], activeId: string, targetId: string) {
-  const next = [...order];
-  const fromIndex = next.indexOf(activeId);
-  const toIndex = next.indexOf(targetId);
-
-  if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
-    return order;
-  }
-
-  [next[fromIndex], next[toIndex]] = [next[toIndex], next[fromIndex]];
-  return next;
-}
-
-function moveItemBefore(order: string[], activeId: string, targetId: string) {
-  if (activeId === targetId) {
-    return order;
-  }
-
-  const next = order.filter((id) => id !== activeId);
-  const targetIndex = next.indexOf(targetId);
-
-  if (targetIndex === -1) {
-    return order;
-  }
-
-  next.splice(targetIndex, 0, activeId);
-  return next;
 }
 
 function loadOrder(ids: string[], storageKey: string) {
@@ -355,11 +317,10 @@ function InfoPanelVisibilityModal({
   hiddenItemIds,
   orderedItemIds,
   onClose,
-  onToggleItem,
-  onReorderItem,
   onShowGroup,
   onHideGroup,
   onShowOnlyGroup,
+  onReorderGroup,
   onShowAll,
   onHideAll,
   onApply,
@@ -369,19 +330,33 @@ function InfoPanelVisibilityModal({
   hiddenItemIds: string[];
   orderedItemIds: string[];
   onClose: () => void;
-  onToggleItem: (itemId: string) => void;
-  onReorderItem: (activeId: string, targetId: string) => void;
   onShowGroup: (groupLabel: string) => void;
   onHideGroup: (groupLabel: string) => void;
   onShowOnlyGroup: (groupLabel: string) => void;
+  onReorderGroup: (
+    activeGroupLabel: string,
+    targetGroupLabel: string,
+    placement: GroupDropPlacement,
+  ) => void;
   onShowAll: () => void;
   onHideAll: () => void;
   onApply: () => void;
 }) {
-  const hiddenItemIdSet = new Set(hiddenItemIds);
+  const hiddenItemIdSet = useMemo(
+    () => new Set(hiddenItemIds),
+    [hiddenItemIds],
+  );
   const visibleCount = items.length - hiddenItemIds.length;
-  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
-  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [draggedGroupLabel, setDraggedGroupLabel] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    label: string;
+    placement: GroupDropPlacement;
+  } | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const dragTargetRef = useRef<{
+    label: string;
+    placement: GroupDropPlacement;
+  } | null>(null);
   const orderedItems = useMemo(() => {
     const itemMap = new Map(items.map((item) => [item.id, item]));
     const ordered = orderedItemIds
@@ -411,6 +386,133 @@ function InfoPanelVisibilityModal({
       items: grouped,
     }));
   }, [orderedItems]);
+  const activeGroupLabel = useMemo(() => {
+    if (visibleCount <= 0 || visibleCount >= items.length) {
+      return null;
+    }
+
+    const visibleGroups = groupedItems.filter((group) =>
+      group.items.some((item) => !hiddenItemIdSet.has(item.id)),
+    );
+
+    return visibleGroups.length === 1 ? visibleGroups[0].label : null;
+  }, [groupedItems, hiddenItemIdSet, items.length, visibleCount]);
+
+  function resetGroupDragState() {
+    dragTargetRef.current = null;
+    setDraggedGroupLabel(null);
+    setDropTarget(null);
+  }
+
+  function stopGroupDrag() {
+    dragCleanupRef.current?.();
+    dragCleanupRef.current = null;
+    resetGroupDragState();
+  }
+
+  function resolveHoveredGroupTarget(clientX: number, clientY: number) {
+    const hovered = document.elementFromPoint(clientX, clientY);
+    if (!(hovered instanceof HTMLElement)) {
+      return null;
+    }
+
+    const chip = hovered.closest<HTMLElement>("[data-group-chip-label]");
+    const label = chip?.dataset.groupChipLabel?.trim();
+    if (!label || !chip) {
+      return null;
+    }
+
+    const rect = chip.getBoundingClientRect();
+    const placement: GroupDropPlacement =
+      clientX < rect.left + rect.width / 2 ? "before" : "after";
+
+    return { label, placement };
+  }
+
+  function beginGroupDrag(
+    groupLabel: string,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    stopGroupDrag();
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const moveThresholdPx = 6;
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    let hasMoved = false;
+
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "grabbing";
+    setDraggedGroupLabel(groupLabel);
+
+    const updateDropTarget = (clientX: number, clientY: number) => {
+      const nextTarget = resolveHoveredGroupTarget(clientX, clientY);
+      const resolvedTarget =
+        nextTarget && nextTarget.label !== groupLabel ? nextTarget : null;
+      dragTargetRef.current = resolvedTarget;
+      setDropTarget(resolvedTarget);
+    };
+
+    const release = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerCancel);
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      if (dragCleanupRef.current === release) {
+        dragCleanupRef.current = null;
+      }
+    };
+
+    const finish = (commit: boolean) => {
+      const target = dragTargetRef.current;
+      release();
+      resetGroupDragState();
+
+      if (
+        commit &&
+        hasMoved &&
+        target &&
+        target.label !== groupLabel
+      ) {
+        onReorderGroup(groupLabel, target.label, target.placement);
+      }
+    };
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      if (!hasMoved) {
+        const deltaX = moveEvent.clientX - startX;
+        const deltaY = moveEvent.clientY - startY;
+        if (Math.hypot(deltaX, deltaY) < moveThresholdPx) {
+          return;
+        }
+        hasMoved = true;
+      }
+
+      updateDropTarget(moveEvent.clientX, moveEvent.clientY);
+    };
+
+    const onPointerUp = (upEvent: PointerEvent) => {
+      if (hasMoved) {
+        updateDropTarget(upEvent.clientX, upEvent.clientY);
+      }
+      finish(true);
+    };
+
+    const onPointerCancel = () => finish(false);
+
+    dragCleanupRef.current = release;
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerCancel);
+  }
 
   useEffect(() => {
     if (!isOpen) {
@@ -434,11 +536,14 @@ function InfoPanelVisibilityModal({
   }, [isOpen, onClose]);
 
   useEffect(() => {
-    if (!isOpen) {
-      setDraggedItemId(null);
-      setDropTargetId(null);
+    if (isOpen) {
+      return;
     }
+
+    stopGroupDrag();
   }, [isOpen]);
+
+  useEffect(() => () => stopGroupDrag(), []);
 
   if (!isOpen) {
     return null;
@@ -505,10 +610,16 @@ function InfoPanelVisibilityModal({
                   quick groups
                 </p>
                 <p className="mt-1 text-[0.7rem] leading-[1.45] text-orbit-muted">
-                  Focus on one category or reopen one group at once.
+                  Click a label to focus on one category. Drag the handle to reorder groups.
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {groupedItems.map((group) => {
+                    const isActive = activeGroupLabel === group.label;
+                    const isDragged = draggedGroupLabel === group.label;
+                    const targetPlacement =
+                      dropTarget?.label === group.label && !isDragged
+                        ? dropTarget.placement
+                        : null;
                     const groupAccent =
                       group.accentColor || "var(--color-orbit-accent-dim)";
 
@@ -516,31 +627,37 @@ function InfoPanelVisibilityModal({
                       <button
                         key={group.label}
                         type="button"
+                        data-group-chip-label={group.label}
                         className={[
-                          "border px-2 py-1 font-mono text-[0.54rem] font-semibold uppercase tracking-[0.12em] transition-colors duration-150",
-                          "hover:brightness-110",
+                          "touch-none select-none border px-2 py-1 font-mono text-[0.54rem] font-semibold uppercase tracking-[0.12em] transition-colors duration-150 cursor-grab active:cursor-grabbing",
+                          isDragged ? "opacity-50" : "hover:brightness-110",
+                          targetPlacement === "before"
+                            ? "border-l-orbit-accent border-l-2"
+                            : targetPlacement === "after"
+                              ? "border-r-orbit-accent border-r-2"
+                              : "",
                         ].join(" ")}
-                        style={{
-                          borderColor: `color-mix(in srgb, ${groupAccent} 38%, var(--color-orbit-border))`,
-                          backgroundColor: `color-mix(in srgb, ${groupAccent} 12%, var(--color-orbit-panel))`,
-                          color: groupAccent,
-                        }}
+                        style={
+                          isActive
+                            ? {
+                                borderColor: targetPlacement ? undefined : `color-mix(in srgb, ${groupAccent} 60%, var(--color-orbit-border))`,
+                                backgroundColor: `color-mix(in srgb, ${groupAccent} 18%, var(--color-orbit-panel))`,
+                                color: groupAccent,
+                              }
+                            : {
+                                borderColor: targetPlacement ? undefined : "var(--color-orbit-border)",
+                                backgroundColor: "var(--color-orbit-panel)",
+                                color: "var(--color-orbit-muted)",
+                              }
+                        }
                         onClick={() => onShowOnlyGroup(group.label)}
+                        onPointerDown={(event) => beginGroupDrag(group.label, event)}
                       >
                         {group.label}
                       </button>
                     );
                   })}
                 </div>
-              </section>
-
-              <section className="border border-orbit-border bg-orbit-bg p-2">
-                <p className="font-mono text-[0.52rem] uppercase tracking-[0.14em] text-orbit-accent">
-                  priority
-                </p>
-                <p className="mt-1 text-[0.7rem] leading-[1.45] text-orbit-muted">
-                  Drag the handle on each panel card to control which source shows first.
-                </p>
               </section>
 
               {groupedItems.map((group) => {
@@ -605,7 +722,7 @@ function InfoPanelVisibilityModal({
                       </div>
                     </div>
 
-                    <div className="grid gap-1 p-2 sm:grid-cols-2">
+                    <div className="flex flex-wrap gap-1.5 p-2">
                       {group.items.map((item) => {
                         const resolvedTitle = item.title ?? item.label ?? item.id;
                         const parsedTitle = parseTaggedPanelTitle(
@@ -619,87 +736,17 @@ function InfoPanelVisibilityModal({
                         const isHidden = hiddenItemIdSet.has(item.id);
 
                         return (
-                          <article
+                          <span
                             key={item.id}
                             className={[
-                              "group min-w-0 border p-2 transition-colors duration-150",
-                              dropTargetId === item.id && draggedItemId !== item.id
-                                ? "border-orbit-accent"
-                                : "",
+                              "inline-block border px-2 py-1 font-mono text-[0.52rem] tracking-[0.06em]",
                               isHidden
-                                ? "border-orbit-border bg-orbit-bg hover:border-orbit-accent/70 hover:bg-orbit-bg-elevated"
-                                : "border-orbit-accent/70 bg-orbit-panel",
+                                ? "border-orbit-border text-orbit-muted line-through opacity-50"
+                                : "border-orbit-border-strong text-orbit-text",
                             ].join(" ")}
-                            onDragOver={(event) => {
-                              event.preventDefault();
-                              if (draggedItemId && draggedItemId !== item.id) {
-                                setDropTargetId(item.id);
-                              }
-                            }}
-                            onDragLeave={() => {
-                              if (dropTargetId === item.id) {
-                                setDropTargetId(null);
-                              }
-                            }}
-                            onDrop={(event) => {
-                              event.preventDefault();
-                              if (draggedItemId && draggedItemId !== item.id) {
-                                onReorderItem(draggedItemId, item.id);
-                              }
-                              setDraggedItemId(null);
-                              setDropTargetId(null);
-                            }}
                           >
-                            <div className="flex items-start gap-2">
-                              <button
-                                type="button"
-                                draggable
-                                className={[
-                                  "mt-0.5 shrink-0 border px-1.5 py-1 font-mono text-[0.48rem] uppercase tracking-[0.16em] transition-colors duration-150",
-                                  draggedItemId === item.id
-                                    ? "border-orbit-accent text-orbit-accent"
-                                    : "border-orbit-border text-orbit-muted hover:border-orbit-accent hover:text-orbit-accent",
-                                ].join(" ")}
-                                title="Drag to change priority"
-                                aria-label={`Drag to reorder ${displayTitle}`}
-                                onDragStart={(event) => {
-                                  event.dataTransfer.effectAllowed = "move";
-                                  event.dataTransfer.setData("text/plain", item.id);
-                                  setDraggedItemId(item.id);
-                                  setDropTargetId(item.id);
-                                }}
-                                onDragEnd={() => {
-                                  setDraggedItemId(null);
-                                  setDropTargetId(null);
-                                }}
-                              >
-                                drag
-                              </button>
-
-                              <button
-                                type="button"
-                                aria-pressed={!isHidden}
-                                className="min-w-0 flex-1 text-left"
-                                onClick={() => onToggleItem(item.id)}
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0 flex-1">
-                                    <p className="font-mono text-[0.48rem] uppercase tracking-[0.14em] text-orbit-muted">
-                                      priority {orderedItemIds.indexOf(item.id) + 1}
-                                    </p>
-                                    <h4 className="orbit-wrap-anywhere mt-1 min-w-0 font-display text-[0.76rem] font-semibold leading-[1.32] text-orbit-text">
-                                      {displayTitle}
-                                    </h4>
-                                  </div>
-                                  {item.meta ? (
-                                    <span className="shrink-0 font-mono text-[0.5rem] uppercase tracking-[0.1em] text-orbit-muted">
-                                      {item.meta}
-                                    </span>
-                                  ) : null}
-                                </div>
-                              </button>
-                            </div>
-                          </article>
+                            {displayTitle}
+                          </span>
                         );
                       })}
                     </div>
@@ -763,16 +810,11 @@ function PanelBoard({
   allowColumnResize = true,
   allowRowResize = true,
   rowHeightPx = DEFAULT_GRID_ROW_HEIGHT_PX,
-  onRemoveItem,
 }: PanelBoardProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
-  const dragCleanupRef = useRef<(() => void) | null>(null);
-  const swapTargetIdRef = useRef<string | null>(null);
   const ids = useMemo(() => items.map((item) => item.id), [items]);
-  const [order, setOrder] = useState(() => loadOrder(ids, orderStorageKey));
+  const [order] = useState(() => loadOrder(ids, orderStorageKey));
   const [sizes, setSizes] = useState(() => loadSizes(items, sizeStorageKey));
-  const [dragState, setDragState] = useState<DragState | null>(null);
-  const [swapTargetId, setSwapTargetId] = useState<string | null>(null);
   const [columnCount, setColumnCount] = useState(1);
   const [rowStepPx, setRowStepPx] = useState(rowHeightPx);
 
@@ -821,14 +863,6 @@ function PanelBoard({
     };
   }, [items.length, maxDynamicColumns, minColumnWidthPx, rowHeightPx]);
 
-  useEffect(() => {
-    return () => {
-      dragCleanupRef.current?.();
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    };
-  }, []);
-
   const syncedOrder = useMemo(() => {
     const valid = order.filter((id) => ids.includes(id));
     const missing = ids.filter((id) => !valid.includes(id));
@@ -857,22 +891,6 @@ function PanelBoard({
     window.localStorage.setItem(sizeStorageKey, JSON.stringify(syncedSizes));
   }, [sizeStorageKey, syncedSizes]);
 
-  useEffect(() => {
-    if (dragState == null) {
-      return;
-    }
-
-    const previousUserSelect = document.body.style.userSelect;
-    const previousCursor = document.body.style.cursor;
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "grabbing";
-
-    return () => {
-      document.body.style.userSelect = previousUserSelect;
-      document.body.style.cursor = previousCursor;
-    };
-  }, [dragState]);
-
   const orderedItems = syncedOrder
     .map((id) => items.find((item) => item.id === id))
     .filter((item): item is PanelWorkspaceItem => Boolean(item));
@@ -880,103 +898,6 @@ function PanelBoard({
     () => computePlacements(orderedItems, syncedSizes, columnCount),
     [columnCount, orderedItems, syncedSizes],
   );
-  const activeDragId = dragState?.id ?? null;
-  const draggedItem = activeDragId
-    ? (orderedItems.find((item) => item.id === activeDragId) ?? null)
-    : null;
-
-  function updateSwapTarget(nextTargetId: string | null) {
-    swapTargetIdRef.current = nextTargetId;
-    setSwapTargetId(nextTargetId);
-  }
-
-  function beginPanelDrag(
-    event: React.PointerEvent<HTMLButtonElement>,
-    itemId: string,
-  ) {
-    if (event.button !== 0) {
-      return;
-    }
-
-    const panelElement = event.currentTarget.closest("[data-panel-item-id]");
-
-    if (!(panelElement instanceof HTMLElement)) {
-      return;
-    }
-
-    dragCleanupRef.current?.();
-    event.preventDefault();
-
-    const rect = panelElement.getBoundingClientRect();
-    const cleanupListeners = () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("blur", onCancel);
-      window.removeEventListener("keydown", onKeyDown);
-      dragCleanupRef.current = null;
-    };
-
-    const finishDrag = (commitSwap: boolean) => {
-      const nextTargetId = commitSwap ? swapTargetIdRef.current : null;
-
-      cleanupListeners();
-      setDragState(null);
-      updateSwapTarget(null);
-
-      if (commitSwap && nextTargetId && nextTargetId !== itemId) {
-        setOrder((current) => swapItems(current, itemId, nextTargetId));
-      }
-    };
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      setDragState((current) =>
-        current?.id === itemId
-          ? {
-              ...current,
-              pointerX: moveEvent.clientX,
-              pointerY: moveEvent.clientY,
-            }
-          : current,
-      );
-
-      const hoverElement = document.elementFromPoint(
-        moveEvent.clientX,
-        moveEvent.clientY,
-      );
-      const hoveredPanel = hoverElement?.closest("[data-panel-item-id]");
-      const hoveredId =
-        hoveredPanel instanceof HTMLElement
-          ? (hoveredPanel.dataset.panelItemId ?? null)
-          : null;
-
-      updateSwapTarget(hoveredId && hoveredId !== itemId ? hoveredId : null);
-    };
-
-    const onPointerUp = () => finishDrag(true);
-    const onCancel = () => finishDrag(false);
-    const onKeyDown = (keyEvent: KeyboardEvent) => {
-      if (keyEvent.key === "Escape") {
-        finishDrag(false);
-      }
-    };
-
-    dragCleanupRef.current = cleanupListeners;
-    setDragState({
-      id: itemId,
-      pointerX: event.clientX,
-      pointerY: event.clientY,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-      width: rect.width,
-      height: rect.height,
-    });
-    updateSwapTarget(null);
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("blur", onCancel);
-    window.addEventListener("keydown", onKeyDown);
-  }
-
   if (items.length === 0) {
     return (
       <EmptyBoardState title={emptyTitle} description={emptyDescription} />
@@ -1019,10 +940,7 @@ function PanelBoard({
               <div
                 key={item.id}
                 data-panel-item-id={item.id}
-                className={[
-                  "group relative min-h-0 min-w-0 overflow-visible transition-colors duration-150",
-                  activeDragId === item.id ? "z-30" : "",
-                ].join(" ")}
+                className="group relative min-h-0 min-w-0 overflow-visible transition-colors duration-150"
                 style={{
                   gridColumn: `${colStart} / span ${resolvedColSpan}`,
                   gridRow: `${rowStart} / span ${resolvedRowSpan}`,
@@ -1031,10 +949,7 @@ function PanelBoard({
                 <div
                   className={[
                     "h-full min-h-0 border transition-colors duration-150",
-                    swapTargetId === item.id
-                      ? "border-orbit-accent"
-                      : "border-orbit-border group-hover:border-orbit-border-strong",
-                    activeDragId === item.id ? "opacity-25" : "",
+                    "border-orbit-border group-hover:border-orbit-border-strong",
                   ].join(" ")}
                   style={{
                     backgroundColor: item.accentColor
@@ -1044,117 +959,40 @@ function PanelBoard({
                 >
                   <div className="flex h-full min-h-0 flex-col">
                     <div
-                      className={[
-                        "flex h-10 min-w-0 items-stretch justify-between border-b transition-colors duration-150",
-                        activeDragId === item.id || swapTargetId === item.id
-                          ? "border-orbit-accent"
-                          : "border-orbit-border group-hover:border-orbit-border-strong",
-                      ].join(" ")}
+                      className="flex h-8 min-w-0 items-center border-b border-orbit-border px-3 transition-colors duration-150 group-hover:border-orbit-border-strong"
                       style={{
                         backgroundColor: item.accentColor
                           ? `color-mix(in srgb, ${item.accentColor} 18%, var(--color-orbit-bg))`
                           : "var(--color-orbit-bg)",
                       }}
                     >
-                      <button
-                        type="button"
-                        className="flex min-w-0 flex-1 touch-none items-center justify-between px-3 text-left"
-                        onPointerDown={(event) =>
-                          beginPanelDrag(event, item.id)
-                        }
-                        title="Drag to reorder"
-                      >
-                        <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                          {parsedTitle.tag ? (
-                            <span
-                              className="shrink-0 border px-2 py-1 font-mono text-[0.52rem] font-semibold uppercase tracking-[0.14em]"
-                              style={{
-                                borderColor:
-                                  activeDragId === item.id ||
-                                  swapTargetId === item.id
-                                    ? "var(--color-orbit-accent)"
-                                    : item.accentColor
-                                      ? `color-mix(in srgb, ${item.accentColor} 55%, var(--color-orbit-border))`
-                                      : "var(--color-orbit-border)",
-                                backgroundColor:
-                                  activeDragId === item.id ||
-                                  swapTargetId === item.id
-                                    ? "color-mix(in srgb, var(--color-orbit-accent) 12%, var(--color-orbit-bg))"
-                                    : item.accentColor
-                                      ? `color-mix(in srgb, ${item.accentColor} 12%, var(--color-orbit-bg))`
-                                      : "var(--color-orbit-bg)",
-                                color:
-                                  activeDragId === item.id ||
-                                  swapTargetId === item.id
-                                    ? "var(--color-orbit-accent)"
-                                    : item.accentColor ||
-                                      "var(--color-orbit-accent-dim)",
-                              }}
-                            >
-                              {parsedTitle.tag}
-                            </span>
-                          ) : null}
-                          {displayTitle ? (
-                            <span
-                              className={[
-                                "orbit-token-ellipsis font-display text-[0.88rem] font-semibold tracking-[-0.01em]",
-                                activeDragId === item.id ||
-                                swapTargetId === item.id
-                                  ? "text-orbit-accent"
-                                  : "text-orbit-text",
-                              ].join(" ")}
-                            >
-                              {displayTitle}
-                            </span>
-                          ) : parsedTitle.tag ? null : (
-                            <span className="font-mono text-[0.58rem] uppercase tracking-[0.14em] text-orbit-muted">
-                              untitled
-                            </span>
-                          )}
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          {item.meta ? (
-                            <span className="font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
-                              {item.meta}
-                            </span>
-                          ) : null}
+                      <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+                        {parsedTitle.tag ? (
                           <span
-                            className={[
-                              "font-mono text-[0.5rem] uppercase tracking-widest",
-                              activeDragId === item.id || swapTargetId === item.id
-                                ? "text-orbit-accent"
-                                : "text-orbit-muted",
-                            ].join(" ")}
+                            className="shrink-0 border px-2 py-0.5 font-mono text-[0.56rem] font-bold uppercase tracking-[0.12em]"
+                            style={{
+                              borderColor: item.accentColor
+                                ? `color-mix(in srgb, ${item.accentColor} 55%, var(--color-orbit-border))`
+                                : "var(--color-orbit-border)",
+                              backgroundColor: item.accentColor
+                                ? `color-mix(in srgb, ${item.accentColor} 12%, var(--color-orbit-bg))`
+                                : "var(--color-orbit-bg)",
+                              color: item.accentColor || "var(--color-orbit-accent-dim)",
+                            }}
                           >
-                            {swapTargetId === item.id
-                              ? "drop here"
-                              : activeDragId === item.id
-                                ? "dragging"
-                                : "drag"}
+                            {parsedTitle.tag}
                           </span>
-                        </span>
-                      </button>
-
-                      {onRemoveItem ? (
-                        <button
-                          type="button"
-                          className={[
-                            "flex h-full w-7 shrink-0 items-center justify-center border-l font-mono text-[0.72rem] uppercase transition-colors duration-150",
-                            activeDragId === item.id || swapTargetId === item.id
-                              ? "border-orbit-accent text-orbit-accent"
-                              : "border-orbit-border text-orbit-muted hover:border-orbit-accent hover:bg-orbit-panel hover:text-orbit-accent",
-                          ].join(" ")}
-                          aria-label={`Hide ${item.title ?? item.label ?? item.id}`}
-                          title="Hide this feed"
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onRemoveItem(item.id);
-                          }}
-                        >
-                          x
-                        </button>
-                      ) : null}
+                        ) : null}
+                        {displayTitle ? (
+                          <span className="orbit-token-ellipsis font-display text-[0.74rem] font-semibold tracking-[-0.01em] text-orbit-text">
+                            {displayTitle}
+                          </span>
+                        ) : parsedTitle.tag ? null : (
+                          <span className="font-mono text-[0.52rem] uppercase tracking-[0.14em] text-orbit-muted">
+                            untitled
+                          </span>
+                        )}
+                      </span>
                     </div>
 
                     <div className="min-h-0 flex-1">{item.node}</div>
@@ -1280,75 +1118,26 @@ function PanelBoard({
         </div>
       )}
 
-      {dragState && draggedItem ? (
-        <div
-          className="pointer-events-none fixed left-0 top-0 z-50"
-          style={{
-            width: dragState.width,
-            height: dragState.height,
-            transform: `translate3d(${dragState.pointerX - dragState.offsetX}px, ${dragState.pointerY - dragState.offsetY}px, 0)`,
-          }}
-        >
-          <div className="h-full min-h-0 border border-orbit-accent bg-orbit-bg-elevated">
-            <div className="flex h-full min-h-0 flex-col">
-              <div
-                className="flex items-center justify-between border-b border-orbit-accent bg-orbit-bg px-3"
-                style={{ height: `${WINDOW_BAR_HEIGHT_PX}px` }}
-              >
-                <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-                  <span className="shrink-0 text-[0.86rem] leading-none text-orbit-accent">
-                    ::
-                  </span>
-                  {draggedItem?.title || draggedItem?.label ? (
-                    <span className="orbit-token-ellipsis font-display text-[0.72rem] font-semibold tracking-[-0.01em] text-orbit-accent">
-                      {draggedItem.title ?? draggedItem.label}
-                    </span>
-                  ) : (
-                    <span className="font-mono text-[0.58rem] uppercase tracking-[0.14em] text-orbit-accent">
-                      slot
-                    </span>
-                  )}
-                </span>
-                <span className="shrink-0 font-mono text-[0.5rem] uppercase tracking-widest text-orbit-accent">
-                  {swapTargetId ? "swap" : "routing"}
-                </span>
-              </div>
-              <div className="min-h-0 flex-1 opacity-95">
-                {draggedItem.node}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
 
 function WorkspaceSection({
-  eyebrow,
   title,
   action,
   children,
 }: {
-  eyebrow: string;
   title: string;
   action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel">
-      <div className="border-b border-orbit-border bg-orbit-bg px-3 py-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent">
-            {eyebrow}
-          </p>
-          <div className="flex items-center gap-2">
-            {action}
-          </div>
-        </div>
-        <h2 className="mt-1 font-display text-[0.86rem] font-semibold text-orbit-text">
+      <div className="flex items-center justify-between gap-2 border-b border-orbit-border bg-orbit-bg px-3 py-2">
+        <h2 className="font-display text-[0.86rem] font-semibold text-orbit-text">
           {title}
         </h2>
+        {action}
       </div>
       <div className="min-h-0 flex-1">{children}</div>
     </section>
@@ -1389,8 +1178,11 @@ export function PanelWorkspace({
   unassignedItems = [],
   rowHeightPx = DEFAULT_GRID_ROW_HEIGHT_PX,
 }: PanelWorkspaceProps) {
-  const infoItemIds = infoItems.map((item) => item.id);
-  const infoItemIdSet = new Set(infoItemIds);
+  const infoItemIds = useMemo(
+    () => infoItems.map((item) => item.id),
+    [infoItems],
+  );
+  const infoItemIdSet = useMemo(() => new Set(infoItemIds), [infoItemIds]);
   const [hiddenInfoItemIds, setHiddenInfoItemIds] = useState(() =>
     loadIdList(infoItemIds, PANEL_WORKSPACE_STORAGE.infoHidden),
   );
@@ -1405,7 +1197,10 @@ export function PanelWorkspace({
   const resolvedHiddenInfoItemIds = hiddenInfoItemIds.filter((id) =>
     infoItemIdSet.has(id),
   );
-  const hiddenInfoItemIdSet = new Set(resolvedHiddenInfoItemIds);
+  const hiddenInfoItemIdSet = useMemo(
+    () => new Set(resolvedHiddenInfoItemIds),
+    [resolvedHiddenInfoItemIds],
+  );
   const visibleInfoItems = infoItems.filter(
     (item) => !hiddenInfoItemIdSet.has(item.id),
   );
@@ -1447,30 +1242,45 @@ export function PanelWorkspace({
     setIsInfoPanelPickerOpen(false);
   }
 
-  function toggleDraftInfoItem(itemId: string) {
-    setDraftHiddenInfoItemIds((current) =>
-      current.includes(itemId)
-        ? current.filter((id) => id !== itemId)
-        : [...current, itemId],
-    );
-  }
-
-  function reorderDraftInfoItem(activeId: string, targetId: string) {
-    setDraftInfoItemOrder((current) =>
-      moveItemBefore(
-        current.filter((id) => infoItemIdSet.has(id)).concat(
-          infoItemIds.filter((id) => !current.includes(id)),
-        ),
-        activeId,
-        targetId,
-      ),
-    );
-  }
-
   function resolveGroupItemIds(groupLabel: string) {
     return infoItems
       .filter((item) => (item.label?.trim() || "Other") === groupLabel)
       .map((item) => item.id);
+  }
+
+  function reorderDraftInfoGroup(
+    activeGroupLabel: string,
+    targetGroupLabel: string,
+    placement: GroupDropPlacement,
+  ) {
+    if (activeGroupLabel === targetGroupLabel) {
+      return;
+    }
+
+    const movingIds = new Set(resolveGroupItemIds(activeGroupLabel));
+    const targetIds = new Set(resolveGroupItemIds(targetGroupLabel));
+
+    setDraftInfoItemOrder((current) => {
+      const baseOrder = current
+        .filter((id) => infoItemIdSet.has(id))
+        .concat(infoItemIds.filter((id) => !current.includes(id)));
+      const moving = baseOrder.filter((id) => movingIds.has(id));
+      const remaining = baseOrder.filter((id) => !movingIds.has(id));
+      const targetStartIndex = remaining.findIndex((id) => targetIds.has(id));
+      const targetEndIndex = remaining.reduce(
+        (lastIndex, id, index) => (targetIds.has(id) ? index : lastIndex),
+        -1,
+      );
+
+      if (targetStartIndex === -1 || targetEndIndex === -1 || moving.length === 0) {
+        return baseOrder;
+      }
+
+      const insertionIndex =
+        placement === "after" ? targetEndIndex + 1 : targetStartIndex;
+      remaining.splice(insertionIndex, 0, ...moving);
+      return remaining;
+    });
   }
 
   function showInfoItemGroup(groupLabel: string) {
@@ -1516,7 +1326,7 @@ export function PanelWorkspace({
   const bottomPanel =
     summaryPanel ??
     (hasUnassigned ? (
-      <WorkspaceSection eyebrow="More Sources" title="Additional Source Panels">
+      <WorkspaceSection title="Additional Source Panels">
         <PanelBoard
           items={unassignedItems}
           orderStorageKey={PANEL_WORKSPACE_STORAGE.unassignedOrder}
@@ -1530,14 +1340,13 @@ export function PanelWorkspace({
 
   return (
     <div className="h-full overflow-hidden bg-orbit-bg p-1.5 md:p-2">
-      <div className="grid h-full min-h-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,3fr)] xl:grid-rows-[5fr_4fr]">
+      <div className="grid h-full min-h-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,3fr)] xl:grid-rows-[6fr_3fr]">
         <div className="min-h-0 overflow-hidden xl:col-start-1 xl:col-span-2 xl:row-start-1">
           {mainPanel ?? <DefaultMainPanel />}
         </div>
 
         <div className="min-h-0 overflow-hidden xl:col-start-3 xl:row-start-1 xl:row-span-2">
           <WorkspaceSection
-            eyebrow={infoPanelOverride ? "Selected Source" : "Browse Sources"}
             title={infoPanelOverride?.title ?? "Side Panel"}
             action={
               infoItems.length > 0 ? (
@@ -1591,11 +1400,10 @@ export function PanelWorkspace({
         hiddenItemIds={draftHiddenInfoItemIds}
         orderedItemIds={resolvedDraftInfoItemOrder}
         onClose={closeInfoPanelPicker}
-        onToggleItem={toggleDraftInfoItem}
-        onReorderItem={reorderDraftInfoItem}
         onShowGroup={showInfoItemGroup}
         onHideGroup={hideInfoItemGroup}
         onShowOnlyGroup={showOnlyInfoItemGroup}
+        onReorderGroup={reorderDraftInfoGroup}
         onShowAll={showAllInfoItems}
         onHideAll={hideAllInfoItems}
         onApply={applyInfoPanelVisibility}

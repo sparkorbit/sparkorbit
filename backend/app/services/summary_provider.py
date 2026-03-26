@@ -292,7 +292,7 @@ def _build_hf_signal_sentence(session_overview: dict[str, Any]) -> str:
     }
     has_hf_daily = "hf_daily_papers" in hf_community_sources
     has_hf_hype = bool(
-        hf_model_sources & {"hf_trending_models", "hf_models_new", "hf_models_likes"}
+        hf_model_sources & {"hf_trending_models", "hf_models_new"}
     )
     if has_hf_daily and has_hf_hype:
         return (
@@ -379,16 +379,6 @@ def _sorted_model_items(
                 str(row.get("title") or ""),
             ),
         )
-    if source == "hf_models_likes":
-        return sorted(
-            rows,
-            key=lambda row: (
-                -_int_or_zero(row.get("likes")),
-                -_int_or_zero(row.get("downloads")),
-                -_int_or_zero(row.get("feed_score")),
-                str(row.get("title") or ""),
-            ),
-        )
     return sorted(
         rows,
         key=lambda row: (
@@ -415,9 +405,7 @@ def _build_models_section(
         return _truncate_sentences(fallback_summary, 1)
     trending = _sorted_model_items(model_items, "hf_trending_models")
     fresh = _sorted_model_items(model_items, "hf_models_new")
-    likes = _sorted_model_items(model_items, "hf_models_likes")
-
-    top_signal = trending[0] if trending else likes[0] if likes else fresh[0] if fresh else None
+    top_signal = trending[0] if trending else fresh[0] if fresh else None
     parts: list[str] = []
 
     if top_signal is not None:
@@ -440,11 +428,6 @@ def _build_models_section(
         parts.append(
             "Fresh uploads are active, with attention still spread across several new entries."
         )
-
-    if likes:
-        top_like = likes[0]
-        if top_signal is None or top_like.get("title") != top_signal.get("title"):
-            parts.append(f"By durable likes: {_model_display_name(top_like)}.")
 
     if parts:
         return " ".join(parts[:3])

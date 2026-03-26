@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useMemo, type CSSProperties } from "react";
 
 import { buildLeaderboardEntries } from "../../features/dashboard/display";
 import type {
@@ -7,14 +7,13 @@ import type {
 } from "../../types/dashboard";
 
 type LeaderboardPanelProps = {
-  sessionLabel: string;
   arenaBoards: readonly SessionArenaBoard[];
   isLoadingLeaderboards: boolean;
   leaderboardError: string | null;
   dashboardError: string | null;
 };
 
-const MAX_ENTRIES = 10;
+const MAX_ENTRIES = 20;
 
 function stripArenaName(value: string | null | undefined) {
   const normalized = (value || "").trim();
@@ -57,29 +56,28 @@ function EntryCard({
           </span>
         </div>
 
-        <div className="orbit-leaderboard-entry__body min-w-0 flex-1 px-2.5 py-1.5">
-          <div className="flex min-w-0 items-baseline gap-2">
+        <div className="orbit-leaderboard-entry__body min-w-0 flex-1 px-2 py-1">
+          <div className="flex min-w-0 items-baseline gap-1.5">
             {entry.url ? (
               <a
                 href={entry.url}
                 target="_blank"
                 rel="noreferrer"
-                className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.78rem] font-semibold leading-snug text-orbit-text hover:text-orbit-accent"
+                className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.68rem] font-semibold leading-snug text-orbit-text hover:text-orbit-accent"
               >
                 {entry.modelName ?? "—"}
               </a>
             ) : (
-              <h3 className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.78rem] font-semibold leading-snug text-orbit-text">
+              <h3 className="orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.68rem] font-semibold leading-snug text-orbit-text">
                 {entry.modelName ?? "—"}
               </h3>
             )}
+            {entry.organization ? (
+              <span className="shrink-0 font-mono text-[0.42rem] uppercase tracking-widest text-orbit-muted">
+                {entry.organization}
+              </span>
+            ) : null}
           </div>
-
-          {entry.organization ? (
-            <p className="mt-0.5 font-mono text-[0.52rem] uppercase tracking-widest text-orbit-muted">
-              {entry.organization}
-            </p>
-          ) : null}
         </div>
       </div>
     </article>
@@ -94,25 +92,11 @@ function BoardCard({
   const entries = buildLeaderboardEntries(board).slice(0, MAX_ENTRIES);
 
   return (
-    <article className="flex h-full min-h-0 w-[20.5rem] flex-none snap-start flex-col border border-orbit-border bg-orbit-bg sm:w-[21.5rem] lg:w-[22.5rem] xl:w-[23rem]">
-      <div className="orbit-leaderboard-board__header px-3 py-2.5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <h3 className="orbit-wrap-anywhere font-display text-[1rem] font-semibold leading-tight text-orbit-text md:text-[1.08rem]">
-              {resolveBoardTitle(board)}
-            </h3>
-          </div>
-          {board.referenceUrl ? (
-            <a
-              href={board.referenceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 border border-orbit-border-strong bg-orbit-bg px-2 py-1 font-mono text-[0.52rem] uppercase tracking-[0.12em] text-orbit-text transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
-            >
-              open
-            </a>
-          ) : null}
-        </div>
+    <article className="flex h-full min-h-0 w-[17rem] flex-none snap-start flex-col border border-orbit-border bg-orbit-bg sm:w-[18rem] lg:w-[19rem] xl:w-[20rem]">
+      <div className="orbit-leaderboard-board__header px-2.5 py-2">
+        <h3 className="orbit-wrap-anywhere font-display text-[0.82rem] font-semibold leading-tight text-orbit-text">
+          {resolveBoardTitle(board)}
+        </h3>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
@@ -122,7 +106,7 @@ function BoardCard({
               <EntryCard
                 key={`${board.id}-${entry.rank}-${entry.modelName}`}
                 entry={entry}
-                delayMs={index * 35}
+                delayMs={index * 80}
               />
             ))}
           </div>
@@ -137,7 +121,6 @@ function BoardCard({
 }
 
 export function LeaderboardPanel({
-  sessionLabel,
   arenaBoards,
   isLoadingLeaderboards,
   leaderboardError,
@@ -145,20 +128,35 @@ export function LeaderboardPanel({
 }: LeaderboardPanelProps) {
   const errorMessage = leaderboardError ?? dashboardError;
 
-  return (
-    <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel p-3 md:p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orbit-border pb-2.5">
-        <div className="min-w-0 flex-1">
-          <h1 className="orbit-wrap-anywhere font-display text-[1.12rem] font-semibold text-orbit-text md:text-[1.32rem]">
-            AI Model Leaderboard
-          </h1>
-        </div>
+  const stats = useMemo(() => {
+    let totalModels = 0;
+    let totalVotes = 0;
+    for (const board of arenaBoards) {
+      totalModels += Number(board.totalModels ?? 0) || 0;
+      totalVotes += Number(board.totalVotes ?? 0) || 0;
+    }
+    return { boards: arenaBoards.length, models: totalModels, votes: totalVotes };
+  }, [arenaBoards]);
 
-        <div className="flex shrink-0 items-center justify-end">
-          <span className="orbit-token-ellipsis inline-flex max-w-[16rem] border border-orbit-border-strong bg-orbit-bg px-2 py-1 font-mono text-[0.66rem] uppercase tracking-[0.14em] text-orbit-text">
-            {sessionLabel}
-          </span>
-        </div>
+  return (
+    <section className="flex h-full min-h-0 flex-col border border-orbit-border bg-orbit-panel p-3 md:p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-orbit-border pb-2">
+        <h1 className="font-display text-[0.92rem] font-semibold text-orbit-text">
+          AI Model Leaderboard
+        </h1>
+        {stats.boards > 0 ? (
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-[0.48rem] uppercase tracking-[0.12em] text-orbit-muted">
+              {stats.boards} boards
+            </span>
+            <span className="font-mono text-[0.48rem] uppercase tracking-[0.12em] text-orbit-muted">
+              {stats.models.toLocaleString()} models
+            </span>
+            <span className="font-mono text-[0.48rem] uppercase tracking-[0.12em] text-orbit-muted">
+              {stats.votes.toLocaleString()} votes
+            </span>
+          </div>
+        ) : null}
       </div>
 
       {isLoadingLeaderboards ? (

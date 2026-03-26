@@ -57,7 +57,7 @@ export function SummaryPanel({
     <DashboardPanel style={style}>
       <div className="mb-2 border-b border-orbit-border pb-2.5">
         <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-orbit-accent">
-          Highlights
+          Overview
         </p>
         <h2 className="orbit-line-clamp-2 orbit-wrap-anywhere mt-1.5 font-display text-[0.98rem] font-semibold leading-[1.35] tracking-[-0.02em] text-orbit-text">
           {title}
@@ -67,7 +67,7 @@ export function SummaryPanel({
         <section className="mb-2 border border-orbit-accent/60 bg-orbit-bg-elevated px-3 py-2.5">
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent">
-              Today's Summary
+              Quick Summary
             </span>
             <span className="inline-flex border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.44rem] uppercase tracking-widest text-orbit-muted">
               ready
@@ -81,14 +81,14 @@ export function SummaryPanel({
         <section className="mb-2 border border-orbit-accent/30 bg-orbit-bg-elevated px-3 py-2.5">
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent">
-              Today's Summary
+              Quick Summary
             </span>
             <span className="inline-flex border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.44rem] uppercase tracking-widest text-orbit-muted">
               updating
             </span>
           </div>
           <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
-            Updating today's summary. This may take a moment while the latest
+            Updating the quick summary. This may take a moment while the latest
             items are being processed.
           </p>
         </section>
@@ -96,14 +96,14 @@ export function SummaryPanel({
         <section className="mb-2 border border-orbit-border bg-orbit-bg-elevated px-3 py-2.5">
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent-dim">
-              Today's Summary
+              Quick Summary
             </span>
             <span className="inline-flex border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.44rem] uppercase tracking-widest text-orbit-muted">
               error
             </span>
           </div>
           <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
-            Today's summary could not be prepared. Reload after the local
+            The quick summary could not be prepared. Reload after the local
             summary service is available.
           </p>
         </section>
@@ -111,14 +111,14 @@ export function SummaryPanel({
         <section className="mb-2 border border-orbit-border bg-orbit-bg-elevated px-3 py-2.5">
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent-dim">
-              Today's Summary
+              Quick Summary
             </span>
             <span className="inline-flex border border-orbit-border bg-orbit-bg px-1.5 py-0.5 font-mono text-[0.44rem] uppercase tracking-widest text-orbit-muted">
               off
             </span>
           </div>
           <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
-            Today's summary is off. Topic cards below are based on source data.
+            The quick summary is off. Topic cards below are based on source data.
           </p>
         </section>
       ) : null}

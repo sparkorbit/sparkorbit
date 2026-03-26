@@ -1,75 +1,16 @@
 import { useEffect } from "react";
 
 import { shell } from "../dashboard/styles";
-import {
-  ROW_HEIGHT_MODE_OPTIONS,
-  type UiSettings,
-} from "../../features/dashboard/uiSettings";
-
-function SettingsGlyph() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="h-4 w-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="square"
-      strokeLinejoin="miter"
-    >
-      <circle cx="12" cy="12" r="2.8" />
-      <path d="M12 3.5v3.1M12 17.4v3.1M20.5 12h-3.1M6.6 12H3.5M17.95 6.05l-2.2 2.2M8.25 15.75l-2.2 2.2M17.95 17.95l-2.2-2.2M8.25 8.25l-2.2-2.2" />
-      <path d="M9.2 3.5h5.6M9.2 20.5h5.6M20.5 9.2v5.6M3.5 9.2v5.6" />
-    </svg>
-  );
-}
-
-function SettingsToggle({
-  label,
-  description,
-  enabled,
-  onToggle,
-}: {
-  label: string;
-  description: string;
-  enabled: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="grid gap-3 border border-orbit-border bg-orbit-bg p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-      <div>
-        <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
-          {label}
-        </p>
-        <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-          {description}
-        </p>
-      </div>
-      <button
-        type="button"
-        aria-pressed={enabled}
-        className={[
-          "inline-flex h-9 min-w-[92px] items-center justify-center border px-3 font-mono text-[0.66rem] uppercase tracking-[0.14em] transition-colors duration-150",
-          enabled
-            ? "border-orbit-accent bg-orbit-panel text-orbit-accent"
-            : "border-orbit-border bg-orbit-bg-elevated text-orbit-muted hover:border-orbit-border-strong hover:text-orbit-text",
-        ].join(" ")}
-        onClick={onToggle}
-      >
-        {enabled ? "on" : "off"}
-      </button>
-    </div>
-  );
-}
 
 export function ConsoleHeader({
   title,
   subtitle,
+  repoUrl,
   onOpenSettings,
 }: {
   title: string;
   subtitle: string;
+  repoUrl?: string;
   onOpenSettings: () => void;
 }) {
   return (
@@ -93,6 +34,16 @@ export function ConsoleHeader({
               <span className="orbit-token-ellipsis hidden max-w-[14rem] border border-orbit-border bg-orbit-panel px-1.5 py-0.5 font-mono text-[0.56rem] uppercase tracking-[0.16em] text-orbit-text sm:inline-flex">
                 {subtitle}
               </span>
+              {repoUrl ? (
+                <a
+                  href={repoUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hidden items-center gap-1 border border-orbit-accent/40 px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-accent transition-colors duration-150 hover:border-orbit-accent hover:bg-orbit-accent/10 sm:inline-flex"
+                >
+                  open source
+                </a>
+              ) : null}
             </div>
           </div>
         </div>
@@ -101,10 +52,10 @@ export function ConsoleHeader({
           type="button"
           aria-label="settings"
           title="settings"
-          className="group inline-flex h-9 w-9 shrink-0 items-center justify-center border border-orbit-border-strong bg-orbit-panel font-mono text-orbit-accent transition-colors duration-150 hover:border-orbit-accent hover:bg-orbit-bg hover:text-orbit-text"
+          className="group inline-flex h-9 shrink-0 items-center justify-center border border-orbit-border-strong bg-orbit-panel px-3 font-mono text-[0.56rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:border-orbit-accent hover:bg-orbit-bg hover:text-orbit-text"
           onClick={onOpenSettings}
         >
-          <SettingsGlyph />
+          setup
         </button>
       </div>
     </header>
@@ -113,19 +64,13 @@ export function ConsoleHeader({
 
 export function SettingsModal({
   isOpen,
-  settings,
   briefingStatus,
   onClose,
-  onUpdateSettings,
-  onResetWorkspace,
   onRestoreDefaults,
 }: {
   isOpen: boolean;
-  settings: UiSettings;
   briefingStatus?: string | null;
   onClose: () => void;
-  onUpdateSettings: (next: UiSettings) => void;
-  onResetWorkspace: () => void;
   onRestoreDefaults: () => void;
 }) {
   useEffect(() => {
@@ -196,91 +141,7 @@ export function SettingsModal({
         </div>
 
         <div className="relative z-10 min-h-0 flex-1 overflow-auto p-4">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)]">
-            <section className="space-y-3 border border-orbit-border bg-orbit-bg-elevated p-3">
-              <div className="border-b border-orbit-border pb-3">
-                <p className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-orbit-accent">
-                  Display
-                </p>
-                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  Control visual noise and density.
-                </p>
-              </div>
-
-              <SettingsToggle
-                label="Animations"
-                description="Toggle entry animations and startup motion."
-                enabled={settings.motionEnabled}
-                onToggle={() =>
-                  onUpdateSettings({
-                    ...settings,
-                    motionEnabled: !settings.motionEnabled,
-                  })
-                }
-              />
-
-              <SettingsToggle
-                label="Background Grid"
-                description="Show or hide the decorative background grid and scan lines."
-                enabled={settings.overlaysEnabled}
-                onToggle={() =>
-                  onUpdateSettings({
-                    ...settings,
-                    overlaysEnabled: !settings.overlaysEnabled,
-                  })
-                }
-              />
-
-              <SettingsToggle
-                label="Debug Panel"
-                description="Show raw dashboard, reload, and detail payloads in the bottom-right panel."
-                enabled={settings.payloadDebugEnabled}
-                onToggle={() =>
-                  onUpdateSettings({
-                    ...settings,
-                    payloadDebugEnabled: !settings.payloadDebugEnabled,
-                  })
-                }
-              />
-
-              <div className="border border-orbit-border bg-orbit-bg p-3">
-                <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
-                  Row Span
-                </p>
-                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  Adjust density and drag response by changing row span.
-                </p>
-
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                  {ROW_HEIGHT_MODE_OPTIONS.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      className={[
-                        "border px-3 py-3 text-left transition-colors duration-150",
-                        settings.rowHeightMode === option.id
-                          ? "border-orbit-accent bg-orbit-panel"
-                          : "border-orbit-border bg-orbit-bg-elevated hover:border-orbit-border-strong",
-                      ].join(" ")}
-                      onClick={() =>
-                        onUpdateSettings({
-                          ...settings,
-                          rowHeightMode: option.id,
-                        })
-                      }
-                    >
-                      <p className="font-mono text-[0.62rem] uppercase tracking-[0.16em] text-orbit-accent">
-                        {option.label}
-                      </p>
-                      <p className="mt-2 font-display text-[0.82rem] font-semibold text-orbit-text">
-                        {option.note}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </section>
-
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,1fr)]">
             <section className="space-y-3 border border-orbit-border bg-orbit-bg-elevated p-3">
               <div className="border-b border-orbit-border pb-3">
                 <p className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-orbit-accent">
@@ -346,48 +207,122 @@ export function SettingsModal({
             <section className="space-y-3 border border-orbit-border bg-orbit-bg-elevated p-3">
               <div className="border-b border-orbit-border pb-3">
                 <p className="font-mono text-[0.62rem] uppercase tracking-[0.18em] text-orbit-accent">
-                  Grid Tools
+                  Default
                 </p>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  Clear saved slot map or revert to baseline loadout.
+                  Return the workspace to its first-load state.
                 </p>
               </div>
 
               <div className="border border-orbit-border bg-orbit-bg p-3">
                 <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
-                  Slot Reset
+                  Reset Everything
                 </p>
                 <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  Clear drag order and column/row span cache, then re-sort to recommended layout.
-                </p>
-                <button
-                  type="button"
-                  className="mt-3 inline-flex border border-orbit-border-strong bg-orbit-panel px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-orbit-text transition-colors duration-150 hover:border-orbit-accent hover:text-orbit-accent"
-                  onClick={onResetWorkspace}
-                >
-                  flush slot map
-                </button>
-              </div>
-
-              <div className="border border-orbit-border bg-orbit-bg p-3">
-                <p className="font-mono text-[0.64rem] uppercase tracking-[0.18em] text-orbit-accent">
-                  Baseline Loadout
-                </p>
-                <p className="mt-2 text-[0.74rem] leading-[1.6] text-orbit-muted">
-                  Restore motion on, grid veil on, row span stock defaults and clear saved slot map.
+                  Clear saved panel layout and restore the original default settings in one step.
                 </p>
                 <button
                   type="button"
                   className="mt-3 inline-flex border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg"
                   onClick={onRestoreDefaults}
                 >
-                  restore baseline
+                  set default
                 </button>
               </div>
             </section>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function GitHubStarPrompt({
+  isOpen,
+  onAccept,
+  onLater,
+  onDismissForever,
+}: {
+  isOpen: boolean;
+  onAccept: () => void;
+  onLater: () => void;
+  onDismissForever: () => void;
+}) {
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="pointer-events-none fixed bottom-4 left-4 right-4 z-[72] sm:left-auto sm:w-[24rem]">
+      <aside className="orbit-hacker-reveal pointer-events-auto relative overflow-hidden border border-orbit-border-strong bg-orbit-bg-elevated shadow-[0_14px_42px_rgba(0,0,0,0.34)]">
+        <div
+          aria-hidden="true"
+          className="orbit-grid pointer-events-none absolute inset-0 opacity-15"
+        />
+        <div
+          aria-hidden="true"
+          className="orbit-scanlines pointer-events-none absolute inset-0 opacity-10"
+        />
+
+        <div className="orbit-hacker-reveal__content relative z-10">
+          <div className="border-b border-orbit-border-strong bg-orbit-bg px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex border border-orbit-accent/50 bg-orbit-panel px-2 py-0.5 font-mono text-[0.54rem] uppercase tracking-[0.16em] text-orbit-accent">
+                1m online
+              </span>
+              <span className="font-mono text-[0.54rem] uppercase tracking-[0.16em] text-orbit-accent-dim">
+                repo ping / 저장소 알림
+              </span>
+            </div>
+
+            <h2 className="mt-2 font-display text-[0.98rem] font-semibold text-orbit-text">
+              You&apos;ve been orbiting for a minute.
+            </h2>
+            <p className="mt-1 font-display text-[0.84rem] font-medium text-orbit-accent-dim">
+              1분 정도 둘러보셨네요.
+            </p>
+            <p className="mt-2 text-[0.76rem] leading-[1.62] text-orbit-muted">
+              Help more people discover our glorious little mess.
+            </p>
+            <p className="mt-1 text-[0.74rem] leading-[1.62] text-orbit-muted">
+              우리의 삽질이 더 많은 사람들과 함께할 수 있도록 도와주세요. -&gt;
+            </p>
+
+            <div className="mt-3 flex items-center gap-2">
+              <span className="font-mono text-[0.5rem] uppercase tracking-[0.14em] text-orbit-accent-dim">
+                signal
+              </span>
+              <div className="h-1.5 flex-1 overflow-hidden border border-orbit-border bg-orbit-panel">
+                <div className="h-full w-[78%] bg-[linear-gradient(90deg,var(--color-orbit-accent),rgba(141,252,84,0.35))]" />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+            <button
+              type="button"
+              className="inline-flex border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg"
+              onClick={onAccept}
+            >
+              open repo / GitHub 열기
+            </button>
+            <button
+              type="button"
+              className="inline-flex border border-orbit-border bg-orbit-bg px-3 py-2 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted transition-colors duration-150 hover:border-orbit-border-strong hover:text-orbit-text"
+              onClick={onLater}
+            >
+              later / 나중에
+            </button>
+            <button
+              type="button"
+              className="inline-flex border border-orbit-border bg-orbit-bg px-3 py-2 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted transition-colors duration-150 hover:border-orbit-border-strong hover:text-orbit-text"
+              onClick={onDismissForever}
+            >
+              mute this / 다시 보지 않기
+            </button>
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }

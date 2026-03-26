@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useMemo, type CSSProperties } from "react";
 
 import type { FeedPanel as FeedPanelData } from "../../content/dashboardContent";
 import { formatDisplayDate } from "../../features/dashboard/display";
@@ -7,6 +7,15 @@ import { categoryAccentColor } from "./styles";
 const htmlEntityDecoder =
   typeof document !== "undefined" ? document.createElement("textarea") : null;
 const COMPACT_PANEL_HEIGHT_PX = 460;
+
+
+function formatFeedScore(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "";
+  }
+
+  return `score ${Math.round(value).toLocaleString()}`;
+}
 
 function decodeHtmlEntities(value: unknown) {
   if (typeof value !== "string") {
@@ -37,6 +46,15 @@ export function SourcePanel({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [isCompactLayout, setIsCompactLayout] = useState(false);
   const catColor = categoryAccentColor(panelData.eyebrow);
+  const shouldShowCommunityScore = panelData.eyebrow === "Community";
+
+  const revealKey = useMemo(() => panelData.id, [panelData.id]);
+  const [shouldReveal, setShouldReveal] = useState(true);
+  useEffect(() => {
+    setShouldReveal(true);
+    const timer = setTimeout(() => setShouldReveal(false), panelData.items.length * 60 + 800);
+    return () => clearTimeout(timer);
+  }, [revealKey, panelData.items.length]);
 
   useEffect(() => {
     const contentElement = panelRef.current?.parentElement;
@@ -93,7 +111,14 @@ export function SourcePanel({
             const resolvedTitle = decodeHtmlEntities(item.title);
             const resolvedNote = decodeHtmlEntities(item.note);
             const resolvedTimestamp = formatDisplayDate(item.timestamp);
-            const engagementLabel = item.engagementLabel || "";
+            const resolvedTimestampLabel =
+              item.timestampLabel && item.timestampLabel !== "Published"
+                ? `${item.timestampLabel} `
+                : "";
+            const scoreLabel =
+              shouldShowCommunityScore && item.feedScore
+                ? formatFeedScore(item.feedScore)
+                : item.engagementLabel || "";
             const isSelected = selectedDocumentId === item.documentId;
             const isOdd = index % 2 === 1;
 
@@ -104,6 +129,7 @@ export function SourcePanel({
                 data-feed-item-document-id={item.documentId}
                 className={[
                   "group min-w-0 text-left transition-all duration-150",
+                  shouldReveal ? "orbit-hacker-reveal" : "",
                   isSelected
                     ? ""
                     : onSelectItem
@@ -111,6 +137,7 @@ export function SourcePanel({
                       : "",
                 ].join(" ")}
                 style={{
+                  ...(shouldReveal ? { "--hacker-delay": `${index * 60}ms` } as CSSProperties : {}),
                   backgroundColor: isSelected
                     ? `color-mix(in srgb, ${catColor} 15%, var(--color-orbit-bg-elevated))`
                     : isOdd
@@ -119,7 +146,7 @@ export function SourcePanel({
                 }}
                 onClick={() => onSelectItem?.(item.documentId)}
               >
-                <div className="flex min-h-0">
+                <div className={["flex min-h-0", shouldReveal ? "orbit-hacker-reveal__content" : ""].join(" ")}>
                   {/* category color bar */}
                   <div
                     className="w-[3px] shrink-0 transition-opacity duration-150"
@@ -130,50 +157,52 @@ export function SourcePanel({
                   />
 
                   {isCompactLayout ? (
-                    <div className="flex min-w-0 flex-1 items-baseline gap-2 px-3 py-2">
-                      <h3 className="orbit-line-clamp-1 orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.74rem] font-semibold leading-[1.3] text-orbit-text">
+                    <div className="min-w-0 flex-1 px-3 py-2">
+                      <h3 className="orbit-line-clamp-1 orbit-wrap-anywhere min-w-0 font-display text-[0.74rem] font-semibold leading-[1.3] text-orbit-text">
                         {resolvedTitle}
                       </h3>
-                      <div className="flex shrink-0 items-baseline gap-1.5">
-                        {engagementLabel ? (
-                          <span
-                            className="font-mono text-[0.44rem] tabular-nums tracking-[0.08em]"
-                            style={{ color: catColor, opacity: 0.85 }}
-                          >
-                            {engagementLabel}
-                          </span>
-                        ) : null}
-                        {resolvedTimestamp ? (
-                          <span className="font-mono text-[0.44rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
-                            {resolvedTimestamp}
-                          </span>
-                        ) : null}
-                      </div>
+                      {(scoreLabel || resolvedTimestamp) ? (
+                        <div className="mt-1 flex items-center gap-2">
+                          {scoreLabel ? (
+                            <span
+                              className="font-mono text-[0.44rem] tabular-nums tracking-[0.08em]"
+                              style={{ color: catColor, opacity: 0.85 }}
+                            >
+                              {scoreLabel}
+                            </span>
+                          ) : null}
+                          {resolvedTimestamp ? (
+                            <span className="font-mono text-[0.44rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
+                              {resolvedTimestampLabel}{resolvedTimestamp}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="min-w-0 flex-1 px-3 py-2.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="orbit-line-clamp-2 orbit-wrap-anywhere min-w-0 flex-1 font-display text-[0.78rem] font-semibold leading-[1.35] text-orbit-text">
-                          {resolvedTitle}
-                        </h3>
-                        <div className="mt-0.5 flex shrink-0 flex-col items-end gap-0.5">
-                          {engagementLabel ? (
+                      <h3 className="orbit-line-clamp-2 orbit-wrap-anywhere min-w-0 font-display text-[0.78rem] font-semibold leading-[1.35] text-orbit-text">
+                        {resolvedTitle}
+                      </h3>
+                      {(scoreLabel || resolvedTimestamp) ? (
+                        <div className="mt-1 flex items-center gap-2">
+                          {scoreLabel ? (
                             <span
                               className="font-mono text-[0.46rem] tabular-nums tracking-[0.08em]"
                               style={{ color: catColor, opacity: 0.85 }}
                             >
-                              {engagementLabel}
+                              {scoreLabel}
                             </span>
                           ) : null}
                           {resolvedTimestamp ? (
                             <span className="font-mono text-[0.46rem] tabular-nums uppercase tracking-[0.1em] text-orbit-muted">
-                              {resolvedTimestamp}
+                              {resolvedTimestampLabel}{resolvedTimestamp}
                             </span>
                           ) : null}
                         </div>
-                      </div>
+                      ) : null}
                       {resolvedNote ? (
-                        <p className="orbit-line-clamp-1 orbit-wrap-anywhere mt-1 text-[0.64rem] leading-[1.5] text-orbit-muted">
+                        <p className="orbit-line-clamp-2 orbit-wrap-anywhere mt-1.5 text-[0.64rem] leading-[1.5] text-orbit-muted">
                           {resolvedNote}
                         </p>
                       ) : null}

@@ -68,10 +68,17 @@ def git_commit() -> str | None:
         return None
 
 
-def effective_limit(limit: int | None) -> int:
+def configured_source_limit(source: Any) -> int:
+    configured = getattr(source, "default_limit", None)
+    if isinstance(configured, int) and configured > 0:
+        return configured
+    return ITEMS_PER_SOURCE
+
+
+def effective_limit(source: Any, limit: int | None) -> int:
     if limit is not None:
         return limit
-    return ITEMS_PER_SOURCE
+    return configured_source_limit(source)
 
 
 def deep_fill(default: Any, value: Any) -> Any:
@@ -443,6 +450,39 @@ def has_displayable_reference(document: dict[str, Any]) -> bool:
     return bool(document.get("title")) and any(document.get(field) for field in ("reference_url", "canonical_url", "url"))
 
 
+def _matches_source_age_policy(document: dict[str, Any], max_age_days: int | None) -> bool:
+    if not isinstance(max_age_days, int) or max_age_days <= 0:
+        return True
+    sort_dt = parse_iso_datetime(document.get("sort_at"))
+    published_dt = parse_iso_datetime(document.get("published_at"))
+    reference_dt = sort_dt or published_dt
+    if reference_dt is None:
+        return False
+    age_days = (datetime.now(timezone.utc) - reference_dt).total_seconds() / 86400
+    return age_days <= max_age_days
+
+
+def apply_source_collection_policy(
+    source: Any,
+    documents: list[dict[str, Any]],
+    metrics: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    max_age_days = getattr(source, "max_age_days", None)
+    if not isinstance(max_age_days, int) or max_age_days <= 0:
+        return documents, metrics, 0
+
+    kept_documents = [
+        document
+        for document in documents
+        if _matches_source_age_policy(document, max_age_days)
+    ]
+    kept_ids = {document.get("source_item_id") for document in kept_documents}
+    kept_metrics = [
+        metric for metric in metrics if metric.get("source_item_id") in kept_ids
+    ]
+    return kept_documents, kept_metrics, len(documents) - len(kept_documents)
+
+
 def filter_displayable_documents(
     documents: list[dict[str, Any]],
     metrics: list[dict[str, Any]],
@@ -547,12 +587,13 @@ MAX_WORKERS = 6
 def _fetch_one_source(
     source: Any,
     run_id: str,
-    applied_limit: int,
+    limit_override: int | None,
     timeout: float,
 ) -> dict[str, Any]:
     """Fetch, normalize, and filter a single source. Thread-safe (no shared state)."""
     client = make_client(timeout=timeout)
     source_started_at = perf_counter()
+    applied_limit = effective_limit(source, limit_override)
     try:
         fetch_started_at = perf_counter()
         result = fetch_source(client, source, run_id, applied_limit)
@@ -564,12 +605,22 @@ def _fetch_one_source(
         normalize_duration_ms = int((perf_counter() - normalize_started_at) * 1000)
 
         filter_started_at = perf_counter()
+        result.documents, result.metrics, age_excluded_count = apply_source_collection_policy(
+            source,
+            result.documents,
+            result.metrics,
+        )
         filtered_docs, filtered_metrics, excluded_count = filter_displayable_documents(
             result.documents, result.metrics,
         )
         result.documents = filtered_docs
         result.metrics = filtered_metrics
         filter_duration_ms = int((perf_counter() - filter_started_at) * 1000)
+        if age_excluded_count:
+            max_age_days = getattr(source, "max_age_days", None)
+            result.notes.append(
+                f"Excluded {age_excluded_count} document(s) older than {max_age_days} days."
+            )
         if excluded_count:
             result.notes.append(f"Excluded {excluded_count} document(s) without a displayable URL/reference.")
 
@@ -593,7 +644,9 @@ def _fetch_one_source(
             "fetch_duration_ms": fetch_duration_ms,
             "normalize_duration_ms": normalize_duration_ms,
             "filter_duration_ms": filter_duration_ms,
-            "excluded_count": excluded_count,
+            "excluded_count": excluded_count + age_excluded_count,
+            "age_excluded_count": age_excluded_count,
+            "applied_limit": applied_limit,
         }
     except Exception as exc:
         duration_ms = int((perf_counter() - source_started_at) * 1000)
@@ -621,11 +674,9 @@ def run_collection(
     run_dir = Path(output_dir) / run_id
     paths = ensure_dirs(run_dir)
     selected_sources = resolve_sources(sources)
-    applied_limit = effective_limit(limit)
     started_at = now_utc_iso()
     run_manifest: dict[str, Any] = {
         "run_id": run_id,
-        "limit": applied_limit,
         "started_at": started_at,
         "finished_at": None,
         "git_commit": git_commit(),
@@ -635,13 +686,18 @@ def run_collection(
         "excluded_count": 0,
         "error_count": 0,
     }
+    if limit is not None:
+        run_manifest["limit"] = limit
     source_manifest_entries: list[dict[str, Any]] = []
     fetch_log_rows: list[dict[str, Any]] = []
     request_log_rows: list[dict[str, Any]] = []
     error_rows: list[dict[str, Any]] = []
 
     total_sources = len(selected_sources)
-    print(f"[collect] run={run_id}  sources={total_sources}  limit={applied_limit}")
+    run_summary_parts = [f"[collect] run={run_id}", f"sources={total_sources}"]
+    if limit is not None:
+        run_summary_parts.append(f"limit={limit}")
+    print("  ".join(run_summary_parts))
 
     if progress_callback is not None:
         progress_callback(
@@ -680,7 +736,7 @@ def run_collection(
                 _fetch_one_source,
                 source,
                 run_id,
-                applied_limit,
+                limit,
                 timeout,
             )
             future_to_source[future] = source
@@ -739,10 +795,14 @@ def run_collection(
                 "source": source.name,
                 "endpoint": source.endpoint,
                 "status": status,
+                "applied_limit": outcome.get("applied_limit"),
+                "default_limit": configured_source_limit(source),
+                "max_age_days": getattr(source, "max_age_days", None),
                 "item_count": len(result.raw_items),
                 "normalized_count": len(result.documents),
                 "metric_count": len(result.metrics),
                 "excluded_document_count": outcome["excluded_count"],
+                "age_excluded_document_count": outcome.get("age_excluded_count", 0),
                 "notes": result.notes,
                 "duration_ms": outcome["duration_ms"],
                 "fetch_duration_ms": outcome["fetch_duration_ms"],
@@ -760,6 +820,9 @@ def run_collection(
                     "source": source.name,
                     "phase": "fetch",
                     "status": status,
+                    "applied_limit": outcome.get("applied_limit"),
+                    "default_limit": configured_source_limit(source),
+                    "max_age_days": getattr(source, "max_age_days", None),
                     "item_count": len(result.raw_items),
                     "normalized_count": len(result.documents),
                     "metric_count": len(result.metrics),
@@ -797,10 +860,14 @@ def run_collection(
                     "source": source.name,
                     "endpoint": source.endpoint,
                     "status": "error",
+                    "applied_limit": effective_limit(source, limit),
+                    "default_limit": configured_source_limit(source),
+                    "max_age_days": getattr(source, "max_age_days", None),
                     "item_count": 0,
                     "normalized_count": 0,
                     "metric_count": 0,
                     "excluded_document_count": 0,
+                    "age_excluded_document_count": 0,
                     "duration_ms": outcome["duration_ms"],
                     "raw_response_paths": [],
                     "raw_items_path": None,

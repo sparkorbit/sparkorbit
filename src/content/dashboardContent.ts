@@ -22,12 +22,14 @@ export type FeedItem = {
   documentId: string;
   referenceUrl: string;
   timestamp: string | null;
+  timestampLabel?: string | null;
   source: string;
   type: string;
   title: string;
   meta: string;
   note: string;
   engagementLabel?: string;
+  feedScore?: number | null;
 };
 
 export type FeedPanel = {

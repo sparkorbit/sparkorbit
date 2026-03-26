@@ -1,11 +1,12 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css");
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "IBM Plex Sans KR", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-  --font-display: "IBM Plex Sans KR", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-  --font-body: "IBM Plex Sans KR", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-  --font-mono: "IBM Plex Mono", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", monospace;
+  --font-sans: "Inter", "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-display: "Inter", "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "Inter", "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-mono: "JetBrains Mono", "Pretendard Variable", monospace;
   --color-orbit-bg: #050705;
   --color-orbit-bg-elevated: #0b100b;
   --color-orbit-panel: #0d130d;
@@ -199,7 +200,7 @@ body {
 
 .orbit-hacker-reveal {
   --hacker-delay: 0ms;
-  --hacker-content-delay: calc(var(--hacker-delay) + 40ms);
+  --hacker-content-delay: calc(var(--hacker-delay) + 80ms);
   position: relative;
   overflow: hidden;
   isolation: isolate;
@@ -217,7 +218,7 @@ body {
   z-index: 3;
   border: 1px solid var(--color-orbit-accent);
   opacity: 0;
-  animation: orbit-hacker-frame 300ms steps(4, end) var(--hacker-delay)
+  animation: orbit-hacker-frame 500ms steps(5, end) var(--hacker-delay)
     forwards;
 }
 
@@ -230,7 +231,7 @@ body {
   border-top: 1px solid rgb(141 252 84 / 0.35);
   border-bottom: 1px solid rgb(141 252 84 / 0.35);
   opacity: 0;
-  animation: orbit-hacker-scan-band 520ms steps(8, end) var(--hacker-delay)
+  animation: orbit-hacker-scan-band 750ms steps(10, end) var(--hacker-delay)
     forwards;
 }
 
@@ -239,7 +240,7 @@ body {
   z-index: 1;
   opacity: 0;
   clip-path: inset(0 0 100% 0);
-  animation: orbit-hacker-content 420ms steps(9, end)
+  animation: orbit-hacker-content 600ms steps(12, end)
     var(--hacker-content-delay) forwards;
 }
 
@@ -254,7 +255,7 @@ body {
   background: var(--color-orbit-accent);
   opacity: 0;
   pointer-events: none;
-  animation: orbit-hacker-scan-line 540ms steps(12, end) var(--hacker-delay)
+  animation: orbit-hacker-scan-line 800ms steps(16, end) var(--hacker-delay)
     forwards;
 }
 

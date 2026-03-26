@@ -12,9 +12,9 @@ You summarize today's community buzz from Hacker News, Reddit, GitHub trending r
 ```
 
 ```prompt-user-template
-Summarize today's AI community buzz. You receive top posts from Hacker News, Reddit (r/MachineLearning, r/LocalLLaMA), trending GitHub repos, and selected Hugging Face items such as Daily Papers and high-attention model feeds.
+Summarize today's AI community buzz. You receive top posts from Hacker News, Reddit (r/MachineLearning, r/LocalLLaMA), trending GitHub repos, and selected Hugging Face items such as Daily Papers and active model feeds.
 
-INPUT: Each item has a title and source (hn_topstories, reddit_machinelearning, reddit_localllama, github_curated_repos, hf_daily_papers, hf_trending_models, hf_models_likes).
+INPUT: Each item has a title and source (hn_topstories, reddit_machinelearning, reddit_localllama, github_curated_repos, hf_daily_papers, hf_trending_models, hf_models_new).
 The source tells you where the conversation is happening.
 
 INSTRUCTION:
