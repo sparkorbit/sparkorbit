@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 
 import {
   ConsoleHeader,
-  FullscreenLoading,
   SettingsModal,
 } from "./components/app/AppChrome";
 import {
@@ -40,16 +39,11 @@ import {
   fetchDigestDetail,
   fetchDocument,
   fetchLeaderboards,
-  fetchReloadState,
-  openDashboardStream,
-  openReloadStream,
   reloadSession,
 } from "./lib/dashboardApi";
 import type {
-  DashboardLoading,
   DashboardResponse,
   SessionArenaOverview,
-  SessionReloadStateResponse,
 } from "./types/dashboard";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -118,16 +112,11 @@ function App() {
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
     null,
   );
-  const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
-  const [isReloading, setIsReloading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [workspaceVersion, setWorkspaceVersion] = useState(0);
   const [uiSettings, setUiSettings] = useState<UiSettings>(loadUiSettings);
-  const [blockingLoadingState, setBlockingLoadingState] =
-    useState<DashboardLoading | null>(null);
   const [leaderboardOverview, setLeaderboardOverview] =
     useState<SessionArenaOverview | null>(null);
-  const [isLoadingLeaderboards, setIsLoadingLeaderboards] = useState(false);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const [selectedLeaderboardId, setSelectedLeaderboardId] = useState<
     string | null
@@ -171,11 +160,11 @@ function App() {
 
   useEffect(() => {
     let isDisposed = false;
-    let dashboardStream: EventSource | null = null;
 
     async function loadDashboardData(session = "active") {
       try {
         const payload = await fetchDashboard(session);
+        if (isDisposed) return;
         recordPayloadSnapshot({
           key: "dashboard-fetch",
           title: "dashboard fetch",
@@ -185,8 +174,8 @@ function App() {
         });
         setDashboard(payload);
         setDashboardError(null);
-        return payload;
       } catch (error) {
+        if (isDisposed) return;
         setDashboard((current) =>
           current.session.sessionId === EMPTY_DASHBOARD.session.sessionId
             ? EMPTY_DASHBOARD
@@ -197,186 +186,16 @@ function App() {
             ? compactText(error.message, 180)
             : "Failed to connect to BFF API.",
         );
-        return EMPTY_DASHBOARD;
-      } finally {
-        setIsLoadingDashboard(false);
       }
     }
 
-    async function resumeReloadIfNeeded() {
-      try {
-        const payload = await fetchReloadState();
-        recordPayloadSnapshot({
-          key: "reload-state",
-          title: "reload state",
-          path: "/api/sessions/reload",
-          transport: "http",
-          payload,
-        });
-        if (isDisposed) {
-          return;
-        }
-        if (
-          payload.status === "collecting" ||
-          payload.status === "published" ||
-          payload.status === "summarizing"
-        ) {
-          setBlockingLoadingState(payload.loading);
-          setIsReloading(true);
-        }
-      } catch {
-        // dashboard stream fallback covers the initial load path.
-      }
-    }
-
-    async function initializeDashboardStream() {
-      await resumeReloadIfNeeded();
-      if (isDisposed) {
-        return;
-      }
-
-      if (typeof EventSource === "undefined") {
-        await loadDashboardData();
-        return;
-      }
-
-      let hasReceivedMessage = false;
-      dashboardStream = openDashboardStream("active");
-
-      dashboardStream.onmessage = (event) => {
-        if (isDisposed) {
-          return;
-        }
-        try {
-          const payload = JSON.parse(event.data) as DashboardResponse;
-          hasReceivedMessage = true;
-          recordPayloadSnapshot({
-            key: "dashboard-stream",
-            title: "dashboard stream",
-            path: "/api/dashboard/stream?session=active",
-            transport: "sse",
-            payload,
-          });
-          setDashboard(payload);
-          setDashboardError(null);
-        } catch (error) {
-          setDashboardError(
-            error instanceof Error
-              ? compactText(error.message, 180)
-              : "Failed to parse dashboard stream payload.",
-          );
-        } finally {
-          setIsLoadingDashboard(false);
-        }
-      };
-
-      dashboardStream.onerror = () => {
-        if (isDisposed || hasReceivedMessage) {
-          return;
-        }
-        void loadDashboardData();
-      };
-    }
-
-    void initializeDashboardStream();
+    void loadDashboardData();
 
     return () => {
       isDisposed = true;
-      dashboardStream?.close();
     };
   }, []);
 
-  useEffect(() => {
-    if (!isReloading) {
-      return;
-    }
-
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [isReloading]);
-
-  useEffect(() => {
-    if (!isReloading || typeof EventSource === "undefined") {
-      return;
-    }
-
-    let isDisposed = false;
-    let isTerminal = false;
-    const reloadStream = openReloadStream();
-
-    reloadStream.onmessage = (event) => {
-      if (isDisposed) {
-        return;
-      }
-
-      try {
-        const payload = JSON.parse(event.data) as SessionReloadStateResponse;
-        recordPayloadSnapshot({
-          key: "reload-stream",
-          title: "reload stream",
-          path: "/api/sessions/reload/stream",
-          transport: "sse",
-          payload,
-        });
-        if (payload.loading) {
-          setBlockingLoadingState(payload.loading);
-        }
-
-        if (payload.status === "ready" || payload.status === "partial_error") {
-          isTerminal = true;
-          setDashboardError(null);
-          setBlockingLoadingState(null);
-          setIsReloading(false);
-          reloadStream.close();
-          return;
-        }
-
-        if (payload.status === "error") {
-          isTerminal = true;
-          setDashboardError(
-            compactText(
-              payload.error ?? "Fault occurred during probe cycle.",
-              180,
-            ),
-          );
-          setBlockingLoadingState(null);
-          setIsReloading(false);
-          reloadStream.close();
-        }
-      } catch (error) {
-        setDashboardError(
-          error instanceof Error
-            ? compactText(error.message, 180)
-            : "Failed to parse reload stream payload.",
-        );
-        setBlockingLoadingState(null);
-        setIsReloading(false);
-        reloadStream.close();
-      }
-    };
-
-    reloadStream.onerror = () => {
-      if (isDisposed || isTerminal) {
-        return;
-      }
-      setDashboardError("Reload stream connection lost.");
-      setBlockingLoadingState(null);
-      setIsReloading(false);
-      reloadStream.close();
-    };
-
-    return () => {
-      isDisposed = true;
-      reloadStream.close();
-    };
-  }, [isReloading]);
 
   useEffect(() => {
     persistUiSettings(uiSettings);
@@ -396,14 +215,12 @@ function App() {
     ) {
       setLeaderboardOverview(null);
       setLeaderboardError(null);
-      setIsLoadingLeaderboards(false);
       return;
     }
 
     let isDisposed = false;
 
     async function loadLeaderboards() {
-      setIsLoadingLeaderboards(true);
       setLeaderboardError(null);
       try {
         const payload = await fetchLeaderboards(sessionId);
@@ -428,10 +245,6 @@ function App() {
             ? compactText(error.message, 180)
             : "Failed to fetch leaderboard API.",
         );
-      } finally {
-        if (!isDisposed) {
-          setIsLoadingLeaderboards(false);
-        }
       }
     }
 
@@ -512,8 +325,6 @@ function App() {
   }
 
   async function handleReloadSession() {
-    setIsReloading(true);
-    setBlockingLoadingState(null);
     setDashboardError(null);
     setDetailState(null);
     setSelectedDigestId(null);
@@ -530,15 +341,12 @@ function App() {
         transport: "http",
         payload: result,
       });
-      setBlockingLoadingState(result.loading);
     } catch (error) {
       setDashboardError(
         error instanceof Error
           ? compactText(error.message, 180)
           : "Reload request failed.",
       );
-      setBlockingLoadingState(null);
-      setIsReloading(false);
     }
   }
 
@@ -547,15 +355,6 @@ function App() {
     dashboard.session.sessionDate,
     dashboard.session.window,
   );
-  const fullscreenLoadingState =
-    dashboard.status === "collecting"
-      ? dashboard.session.loading
-      : blockingLoadingState || null;
-  const shouldShowFullscreenLoading =
-    isLoadingDashboard ||
-    blockingLoadingState !== null ||
-    dashboard.status === "collecting";
-
   const resolvedArenaOverview =
     leaderboardOverview ?? dashboard.session.arenaOverview;
   const arenaBoards = resolvedArenaOverview?.boards ?? EMPTY_ARENA_BOARDS;
@@ -645,13 +444,11 @@ function App() {
   const mainPanel = (
     <LeaderboardPanel
       sessionLabel={sessionLabel}
-      isReloading={isReloading}
       onReload={() => void handleReloadSession()}
       resolvedArenaOverview={resolvedArenaOverview}
       selectedArenaBoard={selectedArenaBoard}
       arenaBoards={arenaBoards}
       leaderboardEntries={leaderboardEntries}
-      isLoadingLeaderboards={isLoadingLeaderboards}
       leaderboardError={leaderboardError}
       dashboardError={dashboardError}
       onSelectBoard={setSelectedLeaderboardId}
@@ -677,22 +474,6 @@ function App() {
       onToggle={() => setIsPayloadDebugOpen((current) => !current)}
     />
   ) : null;
-
-  if (shouldShowFullscreenLoading) {
-    return (
-      <div
-        data-orbit-motion={uiSettings.motionEnabled ? "on" : "off"}
-        className="relative flex h-dvh w-screen flex-col overflow-hidden bg-orbit-bg font-body text-orbit-text"
-      >
-        {overlays}
-        <FullscreenLoading
-          brand={dashboard.brand}
-          loading={fullscreenLoadingState}
-        />
-        {payloadDebugOverlay}
-      </div>
-    );
-  }
 
   return (
     <div

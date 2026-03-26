@@ -16,10 +16,7 @@ def create_app(store: Any | None = None):
     from .api.routes.leaderboards import router as leaderboards_router
     from .api.routes.sessions import router as sessions_router
     from .core.constants import ACTIVE_SESSION_KEY
-    from .services.session_service import (
-        begin_homepage_bootstrap,
-        run_homepage_bootstrap,
-    )
+    from .services.session_service import run_homepage_bootstrap
 
     resolved_store = store or RedisStore()
     app = FastAPI(title="SparkOrbit Backend", version="0.1.0")
@@ -45,9 +42,6 @@ def create_app(store: Any | None = None):
     # Eagerly start data collection on boot if no active session exists
     def _eager_bootstrap() -> None:
         if resolved_store.get(ACTIVE_SESSION_KEY):
-            return
-        _bootstrap_state, should_start = begin_homepage_bootstrap(resolved_store)
-        if not should_start:
             return
         run_homepage_bootstrap(resolved_store)
 

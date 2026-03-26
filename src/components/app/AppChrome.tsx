@@ -1,15 +1,10 @@
 import { useEffect } from "react";
 
 import { shell } from "../dashboard/styles";
-import { loadingStepClasses } from "../../features/dashboard/display";
 import {
   ROW_HEIGHT_MODE_OPTIONS,
   type UiSettings,
 } from "../../features/dashboard/uiSettings";
-import type {
-  DashboardLoading,
-  DashboardResponse,
-} from "../../types/dashboard";
 
 function SettingsGlyph() {
   return (
@@ -68,142 +63,6 @@ function SettingsToggle({
   );
 }
 
-export function FullscreenLoading({
-  brand,
-  loading,
-}: {
-  brand: DashboardResponse["brand"];
-  loading: DashboardLoading | null;
-}) {
-  const hasServerLoading = loading !== null;
-  const progressWidth = hasServerLoading
-    ? `${Math.max(0, Math.min(100, loading.percent))}%`
-    : undefined;
-  const progressCount =
-    hasServerLoading && loading.progressTotal > 0
-      ? `${loading.progressCurrent}/${loading.progressTotal}`
-      : null;
-  const resolvedStageLabel = hasServerLoading
-    ? loading.stageLabel
-    : "Link Handshake";
-  const resolvedDetail = hasServerLoading
-    ? loading.detail
-    : "Checking active cache status on relay.";
-  const currentSource =
-    hasServerLoading && loading.currentSource ? loading.currentSource : null;
-  const steps = hasServerLoading ? loading.steps : [];
-  const currentStep =
-    steps.find((step) => step.status === "active" || step.status === "error") ??
-    null;
-
-  return (
-    <main className="flex flex-1 items-center justify-center px-5 py-8">
-      <section className="orbit-loader-shell w-full max-w-2xl">
-        <p className="font-mono text-[0.64rem] uppercase tracking-[0.22em] text-orbit-accent">
-          {hasServerLoading ? "cold boot" : "handshake"}
-        </p>
-        <h1 className="orbit-wrap-anywhere mt-4 font-display text-[1.5rem] font-semibold text-orbit-text md:text-[1.9rem]">
-          {brand.name}
-        </h1>
-        <p className="orbit-wrap-anywhere mt-3 font-mono text-[0.72rem] uppercase tracking-[0.16em] text-orbit-accent-dim">
-          {resolvedStageLabel}
-        </p>
-
-        <div className="mt-6 border border-orbit-border bg-orbit-bg p-3">
-          <div className="orbit-loading-bar">
-            <div
-              className={
-                hasServerLoading
-                  ? "orbit-loading-bar__fill"
-                  : "orbit-loading-bar__fill orbit-loading-bar__fill--indeterminate"
-              }
-              style={hasServerLoading ? { width: progressWidth } : undefined}
-            />
-          </div>
-
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="font-mono text-[0.66rem] uppercase tracking-[0.16em] text-orbit-accent">
-              {hasServerLoading ? `${loading.percent}%` : "handshake"}
-            </p>
-            <p className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted">
-              {progressCount ?? "waiting"}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-4 border border-orbit-border bg-orbit-bg px-4 py-3">
-          <p className="font-mono text-[0.6rem] uppercase tracking-[0.16em] text-orbit-accent">
-            trace log
-          </p>
-          <p className="orbit-wrap-anywhere mt-2 text-[0.76rem] leading-[1.65] text-orbit-text">
-            {resolvedDetail}
-          </p>
-          {hasServerLoading ? (
-            <div className="mt-4 grid gap-2 sm:grid-cols-3">
-              <div className="border border-orbit-border bg-orbit-panel px-3 py-2">
-                <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                  active trace
-                </p>
-                <p className="orbit-wrap-anywhere mt-1 font-mono text-[0.7rem] uppercase tracking-[0.12em] text-orbit-text">
-                  {currentStep?.label ?? loading.stageLabel}
-                </p>
-              </div>
-              <div className="border border-orbit-border bg-orbit-panel px-3 py-2">
-                <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                  percent
-                </p>
-                <p className="mt-1 font-mono text-[0.82rem] text-orbit-text">
-                  {loading.percent}%
-                </p>
-              </div>
-              <div className="border border-orbit-border bg-orbit-panel px-3 py-2">
-                <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
-                  ops
-                </p>
-                <p className="mt-1 font-mono text-[0.82rem] text-orbit-text">
-                  {progressCount ?? "-"}
-                </p>
-              </div>
-            </div>
-          ) : null}
-          {currentStep ? (
-            <p className="orbit-wrap-anywhere mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
-              {currentStep.detail}
-            </p>
-          ) : null}
-          {currentSource ? (
-            <p className="orbit-wrap-anywhere mt-2 font-mono text-[0.62rem] uppercase leading-[1.5] tracking-[0.12em] text-orbit-accent-dim">
-              target / {currentSource}
-            </p>
-          ) : null}
-        </div>
-
-        {steps.length > 0 ? (
-          <div className="mt-4 grid gap-2">
-            {steps.map((step) => (
-              <article
-                key={step.id}
-                className={`border px-4 py-3 ${loadingStepClasses(step.status)}`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-mono text-[0.62rem] uppercase tracking-[0.14em]">
-                    {step.label}
-                  </p>
-                  <p className="font-mono text-[0.56rem] uppercase tracking-[0.12em]">
-                    {step.status}
-                  </p>
-                </div>
-                <p className="orbit-wrap-anywhere mt-2 text-[0.74rem] leading-[1.6]">
-                  {step.detail}
-                </p>
-              </article>
-            ))}
-          </div>
-        ) : null}
-      </section>
-    </main>
-  );
-}
 
 export function ConsoleHeader({
   title,

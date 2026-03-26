@@ -14,8 +14,6 @@ from typing import Any, Callable, Iterable
 
 from ..core.constants import (
     ACTIVE_SESSION_KEY,
-    BOOTSTRAP_STATE_KEY,
-    BOOTSTRAP_STATE_TTL_SECONDS,
     DEFAULT_RUN_LABEL,
     HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     OLLAMA_BASE_URL,
@@ -23,8 +21,6 @@ from ..core.constants import (
     QUEUE_SESSION_ENRICH_KEY,
     ROOT_DIR,
     RECENT_SESSIONS_KEY,
-    RELOAD_STATE_KEY,
-    RELOAD_STATE_TTL_SECONDS,
     SCHEMA_VERSION,
     SESSION_RETAIN_COUNT,
     SESSION_PREFIX,
@@ -63,20 +59,6 @@ _SESSION_RELOAD_LOCK = threading.Lock()
 _SESSION_RELOAD_RUNNING = False
 
 
-def now_utc_iso() -> str:
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def session_key(session_id: str, suffix: str) -> str:
-    return f"{SESSION_PREFIX}:{session_id}:{suffix}"
-
-
-def artifact_root_key(session_id: str) -> str:
-    return session_key(session_id, "artifact_root")
-
-
 def set_homepage_bootstrap_running(is_running: bool) -> None:
     global _HOMEPAGE_BOOTSTRAP_RUNNING
     with _HOMEPAGE_BOOTSTRAP_LOCK:
@@ -86,12 +68,6 @@ def set_homepage_bootstrap_running(is_running: bool) -> None:
 def is_homepage_bootstrap_running() -> bool:
     with _HOMEPAGE_BOOTSTRAP_LOCK:
         return _HOMEPAGE_BOOTSTRAP_RUNNING
-
-
-def reset_homepage_bootstrap_state(store: RedisLike | None = None) -> None:
-    set_homepage_bootstrap_running(False)
-    if store is not None:
-        store.delete(BOOTSTRAP_STATE_KEY)
 
 
 def set_session_reload_running(is_running: bool) -> None:
@@ -105,14 +81,18 @@ def is_session_reload_running() -> bool:
         return _SESSION_RELOAD_RUNNING
 
 
-def reset_session_reload_state(
-    store: RedisLike | None = None,
-    *,
-    clear_state: bool = True,
-) -> None:
-    set_session_reload_running(False)
-    if store is not None and clear_state:
-        store.delete(RELOAD_STATE_KEY)
+def now_utc_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def session_key(session_id: str, suffix: str) -> str:
+    return f"{SESSION_PREFIX}:{session_id}:{suffix}"
+
+
+def artifact_root_key(session_id: str) -> str:
+    return session_key(session_id, "artifact_root")
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -188,32 +168,6 @@ def get_json(store: RedisLike, key: str) -> Any:
     return json_loads(store.get(key))
 
 
-def set_bootstrap_state(store: RedisLike, payload: dict[str, Any]) -> None:
-    set_json_with_ttl(
-        store,
-        BOOTSTRAP_STATE_KEY,
-        payload,
-        ttl=BOOTSTRAP_STATE_TTL_SECONDS,
-    )
-
-
-def get_bootstrap_state(store: RedisLike) -> dict[str, Any] | None:
-    payload = get_json(store, BOOTSTRAP_STATE_KEY)
-    return payload if isinstance(payload, dict) else None
-
-
-def set_reload_state(store: RedisLike, payload: dict[str, Any]) -> None:
-    set_json_with_ttl(
-        store,
-        RELOAD_STATE_KEY,
-        payload,
-        ttl=RELOAD_STATE_TTL_SECONDS,
-    )
-
-
-def get_reload_state(store: RedisLike) -> dict[str, Any] | None:
-    payload = get_json(store, RELOAD_STATE_KEY)
-    return payload if isinstance(payload, dict) else None
 
 
 def get_recent_session_ids(store: RedisLike) -> list[str]:
@@ -573,180 +527,6 @@ def build_feed_item(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def loading_stage_label(stage: str, status: str) -> str:
-    labels = {
-        "starting": "Link Prep",
-        "fetching_sources": "Signal Sweep",
-        "writing_artifacts": "Trace Write",
-        "publishing_session": "Cache Relay",
-        "publishing_documents": "Cache Write",
-        "publishing_views": "View Relay",
-        "published": "Relay Armed",
-        "summarizing_documents": "Pattern Pass",
-        "building_digests": "Sweep Build",
-        "generating_briefing": "Briefing Gen",
-        "ready": "Grid Ready",
-        "partial_error": "Partial Ready",
-        "error": "Fault",
-    }
-    if status == "partial_error":
-        return labels["partial_error"]
-    return labels.get(stage, labels.get(status, "In Progress"))
-
-
-def loading_step_statuses(stage: str, status: str) -> list[dict[str, str]]:
-    steps = [
-        {
-            "id": "prepare",
-            "label": "Handshake",
-            "detail": "Accepting request and locking scan scope and run parameters.",
-        },
-        {
-            "id": "collect",
-            "label": "Sweep",
-            "detail": "Collector is scanning raw signals from each source.",
-        },
-        {
-            "id": "normalize",
-            "label": "Trace Write",
-            "detail": "Writing manifest and normalized artifacts to the trace directory.",
-        },
-        {
-            "id": "publish-docs",
-            "label": "Cache Docs",
-            "detail": "Pushing displayable documents into cache keys.",
-        },
-        {
-            "id": "publish-views",
-            "label": "Relay Views",
-            "detail": "Refreshing feeds and live views.",
-        },
-        {
-            "id": "summarize",
-            "label": "Pattern Pass",
-            "detail": "Extracting key lines from selected documents.",
-        },
-        {
-            "id": "digest",
-            "label": "Sweep Build",
-            "detail": "Bundling sweeps and recording final state.",
-        },
-        {
-            "id": "briefing",
-            "label": "Briefing",
-            "detail": "Generating a daily briefing from the collected signals.",
-        },
-    ]
-
-    current_index = {
-        "starting": 0,
-        "fetching_sources": 1,
-        "writing_artifacts": 2,
-        "publishing_session": 3,
-        "publishing_documents": 3,
-        "publishing_views": 4,
-        "published": 4,
-        "summarizing_documents": 5,
-        "building_digests": 6,
-        "generating_briefing": 7,
-        "ready": 7,
-        "partial_error": 7,
-        "error": 0,
-    }.get(stage, 0)
-
-    error_index = current_index if status == "error" else None
-    completed_through = {
-        "starting": -1,
-        "fetching_sources": 0,
-        "writing_artifacts": 1,
-        "publishing_session": 2,
-        "publishing_documents": 2,
-        "publishing_views": 3,
-        "published": 4,
-        "summarizing_documents": 4,
-        "building_digests": 5,
-        "generating_briefing": 6,
-        "ready": 7,
-        "partial_error": 7,
-        "error": -1,
-    }.get(stage, -1)
-
-    resolved_steps: list[dict[str, str]] = []
-    for index, step in enumerate(steps):
-        step_status = "pending"
-        if error_index is not None and index == error_index:
-            step_status = "error"
-        elif status == "partial_error" and step["id"] == "summarize":
-            step_status = "error"
-        elif index <= completed_through:
-            step_status = "complete"
-        elif index == current_index:
-            step_status = "active"
-        resolved_steps.append({**step, "status": step_status})
-    return resolved_steps
-
-
-def loading_percent(current: int, total: int, *, status: str, stage: str) -> int:
-    stage_ranges: dict[str, tuple[int, int]] = {
-        "starting": (0, 4),
-        "fetching_sources": (5, 55),
-        "writing_artifacts": (56, 64),
-        "publishing_session": (65, 72),
-        "publishing_documents": (65, 72),
-        "publishing_views": (73, 84),
-        "published": (84, 84),
-        "summarizing_documents": (85, 94),
-        "building_digests": (95, 98),
-        "generating_briefing": (99, 99),
-        "ready": (100, 100),
-        "partial_error": (100, 100),
-    }
-
-    def stage_based_percent(stage_start: int, stage_end: int) -> int:
-        if stage_end <= stage_start:
-            return stage_end
-        if total <= 0:
-            return stage_start
-        bounded = max(0, min(current, total))
-        ratio = bounded / total
-        return int(round(stage_start + ((stage_end - stage_start) * ratio)))
-
-    if status in {"ready", "partial_error"}:
-        return 100
-    if stage == "error":
-        if total <= 0:
-            return 0
-        bounded = max(0, min(current, total))
-        return int(round((bounded / total) * 100))
-    stage_start, stage_end = stage_ranges.get(stage, (0, 0))
-    return stage_based_percent(stage_start, stage_end)
-
-
-def build_loading_block(
-    *,
-    status: str,
-    stage: str,
-    detail: str,
-    progress_current: int,
-    progress_total: int,
-    current_source: str | None = None,
-) -> dict[str, Any]:
-    return {
-        "stage": stage,
-        "stageLabel": loading_stage_label(stage, status),
-        "detail": detail,
-        "progressCurrent": progress_current,
-        "progressTotal": progress_total,
-        "percent": loading_percent(
-            progress_current,
-            progress_total,
-            status=status,
-            stage=stage,
-        ),
-        "currentSource": current_source,
-        "steps": loading_step_statuses(stage, status),
-    }
-
 
 def build_runtime_items(status: str, *, stage: str | None = None) -> list[dict[str, str]]:
     enricher_status = "queued"
@@ -790,134 +570,6 @@ def build_runtime_items(status: str, *, stage: str | None = None) -> list[dict[s
     ]
 
 
-def build_bootstrap_runtime_items(status: str, stage: str) -> list[dict[str, str]]:
-    collector_status = "running"
-    redis_status = "waiting"
-    enricher_status = "queued"
-    ui_status = "streaming"
-
-    if stage in {"publishing_session", "publishing_documents", "publishing_views"}:
-        collector_status = "completed"
-        redis_status = "running"
-    elif status == "error":
-        collector_status = "error" if stage in {"starting", "fetching_sources", "writing_artifacts"} else "completed"
-        redis_status = "error" if stage == "publishing_session" else "waiting"
-        enricher_status = "waiting"
-        ui_status = "blocked"
-
-    return [
-        {
-            "name": "collector",
-            "role": "Collector runs a full scan on first visit.",
-            "status": collector_status,
-        },
-        {
-            "name": "enricher",
-            "role": "Populates key lines and sweeps after publish.",
-            "status": enricher_status,
-        },
-        {
-            "name": "redis",
-            "role": "Replaces the active cache once collector results arrive.",
-            "status": redis_status,
-        },
-        {
-            "name": "ui",
-            "role": "Monitors cold boot status via stream.",
-            "status": ui_status,
-        },
-    ]
-
-
-def build_bootstrap_digest_items(status: str) -> list[dict[str, str]]:
-    collecting_summary = "Signal sweeps will be populated once the scan completes."
-    error_summary = "Cold boot failed. Please reopen the link or re-run the probe."
-    summary = collecting_summary if status == "collecting" else error_summary
-    evidence = "pending" if status == "collecting" else "error"
-    return [
-        {
-            "id": category,
-            "domain": SOURCE_CATEGORY_LABELS.get(category, category),
-            "headline": "scan queued" if status == "collecting" else "scan failed",
-            "summary": summary,
-            "evidence": evidence,
-        }
-        for category in ORDERED_SOURCE_CATEGORIES
-    ]
-
-
-def build_bootstrap_dashboard(state: dict[str, Any]) -> dict[str, Any]:
-    status = str(state.get("status") or "collecting")
-    started_at = str(state.get("started_at") or now_utc_iso())
-    error_message = compact_text(state.get("error"), 180)
-    stage = str(state.get("stage") or "starting")
-    detail = str(
-        state.get("detail")
-        or "Collecting live data and preparing the relay cache."
-    )
-    progress_current = int(state.get("progress_current") or 0)
-    progress_total = int(state.get("progress_total") or 0)
-    current_source = state.get("current_source")
-    loading = build_loading_block(
-        status=status,
-        stage=stage if status != "error" else "error",
-        detail=error_message or detail,
-        progress_current=progress_current,
-        progress_total=progress_total,
-        current_source=str(current_source) if current_source else None,
-    )
-    metrics = [
-        {
-            "label": "sources",
-            "value": (
-                f"{progress_current}/{progress_total}"
-                if progress_total > 0
-                else "all"
-            ),
-            "note": "Full scan starts on first visit.",
-        },
-        {
-            "label": "docs",
-            "value": "0",
-            "note": detail,
-        },
-        {
-            "label": "sweeps",
-            "value": "pending" if status == "collecting" else "error",
-            "note": error_message
-            or "Will proceed to summarization once the collector finishes.",
-        },
-    ]
-    return {
-        "brand": {
-            "name": "BLACKSITE",
-            "tagline": "Cold Boot",
-        },
-        "status": status,
-        "session": {
-            "title": "Cold Boot Relay",
-            "sessionId": "bootstrapping",
-            "sessionDate": started_at[:10] or "unknown",
-            "window": "live scan",
-            "reloadRule": "If no active cache exists, the collector automatically starts a new scan.",
-            "metrics": metrics,
-            "runtime": build_bootstrap_runtime_items(status, stage),
-            "rules": [
-                "Stays in collecting state until the actual scan completes.",
-                "Run output is persisted to disk as-is.",
-                "Once publish completes, the active cache is swapped and the UI stream switches immediately.",
-            ],
-            "arenaOverview": None,
-            "loading": loading,
-        },
-        "summary": {
-            "title": "Signal Sweep",
-            "headline": error_message or detail,
-            "digests": build_bootstrap_digest_items(status),
-        },
-        "feeds": [],
-    }
-
 
 def build_session_block(
     session_id: str,
@@ -926,27 +578,10 @@ def build_session_block(
     source_manifest: list[dict[str, Any]],
     documents_by_id: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    session_date = (meta.get("created_at") or run_manifest.get("started_at") or "")[
-        :10
-    ]
+    _ts = meta.get("created_at") or run_manifest.get("started_at") or ""
+    session_date = _ts[:16].replace("T", " ") if len(_ts) >= 16 else _ts[:10]
     digests_ready = "yes" if meta.get("digests_ready") else "no"
-    loading_stage = str(meta.get("loading_stage") or meta.get("status") or "published")
-    loading_detail = str(
-        meta.get("loading_detail")
-        or f"Current relay state is {meta.get('status') or 'published'}."
-    )
-    loading = build_loading_block(
-        status=str(meta.get("status") or "published"),
-        stage=loading_stage,
-        detail=loading_detail,
-        progress_current=int(meta.get("loading_progress_current") or 0),
-        progress_total=int(meta.get("loading_progress_total") or 0),
-        current_source=(
-            str(meta.get("loading_current_source"))
-            if meta.get("loading_current_source")
-            else None
-        ),
-    )
+    session_status = str(meta.get("status") or "published")
     arena_overview = build_lmarena_session_overview(documents_by_id)
     return {
         "title": "Relay Cache",
@@ -979,17 +614,13 @@ def build_session_block(
                 "note": f"summaries {meta.get('summaries_ready', 0)} / state {meta.get('status')}",
             },
         ],
-        "runtime": build_runtime_items(
-            str(meta.get("status") or "published"),
-            stage=loading_stage,
-        ),
+        "runtime": build_runtime_items(session_status),
         "rules": [
             "Run output is the canonical reference data.",
             "Cache only holds per-source feeds and UI views.",
             "Cross-source mixing is performed only in sweeps.",
         ],
         "arenaOverview": arena_overview,
-        "loading": loading,
     }
 
 
@@ -1726,196 +1357,6 @@ def resolve_session_id(store: RedisLike, session: str | None) -> str:
     return target
 
 
-def begin_homepage_bootstrap(
-    store: RedisLike,
-    *,
-    run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
-) -> tuple[dict[str, Any], bool]:
-    global _HOMEPAGE_BOOTSTRAP_RUNNING
-    should_start = False
-    should_persist_state = False
-    with _HOMEPAGE_BOOTSTRAP_LOCK:
-        existing_state = get_bootstrap_state(store)
-        if _HOMEPAGE_BOOTSTRAP_RUNNING:
-            state = existing_state or build_homepage_bootstrap_state(
-                status="collecting",
-                run_label=run_label,
-            )
-            should_persist_state = existing_state is None
-        else:
-            _HOMEPAGE_BOOTSTRAP_RUNNING = True
-            state = build_homepage_bootstrap_state(
-                status="collecting",
-                run_label=run_label,
-            )
-            should_start = True
-            should_persist_state = True
-    if should_persist_state:
-        set_bootstrap_state(store, state)
-    return state, should_start
-
-
-def build_homepage_bootstrap_state(
-    *,
-    status: str,
-    run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
-    stage: str = "starting",
-    detail: str | None = None,
-    progress_current: int = 0,
-    progress_total: int = 0,
-    current_source: str | None = None,
-    error: str | None = None,
-) -> dict[str, Any]:
-    return {
-        "status": status,
-        "run_label": run_label,
-        "stage": stage,
-        "detail": detail
-        or (
-            "Received homepage request; starting live data collection."
-            if status != "error"
-            else "An error occurred during automatic collection."
-        ),
-        "progress_current": progress_current,
-        "progress_total": progress_total,
-        "current_source": current_source,
-        "started_at": now_utc_iso(),
-        "updated_at": now_utc_iso(),
-        "error": compact_text(error, 180) or None,
-    }
-
-
-def begin_session_reload(
-    store: RedisLike,
-    *,
-    run_label: str = DEFAULT_RUN_LABEL,
-) -> dict[str, Any]:
-    global _SESSION_RELOAD_RUNNING
-    with _SESSION_RELOAD_LOCK:
-        if _SESSION_RELOAD_RUNNING:
-            return get_reload_state(store) or build_session_reload_state(
-                status="collecting",
-                run_label=run_label,
-            )
-        _SESSION_RELOAD_RUNNING = True
-        state = build_session_reload_state(
-            status="collecting",
-                run_label=run_label,
-        )
-    set_reload_state(store, state)
-    return state
-
-
-def build_session_reload_state(
-    *,
-    status: str,
-    run_label: str = DEFAULT_RUN_LABEL,
-    stage: str = "starting",
-    detail: str | None = None,
-    progress_current: int = 0,
-    progress_total: int = 0,
-    current_source: str | None = None,
-    session_id: str | None = None,
-    error: str | None = None,
-) -> dict[str, Any]:
-    return {
-        "status": status,
-        "run_label": run_label,
-        "stage": stage,
-        "detail": detail
-        or (
-            "Received probe request; restarting the scan."
-            if status != "error"
-            else "A fault occurred during the probe cycle."
-        ),
-        "progress_current": progress_current,
-        "progress_total": progress_total,
-        "current_source": current_source,
-        "session_id": session_id,
-        "started_at": now_utc_iso(),
-        "updated_at": now_utc_iso(),
-        "error": compact_text(error, 180) or None,
-    }
-
-
-def update_session_reload_state(
-    store: RedisLike,
-    *,
-    status: str,
-    run_label: str = DEFAULT_RUN_LABEL,
-    stage: str,
-    detail: str,
-    progress_current: int,
-    progress_total: int,
-    current_source: str | None = None,
-    session_id: str | None = None,
-    error: str | None = None,
-) -> None:
-    existing = get_reload_state(store) or {}
-    payload = build_session_reload_state(
-        status=status,
-        run_label=run_label,
-        stage=stage,
-        detail=detail,
-        progress_current=progress_current,
-        progress_total=progress_total,
-        current_source=current_source,
-        session_id=session_id or existing.get("session_id"),
-        error=error,
-    )
-    payload["started_at"] = existing.get("started_at") or payload["started_at"]
-    set_reload_state(store, payload)
-
-
-def build_session_reload_response(state: dict[str, Any] | None) -> dict[str, Any]:
-    if not state:
-        return {
-            "status": "idle",
-            "session_id": None,
-            "loading": None,
-            "error": None,
-        }
-
-    status = str(state.get("status") or "collecting")
-    stage = str(state.get("stage") or "starting")
-    detail = str(
-        state.get("detail")
-        or (
-            "Preparing a new probe cycle."
-            if status != "error"
-            else "A fault occurred during the probe cycle."
-        )
-    )
-    loading = build_loading_block(
-        status=status,
-        stage=stage if status != "error" else "error",
-        detail=str(state.get("error") or detail),
-        progress_current=int(state.get("progress_current") or 0),
-        progress_total=int(state.get("progress_total") or 0),
-        current_source=(
-            str(state.get("current_source"))
-            if state.get("current_source")
-            else None
-        ),
-    )
-    return {
-        "status": status,
-        "session_id": state.get("session_id"),
-        "loading": loading,
-        "error": state.get("error"),
-    }
-
-
-def get_session_reload_response(store: RedisLike) -> dict[str, Any]:
-    return build_session_reload_response(get_reload_state(store))
-
-
-def resolve_collect_progress_current(event: dict[str, Any]) -> int:
-    stage = str(event.get("stage") or "")
-    if stage == "fetching_sources" and event.get("source_index") is not None:
-        return int(event.get("source_index") or 0)
-    return int(event.get("completed_sources") or 0)
-
 
 def select_summary_candidate_ids(
     documents: list[dict[str, Any]], *, limit_per_category: int = 8
@@ -1958,13 +1399,7 @@ def publish_run(
     run_dir: str | Path,
     *,
     queue: bool = True,
-    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    def emit_progress(**payload: Any) -> None:
-        if progress_callback is None:
-            return
-        progress_callback(payload)
-
     artifacts = load_run_artifacts(run_dir)
     session_id = str(artifacts.run_manifest["run_id"])
 
@@ -2021,11 +1456,6 @@ def publish_run(
         "summaries_ready": 0,
         "summary_candidates": len(candidate_ids),
         "source_ids": source_ids,
-        "loading_stage": "publishing_documents",
-        "loading_detail": "Pushing displayable documents into cache keys.",
-        "loading_progress_current": 0,
-        "loading_progress_total": max(len(documents), 1),
-        "loading_current_source": None,
     }
 
     set_json_with_ttl(store, session_key(session_id, "meta"), meta)
@@ -2036,89 +1466,17 @@ def publish_run(
     set_json_with_ttl(
         store, session_key(session_id, "source_manifest"), artifacts.source_manifest
     )
-    emit_progress(
-        status="collecting",
-        stage="publishing_documents",
-        detail=str(meta["loading_detail"]),
-        progress_current=0,
-        progress_total=max(len(documents), 1),
-        current_source=None,
-        session_id=session_id,
-    )
 
-    docs_total = max(len(documents), 1)
-    for index, document in enumerate(documents, start=1):
+    for document in documents:
         set_json_with_ttl(store, doc_key(session_id, document["document_id"]), document)
-        if index == len(documents) or index == 1 or index % 10 == 0:
-            meta["loading_stage"] = "publishing_documents"
-            meta["loading_detail"] = (
-                f"Cache write in progress ({index}/{len(documents)})."
-                if documents
-                else "No documents to write to cache."
-            )
-            meta["loading_progress_current"] = index if documents else 1
-            meta["loading_progress_total"] = docs_total
-            meta["loading_current_source"] = str(document.get("source") or "") or None
-            meta["updated_at"] = now_utc_iso()
-            set_json_with_ttl(store, session_key(session_id, "meta"), meta)
-            emit_progress(
-                status="collecting",
-                stage="publishing_documents",
-                detail=str(meta["loading_detail"]),
-                progress_current=int(meta["loading_progress_current"]),
-                progress_total=int(meta["loading_progress_total"]),
-                current_source=meta["loading_current_source"],
-                session_id=session_id,
-            )
 
     feed_lists = {
         source: [document["document_id"] for document in documents_for_source]
         for source, documents_for_source in documents_by_source.items()
     }
-    feed_total = 2
-    meta["loading_stage"] = "publishing_views"
-    meta["loading_detail"] = "Writing feed index to cache."
-    meta["loading_progress_current"] = 0
-    meta["loading_progress_total"] = feed_total
-    meta["loading_current_source"] = None
-    meta["updated_at"] = now_utc_iso()
-    set_json_with_ttl(store, session_key(session_id, "meta"), meta)
-    emit_progress(
-        status="collecting",
-        stage="publishing_views",
-        detail=str(meta["loading_detail"]),
-        progress_current=0,
-        progress_total=feed_total,
-        current_source=None,
-        session_id=session_id,
-    )
-
     for source, document_ids in feed_lists.items():
         set_list_with_ttl(store, feed_key(session_id, source), document_ids)
-    meta["loading_stage"] = "publishing_views"
-    meta["loading_detail"] = "Feed write complete; assembling live views."
-    meta["loading_progress_current"] = 1
-    meta["loading_progress_total"] = feed_total
-    meta["loading_current_source"] = None
-    meta["updated_at"] = now_utc_iso()
-    set_json_with_ttl(store, session_key(session_id, "meta"), meta)
-    emit_progress(
-        status="collecting",
-        stage="publishing_views",
-        detail=str(meta["loading_detail"]),
-        progress_current=1,
-        progress_total=feed_total,
-        current_source=None,
-        session_id=session_id,
-    )
 
-    meta["loading_stage"] = "published"
-    meta["loading_detail"] = "Cache relay armed; ready to proceed to pattern pass."
-    meta["loading_progress_current"] = feed_total
-    meta["loading_progress_total"] = feed_total
-    meta["loading_current_source"] = None
-    meta["updated_at"] = now_utc_iso()
-    set_json_with_ttl(store, session_key(session_id, "meta"), meta)
     dashboard = build_dashboard_payload(
         session_id=session_id,
         meta=meta,
@@ -2131,15 +1489,6 @@ def publish_run(
     set_json_with_ttl(store, session_key(session_id, "dashboard"), dashboard)
     store.set(ACTIVE_SESSION_KEY, session_id)
     prune_stale_sessions(store, session_id)
-    emit_progress(
-        status="published",
-        stage="published",
-        detail=str(meta["loading_detail"]),
-        progress_current=feed_total,
-        progress_total=feed_total,
-        current_source=None,
-        session_id=session_id,
-    )
 
     if queue:
         enqueue_session_for_enrichment(store, session_id)
@@ -2286,13 +1635,7 @@ def run_session_enrichment(
     *,
     generator: SummaryGenerator | None = None,
     briefing_generator: BriefingGenerator | None = None,
-    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    def emit_progress(**payload: Any) -> None:
-        if progress_callback is None:
-            return
-        progress_callback(payload)
-
     generator = generator or build_summary_generator()
     owns_briefing_generator = briefing_generator is None
     if briefing_generator is None:
@@ -2321,27 +1664,7 @@ def run_session_enrichment(
     meta["status"] = "summarizing"
     meta["summary_provider"] = provider_name
     meta["updated_at"] = now_utc_iso()
-    meta["loading_stage"] = (
-        "summarizing_documents" if summary_generation_enabled else "building_digests"
-    )
-    meta["loading_detail"] = (
-        f"Extracting key lines from {pending_total} selected document(s)."
-        if pending_total
-        else "No documents for pattern extraction; skipping to sweep build."
-    )
-    meta["loading_progress_current"] = 0
-    meta["loading_progress_total"] = pending_total if summary_generation_enabled else len(ORDERED_SOURCE_CATEGORIES)
-    meta["loading_current_source"] = None
     set_json_with_ttl(store, session_key(session_id, "meta"), meta)
-    emit_progress(
-        status="summarizing",
-        stage=str(meta["loading_stage"]),
-        detail=meta["loading_detail"],
-        progress_current=meta["loading_progress_current"],
-        progress_total=meta["loading_progress_total"],
-        current_source=None,
-        session_id=session_id,
-    )
 
     summary_errors = 0
     summaries_ready = 0
@@ -2387,64 +1710,13 @@ def run_session_enrichment(
             document["llm"] = llm
             documents_by_id[document_id] = document
             set_json_with_ttl(store, doc_key(session_id, document_id), document)
-            meta["loading_stage"] = "summarizing_documents"
-            meta["loading_detail"] = (
-                f"Pattern pass in progress ({processed_summaries}/{pending_total})."
-                if pending_total
-                else "No candidates for pattern pass."
-            )
-            meta["loading_progress_current"] = processed_summaries
-            meta["loading_progress_total"] = pending_total
-            meta["loading_current_source"] = str(document.get("source") or "") or None
-            meta["updated_at"] = now_utc_iso()
-            set_json_with_ttl(store, session_key(session_id, "meta"), meta)
-            emit_progress(
-                status="summarizing",
-                stage="summarizing_documents",
-                detail=meta["loading_detail"],
-                progress_current=meta["loading_progress_current"],
-                progress_total=meta["loading_progress_total"],
-                current_source=meta["loading_current_source"],
-                session_id=session_id,
-            )
 
     digests_by_category: dict[str, dict[str, Any]] = {}
-    meta["loading_stage"] = "building_digests"
-    meta["loading_detail"] = "Bundling signal sweeps."
-    meta["loading_progress_current"] = 0
-    meta["loading_progress_total"] = len(ORDERED_SOURCE_CATEGORIES)
-    meta["loading_current_source"] = None
-    meta["updated_at"] = now_utc_iso()
-    set_json_with_ttl(store, session_key(session_id, "meta"), meta)
-    emit_progress(
-        status="summarizing",
-        stage="building_digests",
-        detail=meta["loading_detail"],
-        progress_current=meta["loading_progress_current"],
-        progress_total=meta["loading_progress_total"],
-        current_source=None,
-        session_id=session_id,
-    )
     for category in ORDERED_SOURCE_CATEGORIES:
         documents = sort_documents(category_documents.get(category, []))
         digest = build_digest_from_documents(category, documents)
         digests_by_category[category] = digest
         set_json_with_ttl(store, digest_key(session_id, category), digest)
-        meta["loading_progress_current"] = len(digests_by_category)
-        meta["loading_detail"] = (
-            f"Sweep build in progress ({len(digests_by_category)}/{len(ORDERED_SOURCE_CATEGORIES)})."
-        )
-        meta["updated_at"] = now_utc_iso()
-        set_json_with_ttl(store, session_key(session_id, "meta"), meta)
-        emit_progress(
-            status="summarizing",
-            stage="building_digests",
-            detail=meta["loading_detail"],
-            progress_current=meta["loading_progress_current"],
-            progress_total=meta["loading_progress_total"],
-            current_source=None,
-            session_id=session_id,
-        )
 
     # --- offline LLM enrichment (company filter + paper domain) ---
     run_dir_str = store.get(artifact_root_key(session_id))
@@ -2456,80 +1728,15 @@ def run_session_enrichment(
 
     briefing: dict[str, Any] | None = None
     if briefing_generator is not None:
-        meta["loading_stage"] = "generating_briefing"
-        meta["loading_detail"] = "Aggregating collection results to generate the daily briefing."
-        meta["loading_progress_current"] = 0
-        meta["loading_progress_total"] = 1
-        meta["loading_current_source"] = None
-        meta["updated_at"] = now_utc_iso()
-        set_json_with_ttl(store, session_key(session_id, "meta"), meta)
-        emit_progress(
-            status="summarizing",
-            stage="generating_briefing",
-            detail=meta["loading_detail"],
-            progress_current=0,
-            progress_total=1,
-            current_source=None,
-            session_id=session_id,
-        )
         briefing_input = build_briefing_input(documents_by_id, feed_lists)
         briefing = briefing_generator.generate_briefing(briefing_input)
         set_json_with_ttl(store, session_key(session_id, "briefing"), briefing)
-        meta["loading_progress_current"] = 1
-        meta["loading_detail"] = (
-            "Daily briefing generation complete."
-            if not briefing.get("error")
-            else f"Briefing generation error: {briefing.get('error', '')}"
-        )
-        meta["updated_at"] = now_utc_iso()
-        set_json_with_ttl(store, session_key(session_id, "meta"), meta)
-        emit_progress(
-            status="summarizing",
-            stage="generating_briefing",
-            detail=meta["loading_detail"],
-            progress_current=1,
-            progress_total=1,
-            current_source=None,
-            session_id=session_id,
-        )
 
     meta["digests_ready"] = True
     meta["summaries_ready"] = summaries_ready
     meta["updated_at"] = now_utc_iso()
     meta["status"] = "partial_error" if summary_errors else "ready"
-    meta["loading_stage"] = meta["status"]
-    briefing_error = briefing.get("error") if briefing else None
-    if summary_errors:
-        meta["loading_detail"] = (
-            f"Pattern pass completed {summaries_ready} item(s), {summary_errors} fault(s) remaining."
-        )
-    elif briefing_error:
-        meta["loading_detail"] = (
-            "Document summaries and category digests are ready, "
-            "but daily briefing generation failed."
-        )
-    elif summaries_ready == 0 and pending_total > 0:
-        meta["loading_detail"] = (
-            "LLM provider not connected; skipped pattern pass and "
-            f"generated {len(ORDERED_SOURCE_CATEGORIES)} signal sweep(s) only."
-        )
-    else:
-        meta["loading_detail"] = (
-            f"Pattern pass and {len(ORDERED_SOURCE_CATEGORIES)} signal sweep(s) generation complete."
-        )
-    meta["loading_progress_current"] = len(ORDERED_SOURCE_CATEGORIES)
-    meta["loading_progress_total"] = len(ORDERED_SOURCE_CATEGORIES)
-    meta["loading_current_source"] = None
     set_json_with_ttl(store, session_key(session_id, "meta"), meta)
-    emit_progress(
-        status=str(meta["status"]),
-        stage=str(meta["loading_stage"]),
-        detail=str(meta["loading_detail"]),
-        progress_current=int(meta["loading_progress_current"]),
-        progress_total=int(meta["loading_progress_total"]),
-        current_source=None,
-        session_id=session_id,
-    )
 
     dashboard = build_dashboard_payload(
         session_id=session_id,
@@ -2587,33 +1794,6 @@ def process_enrichment_queue(
             return processed
 
 
-def update_bootstrap_state(
-    store: RedisLike,
-    *,
-    status: str,
-    run_label: str,
-    stage: str,
-    detail: str,
-    progress_current: int = 0,
-    progress_total: int = 0,
-    current_source: str | None = None,
-    error: str | None = None,
-) -> None:
-    existing = get_bootstrap_state(store) or {}
-    payload = build_homepage_bootstrap_state(
-        status=status,
-        run_label=run_label,
-        stage=stage,
-        detail=detail,
-        progress_current=progress_current,
-        progress_total=progress_total,
-        current_source=current_source,
-        error=error,
-    )
-    payload["started_at"] = existing.get("started_at") or payload["started_at"]
-    set_bootstrap_state(store, payload)
-
-
 def run_homepage_bootstrap(
     store: RedisLike,
     *,
@@ -2621,76 +1801,14 @@ def run_homepage_bootstrap(
     timeout: float = 30.0,
 ) -> None:
     try:
-        def handle_collect_progress(event: dict[str, Any]) -> None:
-            update_bootstrap_state(
-                store,
-                status="collecting",
-                run_label=run_label,
-                stage=str(event.get("stage") or "fetching_sources"),
-                detail=str(
-                    event.get("detail")
-                    or "Scanning live data."
-                ),
-                progress_current=resolve_collect_progress_current(event),
-                progress_total=int(event.get("total_sources") or 0),
-                current_source=(
-                    str(event.get("current_source"))
-                    if event.get("current_source")
-                    else None
-                ),
-            )
-
-        def handle_publish_progress(event: dict[str, Any]) -> None:
-            update_bootstrap_state(
-                store,
-                status=str(event.get("status") or "collecting"),
-                run_label=run_label,
-                stage=str(event.get("stage") or "publishing_documents"),
-                detail=str(
-                    event.get("detail")
-                    or "Cache write in progress."
-                ),
-                progress_current=int(event.get("progress_current") or 0),
-                progress_total=int(event.get("progress_total") or 0),
-                current_source=(
-                    str(event.get("current_source"))
-                    if event.get("current_source")
-                    else None
-                ),
-            )
-
         _, run_dir = collect_run(
             run_label=run_label,
             timeout=timeout,
-            progress_callback=handle_collect_progress,
         )
-        result = publish_run(
-            store,
-            run_dir,
-            queue=False,
-            progress_callback=handle_publish_progress,
-        )
+        result = publish_run(store, run_dir, queue=False)
         run_session_enrichment(store, result["session_id"])
-        store.delete(BOOTSTRAP_STATE_KEY)
-    except Exception as exc:
-        current_state = get_bootstrap_state(store) or {}
-        set_bootstrap_state(
-            store,
-            build_homepage_bootstrap_state(
-                status="error",
-                run_label=run_label,
-                stage=str(current_state.get("stage") or "error"),
-                detail="A fault occurred during cold boot.",
-                progress_current=int(current_state.get("progress_current") or 0),
-                progress_total=int(current_state.get("progress_total") or 0),
-                current_source=(
-                    str(current_state.get("current_source"))
-                    if current_state.get("current_source")
-                    else None
-                ),
-                error=str(exc),
-            ),
-        )
+    except Exception:
+        logger.exception("Error during homepage bootstrap")
     finally:
         set_homepage_bootstrap_running(False)
 
@@ -2705,197 +1823,37 @@ def run_session_reload(
     timeout: float = 30.0,
 ) -> None:
     try:
-        def handle_collect_progress(event: dict[str, Any]) -> None:
-            update_session_reload_state(
-                store,
-                status="collecting",
-                run_label=run_label,
-                stage=str(event.get("stage") or "fetching_sources"),
-                detail=str(
-                    event.get("detail")
-                    or "Re-sweeping live data."
-                ),
-                progress_current=resolve_collect_progress_current(event),
-                progress_total=int(event.get("total_sources") or 0),
-                current_source=(
-                    str(event.get("current_source"))
-                    if event.get("current_source")
-                    else None
-                ),
-                session_id=(
-                    str(event.get("run_id"))
-                    if event.get("run_id")
-                    else None
-                ),
-            )
-
-        def handle_enrichment_progress(event: dict[str, Any]) -> None:
-            update_session_reload_state(
-                store,
-                status=str(event.get("status") or "summarizing"),
-                run_label=run_label,
-                stage=str(event.get("stage") or "summarizing_documents"),
-                detail=str(
-                    event.get("detail")
-                    or "Updating pattern pass and sweeps."
-                ),
-                progress_current=int(event.get("progress_current") or 0),
-                progress_total=int(event.get("progress_total") or 0),
-                current_source=(
-                    str(event.get("current_source"))
-                    if event.get("current_source")
-                    else None
-                ),
-                session_id=(
-                    str(event.get("session_id"))
-                    if event.get("session_id")
-                    else None
-                ),
-            )
-
-        def handle_publish_progress(event: dict[str, Any]) -> None:
-            update_session_reload_state(
-                store,
-                status=str(event.get("status") or "collecting"),
-                run_label=run_label,
-                stage=str(event.get("stage") or "publishing_documents"),
-                detail=str(
-                    event.get("detail")
-                    or "Cache write in progress."
-                ),
-                progress_current=int(event.get("progress_current") or 0),
-                progress_total=int(event.get("progress_total") or 0),
-                current_source=(
-                    str(event.get("current_source"))
-                    if event.get("current_source")
-                    else None
-                ),
-                session_id=(
-                    str(event.get("session_id"))
-                    if event.get("session_id")
-                    else None
-                ),
-            )
-
-        run_manifest, run_dir = collect_run(
+        _, run_dir = collect_run(
             sources=sources,
-                limit=limit,
+            limit=limit,
             output_dir=output_dir,
             run_label=run_label,
             timeout=timeout,
-            progress_callback=handle_collect_progress,
         )
-        result = publish_run(
-            store,
-            run_dir,
-            queue=False,
-            progress_callback=handle_publish_progress,
-        )
-        enrichment_result = run_session_enrichment(
-            store,
-            result["session_id"],
-            progress_callback=handle_enrichment_progress,
-        )
-        meta = enrichment_result["meta"]
-        update_session_reload_state(
-            store,
-            status=str(meta.get("status") or "ready"),
-                run_label=run_label,
-            stage=str(meta.get("loading_stage") or meta.get("status") or "ready"),
-            detail=str(
-                meta.get("loading_detail")
-                or "Probe cycle complete."
-            ),
-            progress_current=int(meta.get("loading_progress_current") or 0),
-            progress_total=int(meta.get("loading_progress_total") or 0),
-            current_source=(
-                str(meta.get("loading_current_source"))
-                if meta.get("loading_current_source")
-                else None
-            ),
-            session_id=result["session_id"],
-        )
-    except Exception as exc:
-        current_state = get_reload_state(store) or {}
-        set_reload_state(
-            store,
-            build_session_reload_state(
-                status="error",
-                run_label=run_label,
-                stage=str(current_state.get("stage") or "error"),
-                detail="A fault occurred during the probe cycle.",
-                progress_current=int(current_state.get("progress_current") or 0),
-                progress_total=int(current_state.get("progress_total") or 0),
-                current_source=(
-                    str(current_state.get("current_source"))
-                    if current_state.get("current_source")
-                    else None
-                ),
-                session_id=(
-                    str(current_state.get("session_id"))
-                    if current_state.get("session_id")
-                    else None
-                ),
-                error=str(exc),
-            ),
-        )
+        result = publish_run(store, run_dir, queue=False)
+        run_session_enrichment(store, result["session_id"])
+    except Exception:
+        logger.exception("Error during session reload")
     finally:
         set_session_reload_running(False)
+
 
 
 def start_session_reload(
     store: RedisLike,
     *,
     schedule_reload: Callable[[], None],
-    sources: list[str] | None = None,
-    limit: int | None = None,
-    output_dir: str | Path | None = None,
-    run_label: str = DEFAULT_RUN_LABEL,
-    timeout: float = 30.0,
 ) -> dict[str, Any]:
-    current_state = get_reload_state(store)
-    if current_state and is_session_reload_running():
-        return build_session_reload_response(current_state)
+    if is_session_reload_running():
+        return {"session_id": None, "status": "collecting", "error": None}
 
-    state = begin_session_reload(
-        store,
-        run_label=run_label,
-    )
+    set_session_reload_running(True)
     try:
         schedule_reload()
     except Exception:
-        reset_session_reload_state(store)
+        set_session_reload_running(False)
         raise
-    return build_session_reload_response(state)
-
-
-def get_or_bootstrap_dashboard_response(
-    store: RedisLike,
-    *,
-    schedule_bootstrap: Callable[[], None],
-    run_label: str = HOMEPAGE_BOOTSTRAP_RUN_LABEL,
-) -> dict[str, Any]:
-    try:
-        return get_dashboard_response(store, session="active")
-    except KeyError:
-        bootstrap_state = get_bootstrap_state(store)
-        if bootstrap_state and bootstrap_state.get("status") == "collecting":
-            if is_homepage_bootstrap_running():
-                return build_bootstrap_dashboard(bootstrap_state)
-        elif bootstrap_state and bootstrap_state.get("status") == "error":
-            return build_bootstrap_dashboard(bootstrap_state)
-
-        bootstrap_state, should_start = begin_homepage_bootstrap(
-            store,
-            run_label=run_label,
-        )
-        if should_start:
-            try:
-                schedule_bootstrap()
-            except Exception:
-                reset_homepage_bootstrap_state(store)
-                raise
-        return build_bootstrap_dashboard(bootstrap_state)
+    return {"session_id": None, "status": "collecting", "error": None}
 
 
 def get_dashboard_response(

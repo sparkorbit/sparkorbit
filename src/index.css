@@ -156,60 +156,6 @@ body {
   }
 }
 
-@keyframes orbit-loading-sweep {
-  0% {
-    transform: translateX(-120%);
-  }
-
-  100% {
-    transform: translateX(320%);
-  }
-}
-
-.orbit-loader-shell {
-  border: 1px solid var(--color-orbit-border-strong);
-  background:
-    linear-gradient(180deg, rgb(11 16 11 / 0.96), rgb(5 7 5 / 0.98)),
-    var(--color-orbit-bg);
-  box-shadow:
-    0 0 0 1px rgb(141 252 84 / 0.06),
-    0 18px 60px rgb(0 0 0 / 0.45);
-  padding: 2rem 1.4rem;
-}
-
-.orbit-loading-bar {
-  position: relative;
-  overflow: hidden;
-  height: 14px;
-  border: 1px solid var(--color-orbit-border-strong);
-  background:
-    linear-gradient(
-      90deg,
-      rgb(141 252 84 / 0.05),
-      rgb(141 252 84 / 0.02) 35%,
-      transparent 35%,
-      transparent 100%
-    ),
-    var(--color-orbit-bg);
-}
-
-.orbit-loading-bar__fill {
-  height: 100%;
-  background:
-    linear-gradient(
-      90deg,
-      rgb(141 252 84 / 0.22),
-      rgb(141 252 84 / 0.92) 45%,
-      rgb(214 245 208 / 0.92) 100%
-    );
-  box-shadow: 0 0 24px rgb(141 252 84 / 0.18);
-  transition: width 280ms ease-out;
-}
-
-.orbit-loading-bar__fill--indeterminate {
-  width: 28%;
-  animation: orbit-loading-sweep 1.4s linear infinite;
-}
 
 .orbit-leaderboard-entry {
   position: relative;
