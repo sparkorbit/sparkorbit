@@ -76,7 +76,12 @@ echo ""
 echo "  Building and starting containers..."
 echo ""
 
-docker compose "${compose_args[@]}" up --build -d --remove-orphans "${EXTRA_ARGS[@]}"
+docker_cmd=(docker compose "${compose_args[@]}" up --build -d --remove-orphans)
+if (( ${#EXTRA_ARGS[@]} > 0 )); then
+  docker_cmd+=("${EXTRA_ARGS[@]}")
+fi
+
+"${docker_cmd[@]}"
 
 echo ""
 echo "  ✓ All containers started successfully."

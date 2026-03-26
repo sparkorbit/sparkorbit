@@ -5,7 +5,7 @@
 # SparkOrbit - 06. Operational Playbook
 
 > Canonical runbook for setup and execution
-> Last updated: 2026-03-25
+> Last updated: 2026-03-26
 
 ## 0. Rule
 
@@ -36,7 +36,7 @@
 
 ## 2. Environment Setup
 
-Node 기반 frontend tooling (`npm install`, `npm run build`, `npm run dev`) 은 Node `^20.19.0 || >=22.12.0` 를 요구한다. 전체 앱 Docker 빌드는 `frontend/Dockerfile` 에서 `node:22-alpine` 을 사용하므로 Linux, macOS, Windows host에서 동일하게 동작한다. `@rolldown/binding-*`, `@tailwindcss/oxide-*` 같은 플랫폼별 바이너리는 root direct dependency로 고정하지 않고 transitive optional dependency로만 둔다.
+Node 기반 frontend tooling (`npm install`, `npm run build`, `npm run dev`) 은 Node `^20.19.0 || >=22.12.0` 를 요구한다. 현재 공식 로컬 실행 지원 범위는 Linux와 macOS다. Windows는 아직 공식 지원 대상이 아니다. 전체 앱 Docker 빌드는 `frontend/Dockerfile` 에서 `node:22-alpine` 을 사용한다. `@rolldown/binding-*`, `@tailwindcss/oxide-*` 같은 플랫폼별 바이너리는 root direct dependency로 고정하지 않고 transitive optional dependency로만 둔다.
 
 Collection 작업 루트:
 
@@ -137,13 +137,13 @@ curl http://localhost:11434/api/tags
 
 ## 4-b. Full Local Stack
 
-저장소 루트에서 아래 명령으로 frontend, backend, redis, worker를 띄운다. 스크립트가 local LLM bundle 포함 여부를 한 번 묻는다.
+저장소 루트에서 아래 명령으로 frontend, backend, redis, worker를 띄운다. 이 절차는 Linux/macOS 기준이다. 스크립트가 local LLM bundle 포함 여부를 한 번 묻는다.
 
 ```bash
 bash scripts/docker-up.sh
 ```
 
-macOS/Windows에서 Bash 스크립트 대신 Docker Desktop/Engine만으로 실행하고 싶다면 아래 `docker compose up --build` 경로를 그대로 사용하면 된다.
+Linux/macOS에서 Bash 스크립트 대신 Docker Compose만으로 실행하고 싶다면 아래 `docker compose up --build` 경로를 그대로 사용하면 된다. Windows용 공식 절차는 아직 제공하지 않는다.
 
 LLM bundle을 포함하면 첫 실행은 `qwen3.5:4b` model pull까지 같이 진행하므로 몇 분 걸릴 수 있다.
 

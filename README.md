@@ -26,6 +26,12 @@
 
 ***
 
+> **Official local support:** Linux and macOS
+>
+> **Windows:** not officially supported yet
+
+***
+
 ## What It Does
 
 **Tired of AI FOMO?** New papers every hour, model drops you missed, benchmark shakeups you heard about too late — stop drowning in tabs. SparkOrbit pulls everything into one screen so you can catch up in a few minutes.
@@ -34,7 +40,7 @@
 - **Rank** — every item sorted by what matters: likes, downloads, stars, scores. Not just "newest first."
 - **Compare** — AI Model Leaderboard shows LMArena rankings across Text, Code, Vision, Image, Video, and Search side by side.
 - **Summarize** — optional local LLM reads everything and generates a daily briefing + paper topic grouping. Runs on your GPU, stays on your machine.
-- **One command** — `bash scripts/docker-up.sh` and you're live. Docker handles the rest.
+- **One command** — on Linux and macOS, `bash scripts/docker-up.sh` and you're live. Docker handles the rest.
 - **Fully open-source** — run it, fork it, extend it. Add your own sources. Make the orbit wider.
 
 ***
@@ -55,7 +61,9 @@
 
 ***
 
-## Quick Start
+## Quick Start (Linux/macOS)
+
+Windows is not officially supported yet.
 
 ```bash
 git clone https://github.com/sparkorbit/sparkorbit.git
