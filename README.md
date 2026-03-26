@@ -44,13 +44,13 @@
 > **GPU available** — full experience with AI-generated summaries, paper domain grouping, and daily briefing.
 
 <p align="center">
-  <img src="./AIorbits_comp.png" alt="SparkOrbit with GPU — full AI features" width="100%"/>
+  <img src="./docs/images/AIorbits_comp.png" alt="SparkOrbit with GPU — full AI features" width="100%"/>
 </p>
 
 > **No GPU** — you still get the complete dashboard with 30+ sources, leaderboards, and engagement rankings. LLM features are simply skipped.
 
 <p align="center">
-  <img src="./AIOribits_NoGPU.png" alt="SparkOrbit without GPU — source curation only" width="100%"/>
+  <img src="./docs/images/AIOribits_NoGPU.png" alt="SparkOrbit without GPU — source curation only" width="100%"/>
 </p>
 
 ***
@@ -155,5 +155,5 @@ If you searched for any of these, you're in the right place:
 ***
 
 <p align="center">
-  <i>For the orbit.</i> 🛰️
+  <i>For the AI orbit.</i> 🛰️
 </p>

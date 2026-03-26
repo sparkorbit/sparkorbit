@@ -30,3 +30,5 @@ pipelines/source_fetch/.venv/
 pipelines/source_fetch/data/runs/
 __pycache__/
 .claude/
+CLAUDE.md
+AGENTS.md
