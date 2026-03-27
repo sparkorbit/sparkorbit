@@ -1,15 +1,10 @@
 <p align="center">
-  <a href="./README.md">🇺🇸 English</a> · <a href="./README.ko.md">🇰🇷 한국어</a>
-</p>
-
-<p align="center">
+  <h1 align="center">🛰️ SparkOrbit 🛰️</h1>
+  <p align="center">
   <img src="./docs/images/SparKOrbit.png" alt="SparkOrbit" width="300"/>
   <br/>
   <sub>Image credit: ChatGPT</sub>
 </p>
-
-<p align="center">
-  <h1 align="center">🛰️ SparkOrbit 🛰️</h1>
   <p align="center">
     <b><i>✦ AI FOMO는 이제 그만 — 중요한 시그널만 궤도에서 포착하세요 ✦</i></b>
   </p>
@@ -32,6 +27,10 @@
 
 <p align="center">
   <a href="./docs/README.ko.md">문서</a> · <a href="https://github.com/sparkorbit/sparkorbit/issues">이슈</a> · <a href="#contributing">기여하기</a>
+</p>
+
+<p align="center">
+  <a href="./README.md">🇺🇸 English</a> · <a href="./README.ko.md">🇰🇷 한국어</a>
 </p>
 
 <p align="center">
@@ -73,9 +72,9 @@ cd sparkorbit
 bash scripts/docker-up.sh
 ```
 
-
 **주의**  
 
+> **⚠️ Docker가 없으면** 스크립트가 먼저 현재 환경을 확인한 뒤, 설치를 도와주는 안내를 제공합니다.
 > **⚠️ `Use local LLM bundle? [Y/n]`** -- AI 요약 기능의 사용 여부를 결정합니다. 본인의 장비에 맞춰 사용하세요. LLM을 사용하기 위해서는 local GPU가 필요합니다. 
 
 | 선택 | 제공되는 기능 | 요구 사항 |
@@ -83,7 +82,7 @@ bash scripts/docker-up.sh
 | **Y** (기본값) | 전체 기능 — 오늘 집중할 소식 요약, 논문 핵심 주제 분류 등 | NVIDIA GPU, ~13GB VRAM |
 | **N** | 소스 큐레이션만 제공, 요약 없음 | Docker|
 
-GPU가 없어도 괜찮습니다 — `N`을 선택하면 30개 이상의 소스, 리더보드, 인기 순위를 모두 볼 수 있습니다. AI 기능은 추가 옵션이지, 필수가 아닙니다. 없어도 광활한 정보의 호수를 탐험할 수 있습니다.
+GPU가 없어도 괜찮습니다 — `N`을 선택하면 40개 이상의 소스, 리더보드, 인기 순위를 모두 볼 수 있습니다. AI 기능은 추가 옵션이지, 필수가 아닙니다. 없어도 광활한 정보의 호수를 탐험할 수 있습니다.
 
 실행이 끝나면 **http://localhost:3000**을 열어보세요. 원격 서버로 접속한다면 서버 IP로 대체하여 접속할 수 있습니다.
 

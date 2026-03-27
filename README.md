@@ -1,15 +1,10 @@
 <p align="center">
-  <a href="./README.md">🇺🇸 English</a> · <a href="./README.ko.md">🇰🇷 한국어</a>
-</p>
-
-<p align="center">
+  <h1 align="center">🛰️ SparkOrbit 🛰️</h1>
+  <p align="center">
   <img src="./docs/images/SparKOrbit.png" alt="SparkOrbit" width="300"/>
   <br/>
   <sub>Image credit: ChatGPT</sub>
 </p>
-
-<p align="center">
-  <h1 align="center">🛰️ SparkOrbit 🛰️</h1>
   <p align="center">
     <b><i>✦ No more AI FOMO — orbit the signals that matter ✦</i></b>
   </p>
@@ -32,6 +27,10 @@
 
 <p align="center">
   <a href="./docs/README.md">Documentation</a> · <a href="https://github.com/sparkorbit/sparkorbit/issues">Issues</a> · <a href="#contributing">Contributing</a>
+</p>
+
+<p align="center">
+  <a href="./README.md">🇺🇸 English</a> · <a href="./README.ko.md">🇰🇷 한국어</a>
 </p>
 
 <p align="center">
@@ -75,6 +74,7 @@ bash scripts/docker-up.sh
 
 **Note**
 
+> **⚠️ If Docker is missing,** the script checks your environment first and offers guided installation help before continuing.
 > **⚠️ `Use local LLM bundle? [Y/n]`** — This decides whether AI summarization runs on your machine. Choose based on your hardware. A local GPU is required for LLM features.
 
 | Answer | What you get | Requirements |
