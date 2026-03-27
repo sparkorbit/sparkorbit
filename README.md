@@ -32,7 +32,6 @@
 
 > **Tested on:** Linux, macOS, and Windows.
 > Edge cases may exist depending on Docker/WSL setup — see [Known Issues](#known-issues)
-
 > **Don't want to install?** We're considering a live demo server so you can try SparkOrbit right from your browser. No promises yet — stay tuned.
 
 ***
