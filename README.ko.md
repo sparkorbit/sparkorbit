@@ -77,6 +77,12 @@ GPU가 없어도 괜찮습니다 — `N`을 선택하면 40개 이상의 소스,
 
 실행이 끝나면 **http://localhost:3000**을 열어보세요. 원격 서버로 접속한다면 서버 IP로 대체하여 접속할 수 있습니다.
 
+**종료하기**
+
+```bash
+docker compose down
+```
+
 <details>
 <summary><b>스크린샷: GPU 있음 (전체 AI 기능)</b></summary>
 <br/>

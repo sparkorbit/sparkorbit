@@ -77,6 +77,12 @@ bash scripts/docker-up.sh
 
 - Once it's up, open **http://localhost:3000**. On a remote server, replace localhost with your server IP.
 
+**Stopping**
+
+```bash
+docker compose down
+```
+
 <details>
 <summary><b>Screenshot: With GPU (full AI features)</b></summary>
 <br/>
