@@ -74,7 +74,7 @@ bash scripts/docker-up.sh
 
 **Note**
 
-> **⚠️ If Docker is missing,** the script checks your environment first and offers guided installation help before continuing.
+> ⚠️ If Docker is missing, the script checks your environment first and offers guided installation help before continuing.
 > **⚠️ `Use local LLM bundle? [Y/n]`** — This decides whether AI summarization runs on your machine. Choose based on your hardware. A local GPU is required for LLM features.
 
 | Answer | What you get | Requirements |
