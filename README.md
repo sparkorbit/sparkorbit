@@ -43,7 +43,7 @@
 
 - **Collect** — 40+ sources fetched on demand. Papers, trending models, top stories, company announcements and updates. No API keys, no login required.
 - **Rank** — every item sorted by what matters: likes, downloads, stars, scores. Not just "newest first."
-- **Compare** — AI Model Leaderboard shows the latest rankings across Text, Code, Vision, Image, Video, and Search side by side. No more hunting for the current SoTA.
+- **Compare** — AI Model Leaderboard shows the latest rankings across Text, Code, Vision, Image, Video, and Search side by side. **No more hunting for the current SoTA**.
 - **Summarize** — local LLM (Qwen 3.5 4B) reads everything and generates a daily briefing + paper topic grouping. Runs on your GPU, stays on your machine.
 - **One command** — `bash scripts/docker-up.sh` and you're live. Add `--with-llm` for full AI features with GPU, or `--without-llm` to skip. Docker handles the rest.
 - **Fully open-source** — run it, fork it, extend it. Add your own sources and widen the orbit with us.
