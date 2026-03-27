@@ -77,6 +77,14 @@ bash scripts/docker-up.sh
 
 - Once it's up, open **http://localhost:3000**. On a remote server, replace localhost with your server IP.
 
+**Stopping**
+
+```bash
+docker compose down
+```
+
+You can stop the containers when you're done, or leave them running and come back whenever you like. Stopping frees up system resources.
+
 <details>
 <summary><b>Screenshot: With GPU (full AI features)</b></summary>
 <br/>
