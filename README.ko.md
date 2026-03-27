@@ -97,7 +97,7 @@ GPU가 없어도 괜찮습니다 — `N`을 선택하면 40개 이상의 소스,
 
 ## Features (부가 기능)
 
-1. <img src="https://img.shields.io/badge/Normal-blue" height="20"/> --  오른쪽 상단의 **RELOAD** 버튼을 누르면 언제든 모든 소스를 다시 수집하고 LLM 기능을 재실행할 수 있습니다 — 여러 데이터는 매일매일 새롭게 공유되므로, 이들을 놓치지 않기 위해서는 필요할 때 RELOAD를 눌러 데이터를 최신화 할 수 있습니다.
+1. <img src="https://img.shields.io/badge/Normal-blue" height="20"/> — 오른쪽 상단의 **RELOAD** 버튼을 누르면 모든 소스를 다시 수집하고 LLM 기능을 재실행합니다. 소스들은 매일 새로운 데이터를 공개하므로, **날짜가 바뀌면 반드시 RELOAD를 눌러 최신 데이터로 갱신하세요.**
 
 2. <img src="https://img.shields.io/badge/Normal-blue" height="20"/> -- Side Panel의 Manage Panels을 활용하여 확인하고 싶은 정보들만 선택하거나 패널 노출의 순서를 제어할 수 있습니다.
 

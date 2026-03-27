@@ -97,7 +97,7 @@ bash scripts/docker-up.sh
 
 ## Features
 
-1. <img src="https://img.shields.io/badge/Normal-blue" height="16"/> — Hit the **RELOAD** button (top-right) anytime to re-collect all sources and re-run LLM features. Data is updated daily across sources, so reload whenever you want the latest.
+1. <img src="https://img.shields.io/badge/Normal-blue" height="16"/> — Hit the **RELOAD** button (top-right) to re-collect all sources and re-run LLM features. Sources publish new data every day, so **we strongly recommend reloading at least once a day** to stay current.
 
 2. <img src="https://img.shields.io/badge/Normal-blue" height="16"/> — Use **Manage Panels** in the Side Panel to select which information to display and control the panel order.
 
