@@ -1,19 +1,9 @@
+<h1 align="center">🛰️ SparkOrbit 🛰️</h1>
 <p align="center">
-  <h1 align="center">🛰️ SparkOrbit 🛰️</h1>
-  <p align="center">
-  <img src="./docs/images/SparKOrbit.png" alt="SparkOrbit" width="300"/>
-  <br/>
-  <sub>Image credit: ChatGPT</sub>
-</p>
-  <p align="center">
-    <b><i>✦ AI FOMO는 이제 그만 — 중요한 시그널만 궤도에서 포착하세요 ✦</i></b>
-  </p>
-  <p align="center">
-    <b>논문, 모델, 벤치마크, 뉴스 — AI 정보를 하나의 대시보드에서.</b>
-  </p>
-  <p align="center">
-    집에서 진행한 개인 해커톤 결과물입니다. Codex & Claude와 함께 만들었습니다. Keep going!
-  </p>
+  <img src="./docs/images/SparKOrbit.png" alt="SparkOrbit" width="300"/><br/>
+  <b><i>✦ AI FOMO는 이제 그만 — 중요한 시그널만 궤도에서 포착하세요 ✦</i></b><br/>
+  <b>논문, 모델, 벤치마크, 뉴스 — AI 정보를 하나의 대시보드에서.</b><br/>
+  <sub>집에서 진행한 개인 해커톤 결과물입니다. Codex & Claude와 함께 만들었습니다. Keep going!</sub>
 </p>
 
 <p align="center">

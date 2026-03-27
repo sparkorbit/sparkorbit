@@ -1,19 +1,9 @@
+<h1 align="center">🛰️ SparkOrbit 🛰️</h1>
 <p align="center">
-  <h1 align="center">🛰️ SparkOrbit 🛰️</h1>
-  <p align="center">
-  <img src="./docs/images/SparKOrbit.png" alt="SparkOrbit" width="300"/>
-  <br/>
-  <sub>Image credit: ChatGPT</sub>
-</p>
-  <p align="center">
-    <b><i>✦ No more AI FOMO — orbit the signals that matter ✦</i></b>
-  </p>
-  <p align="center">
-    <b>All the AI info you need — papers, models, benchmarks, and news in one dashboard.</b>
-  </p>
-  <p align="center">
-    Our personal home hackathon result, built with brilliant coding agents — Codex & Claude. Keep going!
-  </p>
+  <img src="./docs/images/SparKOrbit.png" alt="SparkOrbit" width="300"/><br/>
+  <b><i>✦ No more AI FOMO — orbit the signals that matter ✦</i></b><br/>
+  <b>All the AI info you need — papers, models, benchmarks, and news in one dashboard.</b><br/>
+  <sub>Our personal home hackathon result, built with brilliant coding agents — Codex & Claude. Keep going!</sub>
 </p>
 
 <p align="center">
