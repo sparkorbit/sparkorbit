@@ -14,7 +14,8 @@ RUN pip install --no-cache-dir \
 
 COPY . /app
 
-RUN chmod +x /app/backend/docker/entrypoint-api.sh /app/backend/docker/entrypoint-worker.sh
+RUN sed -i 's/\r$//' /app/backend/docker/entrypoint-api.sh /app/backend/docker/entrypoint-worker.sh && \
+    chmod +x /app/backend/docker/entrypoint-api.sh /app/backend/docker/entrypoint-worker.sh
 
 EXPOSE 8787
 
