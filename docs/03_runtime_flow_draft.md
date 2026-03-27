@@ -1,51 +1,51 @@
-[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · **03. Runtime Flow** · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md)
+[Index](./README.md) · [🇰🇷 한국어](./03_runtime_flow_draft.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · **03. Runtime Flow** · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md)
 
 ---
 
 # SparkOrbit Docs - 03. Runtime Flow
 
-> Current implemented backend / serving flow
-> Last updated: 2026-03-26
+> Current implemented backend and serving flow
+> Last updated: 2026-03-27
 
 > Note
-> 파일명은 `_draft`를 유지하지만, 현재 내용은 실제 구현된 `backend/app + Redis + frontend polling` 흐름을 설명한다.
+> The filename still keeps `_draft`, but the content below describes the real implemented flow across `backend/app`, Redis, and frontend polling.
 
 ## Purpose
 
-이 문서는 현재 저장소에 실제로 구현된 `backend/app + Redis + frontend polling` 흐름을 설명한다.
+This document explains the runtime flow that is actually implemented in the repository today.
 
-- source 수집 자체는 [05. Data Collection Pipeline](./05_data_collection_pipeline.md)에 정리한다.
-- 여기서는 그 run output를 어떻게 Redis session으로 publish하고, frontend가 어떻게 읽는지에 집중한다.
+- Source collection itself is documented in [05. Data Collection Pipeline](./05_data_collection_pipeline.md).
+- This page focuses on how run outputs are published into Redis sessions and then served to the frontend.
 
 ## Current Components
 
 | Component | Path | Role |
 |----------|------|------|
-| **collector wrapper** | `backend/app/services/collector.py` | `pipelines/source_fetch`의 `run_collection(...)` 호출 |
-| **session runtime** | `backend/app/services/session_service.py` | bootstrap, reload, publish, summarize, dashboard rebuild |
-| **summary provider** | `backend/app/services/summary_provider.py` | `noop` / `heuristic` provider abstraction |
-| **FastAPI app** | `backend/app/main.py` | `/api/*` 라우터와 app wiring |
-| **dashboard routes** | `backend/app/api/routes/dashboard.py` | dashboard, digest, document |
-| **job routes** | `backend/app/api/routes/jobs.py` | active job 조회, progress polling |
-| **session routes** | `backend/app/api/routes/sessions.py` | reload start |
-| **leaderboard routes** | `backend/app/api/routes/leaderboards.py` | leaderboard overview 응답 |
-| **Redis client** | `backend/app/core/store.py` | RedisLike abstraction + socket client |
-| **React frontend** | `src/App.tsx` | dashboard fetch, job polling, fullscreen loading |
-| **dashboard workspace** | `src/components/dashboard/PanelWorkspace.tsx` | main, info, summary layout |
-| **docker compose** | `docker-compose.yml` | `redis + backend + worker + frontend` local runtime |
+| **collector wrapper** | `backend/app/services/collector.py` | Calls `run_collection(...)` from `pipelines/source_fetch` |
+| **session runtime** | `backend/app/services/session_service.py` | Handles bootstrap, reload, publish, summarize, and dashboard rebuild |
+| **summary provider** | `backend/app/services/summary_provider.py` | Provider abstraction for `noop` and `heuristic` summary behavior |
+| **FastAPI app** | `backend/app/main.py` | Wires the app and `/api/*` routes |
+| **dashboard routes** | `backend/app/api/routes/dashboard.py` | Serves dashboard, digest, and document payloads |
+| **job routes** | `backend/app/api/routes/jobs.py` | Serves active-job lookup and progress polling |
+| **session routes** | `backend/app/api/routes/sessions.py` | Starts reload runs |
+| **leaderboard routes** | `backend/app/api/routes/leaderboards.py` | Serves leaderboard overview payloads |
+| **Redis client** | `backend/app/core/store.py` | Provides the Redis-like abstraction and socket client |
+| **React frontend** | `src/App.tsx` | Fetches dashboard state, polls jobs, and renders fullscreen loading |
+| **dashboard workspace** | `src/components/dashboard/PanelWorkspace.tsx` | Renders the main, info, and summary layout |
+| **docker compose** | `docker-compose.yml` | Runs `redis + backend + worker + frontend` locally |
 
 ## Source Of Truth
 
-runtime이 붙어도 canonical artifact는 바뀌지 않는다.
+Adding runtime serving does not change the canonical artifacts.
 
-1. `pipelines/source_fetch`가 `pipelines/source_fetch/data/runs/<run_id>/` 아래 run output를 만든다.
-2. backend는 이 run output를 읽어 Redis session 키를 만든다.
-3. frontend는 JSONL run output를 직접 읽지 않고 backend API/BFF만 사용한다.
+1. `pipelines/source_fetch` writes run outputs under `pipelines/source_fetch/data/runs/<run_id>/`.
+2. The backend reads those run outputs and publishes Redis session keys.
+3. The frontend never reads JSONL run outputs directly. It only uses backend API responses.
 
-즉:
+In short:
 
 ```text
-run output(JSONL/JSON) = source of truth
+run output (JSONL/JSON) = source of truth
 Redis session = serving / cache / live session layer
 ```
 
@@ -90,38 +90,38 @@ sequenceDiagram
 ### Session Identity
 
 - `session_id = run_id`
-- active pointer는 `sparkorbit:session:active`
+- The active pointer lives at `sparkorbit:session:active`
 
 ### Session Status
 
 | Status | Meaning |
 |--------|---------|
-| `collecting` | source fetch 또는 publish 직전/직후 단계 진행 중 |
-| `published` | doc/feed/dashboard가 Redis에 올라간 상태 |
-| `summarizing` | 선택 문서 요약과 digest 생성 중 |
-| `ready` | feed + digest + session dashboard 준비 완료 |
-| `partial_error` | 일부 요약은 실패했지만 session은 usable |
-| `error` | bootstrap 또는 reload 실행 중 오류 |
-| `idle` | reload state 전용. 현재 진행 중인 reload 없음 |
+| `collecting` | Source fetch or publish is currently running |
+| `published` | Document, feed, and dashboard payloads have been written to Redis |
+| `summarizing` | Selected documents are being summarized and digests are being built |
+| `ready` | Feed, digest, and session dashboard are ready |
+| `partial_error` | Some summary work failed, but the session is still usable |
+| `error` | Bootstrap or reload failed |
+| `idle` | Reload-specific state meaning no reload is in progress |
 
 ### Loading Stages
 
-frontend와 backend는 아래 stage 이름을 공유한다.
+The frontend and backend share the stage names below.
 
 | Stage | Meaning |
 |------|---------|
-| `starting` | 요청 수신 후 준비 단계 |
-| `fetching_sources` | source별 실제 fetch 진행 |
-| `writing_artifacts` | normalized, manifest, log 기록 |
-| `publishing_documents` | `doc:{document_id}` publish |
-| `publishing_views` | `feed:{source}`, `dashboard`, `active` 갱신 |
-| `summarizing_documents` | 선택 문서 summary provider 실행 |
-| `offline_labeling` | company filter + paper domain 같은 오래 걸리는 coarse task |
-| `building_digests` | category digest 생성 |
-| `building_briefing` | session briefing 생성 |
-| `ready` | 모든 단계 완료 |
-| `partial_error` | 일부 summary 실패 후 종료 |
-| `error` | 실행 실패 |
+| `starting` | Initial setup after receiving the request |
+| `fetching_sources` | Real source fetching is running |
+| `writing_artifacts` | Normalized outputs, manifests, and logs are being written |
+| `publishing_documents` | `doc:{document_id}` keys are being published |
+| `publishing_views` | `feed:{source}`, `dashboard`, and `active` pointers are being updated |
+| `summarizing_documents` | The summary provider is processing selected documents |
+| `offline_labeling` | Coarser tasks such as company filtering and paper domains are running |
+| `building_digests` | Category digests are being generated |
+| `building_briefing` | Session briefing is being generated |
+| `ready` | All stages finished successfully |
+| `partial_error` | Finished with partial summary failures |
+| `error` | Execution failed |
 
 ## Redis Model
 
@@ -129,61 +129,62 @@ frontend와 backend는 아래 stage 이름을 공유한다.
 
 | Key | TTL | Role |
 |-----|-----|------|
-| `sparkorbit:session:active` | none | 현재 active session id |
-| `sparkorbit:session:recent` | none | 최근 session id 목록. rollover 시 오래된 session prune 기준 |
-| `sparkorbit:job:{job_id}:state` | 15m | bootstrap/reload/long task 진행 상태 snapshot |
-| `sparkorbit:job:active:{surface}` | 15m | 현재 화면을 막는 active job id |
-| `sparkorbit:queue:session_enrich` | queue semantics | existing run publish 후 worker가 읽는 큐 |
+| `sparkorbit:session:active` | none | Current active session id |
+| `sparkorbit:session:recent` | none | Recent session id list used for rollover and pruning |
+| `sparkorbit:job:{job_id}:state` | 15m | Progress snapshot for bootstrap, reload, or long tasks |
+| `sparkorbit:job:active:{surface}` | 15m | Active blocking job id for a given surface |
+| `sparkorbit:queue:session_enrich` | queue semantics | Queue consumed by the worker after a run is published |
 
 ### Session Keys
 
-보존된 세션 키는 `72h` TTL을 가진다. 다만 rollover 시 Redis가 계속 커지지 않도록 최근 session만 유지하고, 더 오래된 session key는 기본적으로 prune한다. 현재 기본 보존 개수는 `2` (`active + previous`)이고 `SPARKORBIT_SESSION_RETAIN_COUNT`로 조절할 수 있다.
+Retained session keys use a `72h` TTL. To keep Redis from growing without bound, rollover also prunes older sessions. The default retain count is `2` (`active + previous`) and can be changed with `SPARKORBIT_SESSION_RETAIN_COUNT`.
 
 | Key pattern | Value |
 |-------------|-------|
-| `sparkorbit:session:{sid}:meta` | session meta + terminal loading snapshot |
+| `sparkorbit:session:{sid}:meta` | Session metadata plus the terminal loading snapshot |
 | `sparkorbit:session:{sid}:run_manifest` | `run_manifest.json` |
 | `sparkorbit:session:{sid}:source_manifest` | `source_manifest.ndjson` rows |
-| `sparkorbit:session:{sid}:doc:{document_id}` | normalized document + `llm` block |
-| `sparkorbit:session:{sid}:feed:{source}` | ordered `document_id` list |
-| `sparkorbit:session:{sid}:digest:{category}` | category digest |
-| `sparkorbit:session:{sid}:dashboard` | frontend-ready materialized dashboard |
+| `sparkorbit:session:{sid}:doc:{document_id}` | Normalized document plus `llm` block |
+| `sparkorbit:session:{sid}:feed:{source}` | Ordered `document_id` list |
+| `sparkorbit:session:{sid}:digest:{category}` | Category digest |
+| `sparkorbit:session:{sid}:dashboard` | Frontend-ready materialized dashboard |
 
 ### What Redis Does Not Store
 
-- `raw_responses` body 전체
-- standalone `metrics.ndjson` rows
-- separate cluster/event layer
+- Full `raw_responses` bodies
+- Standalone `metrics.ndjson` rows
+- A separate cluster or event layer
 
-## Publish / Enrichment Rules
+## Publish And Enrichment Rules
 
 ### Publish
 
-1. run output를 읽는다.
-2. displayable URL이 있는 문서만 남긴다.
-3. `feed_score DESC`, `sort_at DESC`로 source feed를 정렬한다.
-4. 모든 displayable document를 Redis doc key에 저장한다.
-5. source별 feed list를 저장한다.
-6. dashboard materialized view와 active pointer를 갱신한다.
+1. Read the run outputs.
+2. Keep only documents with displayable URLs.
+3. Sort each source feed by `feed_score DESC`, then `sort_at DESC`.
+4. Store every displayable document under its Redis doc key.
+5. Store the source-level feed lists.
+6. Update the materialized dashboard view and the active-session pointer.
 
 ### Summary Candidate Selection
 
-- category별 최대 `8개`
-- `summary_input_text`가 비어 있지 않아야 함
+- Maximum `8` items per category
+- `summary_input_text` must not be empty
 - `text_scope != empty`
-- 정렬은 feed ordering과 동일
+- Ordering follows the same feed ordering used on screen
 
-선택되지 않은 문서는 `llm.status = "not_selected"`로 남고, detail/drill-down에는 그대로 사용된다.
+Documents that are not selected remain available for detail and drill-down, with `llm.status = "not_selected"`.
 
 ### Summary Provider
 
-- summary 생성은 `backend/app/services/summary_provider.py`의 provider abstraction을 사용한다.
-- 기본 provider는 `noop`이고, `SPARKORBIT_SUMMARY_PROVIDER=heuristic`으로 휴리스틱 provider를 선택할 수 있다.
-- 새로운 LLM 연동은 provider factory에 구현체를 추가하는 방식으로 붙인다.
+- Summary generation goes through the provider abstraction in `backend/app/services/summary_provider.py`.
+- The default provider is `noop`.
+- `SPARKORBIT_SUMMARY_PROVIDER=heuristic` enables the heuristic provider.
+- A new LLM integration should be added as another provider implementation in the provider factory.
 
 ### Digest Scope
 
-현재 구현된 category digest는 아래 7개다.
+The currently implemented category digests are:
 
 - `papers`
 - `models`
@@ -193,7 +194,7 @@ frontend와 backend는 아래 stage 이름을 공유한다.
 - `company_cn`
 - `benchmark`
 
-cluster/event 레이어는 아직 없다.
+There is no separate cluster or event layer yet.
 
 ## API Surface
 
@@ -201,75 +202,68 @@ cluster/event 레이어는 아직 없다.
 
 | Method | Path | Role |
 |--------|------|------|
-| `GET` | `/api/health` | backend health |
-| `GET` | `/api/dashboard?session=active|{id}` | materialized dashboard |
-| `GET` | `/api/leaderboards?session=active|{id}` | leaderboard overview |
-| `GET` | `/api/digests/{id}?session=...` | one digest + referenced documents |
-| `GET` | `/api/documents/{document_id}?session=...` | full normalized document |
-| `POST` | `/api/sessions/reload` | new reload run start |
-| `GET` | `/api/jobs/active?surface=dashboard` | active job lookup |
-| `GET` | `/api/jobs/{job_id}` | progress polling snapshot |
+| `GET` | `/api/health` | Backend health |
+| `GET` | `/api/dashboard?session=active|{id}` | Materialized dashboard payload |
+| `GET` | `/api/leaderboards?session=active|{id}` | Leaderboard overview payload |
+| `GET` | `/api/digests/{id}?session=...` | One digest plus referenced documents |
+| `GET` | `/api/documents/{document_id}?session=...` | Full normalized document |
+| `POST` | `/api/sessions/reload` | Start a new reload run |
+| `GET` | `/api/jobs/active?surface=dashboard` | Active job lookup |
+| `GET` | `/api/jobs/{job_id}` | Progress polling snapshot |
 
 ## Frontend Reading Rules
 
 ### Initial Load
 
-1. 앱 시작 시 `/api/jobs/active?surface=dashboard`를 먼저 확인해 ongoing bootstrap/reload가 있는지 본다.
-2. active job이 있으면 `/api/jobs/{job_id}`를 `1.5s` 간격으로 polling한다.
-3. active job이 없으면 `/api/dashboard?session=active`를 읽는다.
-4. fullscreen loader는 job payload의 `loading` block을 그대로 렌더링한다.
+1. On app start, the frontend first checks `/api/jobs/active?surface=dashboard` to see whether bootstrap or reload is already running.
+2. If there is an active job, it polls `/api/jobs/{job_id}` every `1.5s`.
+3. If there is no active job, it requests `/api/dashboard?session=active`.
+4. The fullscreen loader renders the backend `loading` block as-is rather than recomputing it.
 
 ### Reload Resume
 
-1. `reload session` 버튼 클릭
-2. fullscreen loader 표시
-3. reload progress polling 시작
-4. 브라우저 새로고침 시에도 `GET /api/jobs/active?surface=dashboard`로 state를 복구
-5. `ready` 또는 `partial_error`가 되면 일반 dashboard로 복귀
+1. The user clicks `reload session`.
+2. The frontend shows the fullscreen loader.
+3. Reload progress polling starts.
+4. Even after a browser refresh, the frontend restores state through `GET /api/jobs/active?surface=dashboard`.
+5. When the job reaches `ready` or `partial_error`, the app returns to the normal dashboard.
 
 ### Drill-down
 
-- digest 클릭 시 `/api/digests/{id}`를 호출한다.
-- source item 클릭 시 `/api/documents/{document_id}`를 호출하고, reference URL을 새 탭으로 연다.
-- leaderboards는 `session.arenaOverview` 또는 `/api/leaderboards` 응답을 메인 패널에서 렌더링한다.
+- Clicking a digest calls `/api/digests/{id}`.
+- Clicking a source item calls `/api/documents/{document_id}` and opens the reference URL in a new tab.
+- Leaderboards render from `session.arenaOverview` or the `/api/leaderboards` response.
 
 ## Display Time Contract
 
-화면에 보이는 시간 라벨은 raw `published_at` fallback을 프론트엔드가 임의로 해석해서 만들지 않는다. backend serving layer가 문서별 `time_semantics` 를 기준으로 **display time** 을 먼저 결정하고, frontend는 그 값을 그대로 보여준다.
+Frontend time labels should not be derived by reinterpreting raw fields on the client. The backend serving layer first resolves a display-time contract per document based on `time_semantics`, and the frontend renders that resolved value.
 
-- source feed item은 `timestamp` 와 `timestampLabel` 을 함께 받는다.
-- `/api/documents/{document_id}` 응답은 `display_time = { label, value, field, semantics }` 를 포함한다.
-- `published` source는 `Published`
-- `created` source는 `Created`
-- `updated` source는 `Updated`
-- `submission` source는 `Submitted`
-- `snapshot` source는 `Snapshot`
-- `fetched_at` fallback만 남은 경우는 `Observed`
+- Source feed items receive both `timestamp` and `timestampLabel`.
+- `/api/documents/{document_id}` includes `display_time = { label, value, field, semantics }`.
+- A `published` source shows `Published`.
+- A `created` source shows `Created`.
+- An `updated` source shows `Updated`.
+- A `submission` source shows `Submitted`.
+- A `snapshot` source shows `Snapshot`.
+- A pure `fetched_at` fallback shows `Observed`.
 
-운영 규칙:
+Operational rules:
 
-- `sort_at` 는 정렬용 fallback이지 사람에게 그대로 `Published` 로 보이면 안 된다.
-- `updated` semantics source는 `published_at` 를 비워서 `Published` 오표기를 막는다.
-- source panel, digest related items, document detail은 같은 display-time resolution을 써야 한다.
-- 새 source를 추가할 때는 adapter의 `time_semantics` 와 dashboard/document panel의 표시 라벨이 함께 맞는지 확인한다.
+1. `sort_at` is a sorting fallback, not a human-facing `Published` label.
+2. Sources with `updated` semantics should keep `published_at` empty when needed to avoid misleading `Published` labels.
+3. Source panels, digest related items, and document detail should resolve display time the same way.
+4. When adding a new source, verify that adapter `time_semantics` and dashboard/document time labels still match.
 
-현재 표시 패널 점검표:
+Current panel checklist:
 
-- source feed panel: `feed.items[].timestamp` + `feed.items[].timestampLabel` 만 사용한다.
-- document detail panel: `document.display_time` 를 1차 표시값으로 쓰고, 별도 `updated_at` 은 실제로 다른 값일 때만 보조로 노출한다.
-- digest detail panel: 헤더의 digest 갱신 시각은 `digest.updatedAt`, 관련 문서 리스트는 각 문서의 `display_time` 을 사용한다.
-- leaderboard panel: source 문서 시간값을 직접 보여주지 않는다. benchmark snapshot은 문서 detail에서만 `Snapshot` 라벨로 노출한다.
-
-운영 체크 순서:
-
-1. adapter에서 `published_at`, `updated_at`, `sort_at`, `time_semantics` 를 의미에 맞게 채운다.
-2. backend serving layer에서 `display_time` 과 feed `timestampLabel` 이 기대 라벨로 내려오는지 확인한다.
-3. frontend 패널은 raw 시간 필드를 새로 해석하지 말고 backend가 확정한 표시값만 사용한다.
-4. 회귀 방지용 테스트로 dashboard feed, digest detail, document detail이 같은 계약을 공유하는지 검증한다.
+- Source feed panels should only use `feed.items[].timestamp` and `feed.items[].timestampLabel`.
+- The document detail panel should use `document.display_time` as the primary value and only show `updated_at` separately when it adds new information.
+- The digest detail panel should use `digest.updatedAt` for the digest header and each related document's `display_time` for the document list.
+- The leaderboard panel should not directly show source-document time values. Benchmark snapshots should only appear as `Snapshot` in document detail.
 
 ## Loading UX Contract
 
-backend는 모든 live progress를 아래 모양으로 frontend에 내려준다.
+The backend sends live progress to the frontend in the shape below.
 
 ```json
 {
@@ -289,27 +283,27 @@ backend는 모든 live progress를 아래 모양으로 frontend에 내려준다.
 }
 ```
 
-frontend는 이 값을 재계산하지 않고 가능한 그대로 사용한다.
+The frontend should use this payload directly rather than trying to recalculate it.
 
 ## Worker Role
 
-`docker compose`에는 `worker`도 포함돼 있다.
+`docker compose` includes a `worker` service as well.
 
-- manual `publish` CLI처럼 queue 기반 흐름을 쓸 때는 worker가 `sparkorbit:queue:session_enrich`를 소비한다.
-- homepage bootstrap과 manual reload는 현재 API background task 안에서 enrichment까지 바로 처리한다.
+- When queue-based flows are used, such as manual publish flows, the worker consumes `sparkorbit:queue:session_enrich`.
+- Homepage bootstrap and manual reload currently run enrichment directly inside an API background task.
 
-즉 worker는 현재 구조에서 optional sidecar에 가깝다.
+That makes the worker closer to an optional sidecar in the current architecture.
 
 ## Current Constraints
 
-- Redis pub/sub가 아니라 Redis state + HTTP polling으로 live update를 구현한다.
-- reload와 bootstrap은 한 번에 하나만 돌도록 process-local lock을 둔다.
-- 새로고침 방지는 브라우저 제한이 있어 `beforeunload` 경고 + reload state 복구를 함께 사용한다.
-- summary provider 기본값은 `noop`이라 외부 모델을 붙이지 않으면 digest는 placeholder/heuristic 중심으로 보일 수 있다.
+- Live updates use Redis state plus HTTP polling, not Redis pub/sub.
+- Bootstrap and reload are guarded by a process-local lock so only one runs at a time.
+- Browser refresh protection uses both a `beforeunload` warning and reload-state recovery.
+- Because the default summary provider is `noop`, digests can look placeholder-heavy unless another provider is enabled.
 
 ## Relationship To Other Docs
 
-- source 자체는 [02.1 Sources](./02_sections/02_1_sources.md)에서 관리한다.
-- normalized field contract는 [02.2 Fields](./02_sections/02_2_fields.md)에서 본다.
-- collection orchestration 자체는 [05. Data Collection Pipeline](./05_data_collection_pipeline.md)에서 본다.
-- 현재 화면 규칙은 [06. UI Design Guide](./06_ui_design_guide.md)에서 본다.
+- Source selection: [02.1 Sources](./02_sections/02_1_sources.md)
+- Normalized field contract: [02.2 Fields](./02_sections/02_2_fields.md)
+- Collection orchestration: [05. Data Collection Pipeline](./05_data_collection_pipeline.md)
+- Current screen and loading rules: [06. UI Design Guide](./06_ui_design_guide.md)

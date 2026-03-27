@@ -1,13 +1,16 @@
-[Index](../README.md) · [01. Overall Flow](../01_overall_flow.md) · [02. Sections](./README.md) · [02.1 Sources](./02_1_sources.md) · **02.2 Fields** · [03. Runtime Flow](../03_runtime_flow_draft.md) · [04. LLM Usage](../04_llm_usage.md) · [05. Data Collection Pipeline](../05_data_collection_pipeline.md) · [06. UI Design Guide](../06_ui_design_guide.md)
+[Index](../README.md) · [🇰🇷 한국어](./02_2_fields.ko.md) · [01. Overall Flow](../01_overall_flow.md) · [02. Sections](./README.md) · [02.1 Sources](./02_1_sources.md) · **02.2 Fields** · [03. Runtime Flow](../03_runtime_flow_draft.md) · [04. LLM Usage](../04_llm_usage.md) · [05. Data Collection Pipeline](../05_data_collection_pipeline.md) · [06. UI Design Guide](../06_ui_design_guide.md)
 
 ---
 
 # SparkOrbit Docs - 02.2 Normalized Document Fields
 
-> 수집 후 정규화된 문서(documents.ndjson)의 필드 레퍼런스
-> 실데이터 기준: 2026-03-23
+> Field reference for normalized documents (`documents.ndjson`)
+> Sample data baseline: 2026-03-23
 
 ## Purpose
+
+English-first migration note:
+This page is still being rewritten from the older shared draft. The detailed field reference below remains temporarily mixed-language, while the dedicated Korean companion page now lives at [02_2_fields.ko.md](./02_2_fields.ko.md).
 
 이 문서는 수집 → 정규화를 거친 문서가 **어떤 필드를 갖고, 각 필드에 어떤 값이 들어가는지**를 정리한다. Enrichment, LLM 파이프라인, 프론트엔드 서빙에서 "이 필드에 뭐가 들어있지?"를 확인할 때 쓴다.
 

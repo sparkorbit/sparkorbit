@@ -1,4 +1,4 @@
-[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md) · **08. Data Schema & Links**
+[Index](./README.md) · [🇰🇷 한국어](./08_data_schema_and_links.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md) · **08. Data Schema & Links**
 
 ---
 
@@ -6,8 +6,11 @@
 
 > 2026-03-25 v2
 >
-> 수집 → LLM 라벨 → 세션 머지 → 브리핑까지 이어지는 데이터 스키마, 조인 키, 링크 관계를 정의한다.
-> 새로운 파이프라인 단계나 프론트엔드 기능을 추가할 때 이 문서의 스키마와 관계를 따른다.
+> Defines the data schema, join keys, and link relationships from collection through LLM labels, session merge, and briefing.
+> New pipeline stages and frontend features should follow the schema relationships defined here.
+
+Migration note:
+This page is still being rewritten into the English-first structure. Some detailed sections below remain from the older shared draft, and the dedicated Korean companion page now lives at [08_data_schema_and_links.ko.md](./08_data_schema_and_links.ko.md).
 
 ### Monitor Sync Rule
 

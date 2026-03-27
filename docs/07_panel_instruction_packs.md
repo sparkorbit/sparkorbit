@@ -1,63 +1,63 @@
-[Index](./README.md) · [01. Overall Flow](./01_overall_flow.md) · [04. LLM Usage](./04_llm_usage.md) · [06. Operational Playbook](./06_operational_playbook.md) · **07. Panel Instruction Packs**
+[Index](./README.md) · [🇰🇷 한국어](./07_panel_instruction_packs.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [04. LLM Usage](./04_llm_usage.md) · [06. UI Design Guide](./06_ui_design_guide.md) · **07. Panel Instruction Packs**
 
 ---
 
 # SparkOrbit - 07. Panel Instruction Packs
 
 > Canonical instruction-pack policy
-> Last updated: 2026-03-25
+> Last updated: 2026-03-27
 
-## 0. 목적
+## 0. Purpose
 
-이 문서는 panel별 LLM instruction을 어떻게 관리할지 정한다.
+This document defines how SparkOrbit manages panel-specific LLM instructions.
 
-핵심 원칙:
+Core rules:
 
-- panel별 instruction은 분리한다
-- instruction은 Markdown 파일로 version 관리한다
-- runtime은 가능하면 그 Markdown prompt pack을 직접 읽는다
-- prompt, schema, fallback rule은 함께 versioning 한다
+- Keep instructions separated by panel
+- Version instruction packs as Markdown files
+- Let runtime code read those Markdown prompt packs directly when possible
+- Version prompt, schema, and fallback rules together
 
-## 1. 왜 panel별로 나누나
+## 1. Why We Split Packs By Panel
 
-`Paper`, `Company`, `Community`, `Benchmark`는 의미 판단 기준이 다르다.
+`Paper`, `Company`, `Community`, and `Benchmark` require different judgment criteria.
 
-예를 들어:
+For example:
 
-- `Company / Release`는 keep/drop filtering과 domain 분류가 중요하다
-- `Paper`는 topic grouping과 novelty 판단이 중요하다
-- `Community`는 reaction intensity와 discussion quality가 중요하다
-- `Benchmark`는 raw metric 해석과 watchout이 중요하다
+- `Company / Release` needs keep/drop filtering and domain classification
+- `Paper` needs topic grouping and novelty judgment
+- `Community` needs reaction intensity and discussion quality
+- `Benchmark` needs raw metric interpretation and watchout notes
 
-따라서 하나의 범용 prompt보다 **panel별 instruction pack**이 더 안정적이다.
+Because of that, panel-specific instruction packs are more stable than one generic prompt.
 
-## 2. 현재 전략
+## 2. Current Strategy
 
-현재는 `instruction-first`로 시작한다.
+The current strategy is `instruction-first`.
 
-즉:
+That means:
 
-- system instruction을 강하게 준다
-- 입력/출력 contract를 좁힌다
-- enum과 JSON schema를 강하게 고정한다
-- few-shot은 문서에는 남기되, runtime에는 필요할 때만 넣는다
+- Use strong system instructions
+- Narrow the input/output contract
+- Lock down enums and JSON schema tightly
+- Keep few-shot examples in docs, but only inject them at runtime when needed
 
-이유는 현재 범위가 `Qwen3.5-4B` 기반의 구조화 enrichment이기 때문이다.
-작은 모델에서는 heavy few-shot보다 **짧고 명확한 지시 + 좁은 schema**가 먼저 안정화되어야 한다.
+This fits the current scope because SparkOrbit is using `Qwen3.5-4B` for structured enrichment.
+With a smaller model, short and explicit instructions plus a narrow schema stabilize faster than heavy few-shot prompting.
 
-## 3. 파일 규칙
+## 3. File Rules
 
-prompt pack 파일은 아래 형식을 따른다.
+Prompt pack files follow this shape.
 
 ```text
 docs/prompt_packs/<pack_name>.md
 ```
 
-예:
+Example:
 
 - `docs/prompt_packs/company_filter_v2.md`
 
-파일 안에는 최소한 아래가 있어야 한다.
+Each file should include at least:
 
 - pack purpose
 - panel scope
@@ -70,38 +70,36 @@ docs/prompt_packs/<pack_name>.md
 
 ## 4. Runtime Rule
 
-가능하면 runtime script는 prompt를 코드 상수로 두지 않고, `docs/prompt_packs/*.md`에서 읽는다.
+Whenever possible, runtime scripts should not hardcode prompts as string constants. They should load them from `docs/prompt_packs/*.md`.
 
-즉, prompt 변경은:
+In practice, prompt changes should follow this flow:
 
-1. Markdown prompt pack 수정
-2. script가 같은 파일을 읽어 실행
+1. Update the Markdown prompt pack.
+2. Let the script execute by reading that same file.
 
-형태로 관리한다.
+Additional rules:
 
-추가 원칙:
+- Do not change a prompt pack and then hand-patch only the visible output text.
+- Store and reuse summaries, briefings, and digests as generated artifacts from prompt and code.
+- If different wording is needed, change the pack version, schema, or selection rule and regenerate under a new `prompt_version`.
 
-- prompt pack을 바꿨는데 결과 문구만 손으로 patch해서 보여주는 방식은 금지한다.
-- summary, briefing, digest는 prompt/code가 만든 산출물 그대로 저장하고 재사용해야 한다.
-- 다른 표현이 필요하면 pack version, schema, selection rule을 바꾸고 새 `prompt_version`으로 재생성한다.
+## 5. Current Canonical Packs
 
-## 5. 현재 canonical packs
-
-| Pack | Panel | 용도 | 코드 |
-|------|-------|------|------|
-| [company_filter_v2](./prompt_packs/company_filter_v2.md) | Company / Release | keep/drop 판정 + domain 분류 | `llm_enrich.py` |
-| [paper_domain_v1](./prompt_packs/paper_domain_v1.md) | Paper | 22개 연구 분야 분류 | `paper_enrich.py` |
+| Pack | Panel | Use | Code |
+|------|-------|-----|------|
+| [company_filter_v2](./prompt_packs/company_filter_v2.md) | Company / Release | Keep/drop judgment plus domain classification | `llm_enrich.py` |
+| [paper_domain_v1](./prompt_packs/paper_domain_v1.md) | Paper | Classification into 22 research areas | `paper_enrich.py` |
 
 ### company_filter_v2
 
-- `Company / Release` panel 후보를 독립적으로 분류
-- 입력: `document_id`, `source`, `title`, `desc`(optional)
-- 출력: `decision`, `company_domain`, `reason_code`
-- domain disambiguation rule 포함 (model_release vs technical_research 등)
+- Classifies `Company / Release` panel candidates independently
+- Input: `document_id`, `source`, `title`, optional `desc`
+- Output: `decision`, `company_domain`, `reason_code`
+- Includes domain-disambiguation rules such as `model_release` vs `technical_research`
 
 ### paper_domain_v1
 
-- arXiv + HF daily papers를 연구 domain별로 분류
-- 입력: `document_id`, `title` (title-only — 매우 경량)
-- 출력: `paper_domain` (22개 enum 중 하나)
-- domain 우선순위 규칙 포함 (LLM+agent→agents 등)
+- Classifies arXiv and Hugging Face daily papers by research domain
+- Input: `document_id`, `title` (title-only, intentionally lightweight)
+- Output: `paper_domain` (one of 22 enums)
+- Includes domain-priority rules such as `LLM+agent -> agents`

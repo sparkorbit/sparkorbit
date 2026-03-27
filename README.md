@@ -1,4 +1,14 @@
 <p align="center">
+  <a href="./README.md">🇺🇸 English</a> · <a href="./README.ko.md">🇰🇷 한국어</a>
+</p>
+
+<p align="center">
+  <img src="./docs/images/SparKOrbit.png" alt="SparkOrbit" width="300"/>
+  <br/>
+  <sub>Image credit: ChatGPT</sub>
+</p>
+
+<p align="center">
   <h1 align="center">🛰️ SparkOrbit 🛰️</h1>
   <p align="center">
     <b><i>✦ No more AI FOMO — orbit the signals that matter ✦</i></b>
@@ -21,13 +31,13 @@
 </p>
 
 <p align="center">
-  <a href="./docs/00_getting_started_no_gpu.md">Beginner Guide</a> · <a href="./docs/README.md">Documentation</a> · <a href="https://github.com/sparkorbit/sparkorbit/issues">Issues</a> · <a href="#contributing">Contributing</a>
+  <a href="./docs/README.md">Documentation</a> · <a href="https://github.com/sparkorbit/sparkorbit/issues">Issues</a> · <a href="#contributing">Contributing</a>
 </p>
 
 <p align="center">
   <img src="./docs/images/AIorbits_comp.png" alt="SparkOrbit dashboard — full AI features" width="100%"/>
 </p>
-- Proejct View with LLM 
+-- Project snapshot 
 
 ***
 
@@ -40,14 +50,14 @@
 
 ## What It Does
 
-**Tired of AI FOMO?** New papers every hour, model drops you missed, benchmark shakeups you heard about too late — stop drowning in tabs. SparkOrbit pulls everything into one screen so you can catch up in a few minutes.
+**Tired of AI [FOMO (Fear Of Missing Out)](https://en.wikipedia.org/wiki/Fear_of_missing_out)?** New papers every hour, model drops you missed, benchmark shakeups you heard about too late — stop drowning in tabs. SparkOrbit pulls everything into one screen so you can catch up in a few minutes.
 
-- **Collect** — 30+ sources fetched on demand. Papers, trending models, top stories, company announcements. No API keys, no login.
+- **Collect** — 40+ sources fetched on demand. Papers, trending models, top stories, company announcements and updates. No API keys, no login required.
 - **Rank** — every item sorted by what matters: likes, downloads, stars, scores. Not just "newest first."
-- **Compare** — AI Model Leaderboard shows LMArena rankings across Text, Code, Vision, Image, Video, and Search side by side.
-- **Summarize** — optional local LLM reads everything and generates a daily briefing + paper topic grouping. Runs on your GPU, stays on your machine.
-- **One command** — the beginner path on Linux and macOS is `bash scripts/docker-up.sh --without-llm`. Docker handles the rest.
-- **Fully open-source** — run it, fork it, extend it. Add your own sources. Make the orbit wider.
+- **Compare** — AI Model Leaderboard shows the latest rankings across Text, Code, Vision, Image, Video, and Search side by side. No more hunting for the current SoTA.
+- **Summarize** — local LLM (Qwen 3.5 4B) reads everything and generates a daily briefing + paper topic grouping. Runs on your GPU, stays on your machine.
+- **One command** — `bash scripts/docker-up.sh` and you're live. Add `--with-llm` for full AI features with GPU, or `--without-llm` to skip. Docker handles the rest.
+- **Fully open-source** — run it, fork it, extend it. Add your own sources and widen the orbit with us.
 
 
 
@@ -63,29 +73,18 @@ cd sparkorbit
 bash scripts/docker-up.sh
 ```
 
-You'll see one question pop up — **don't just hit Enter without reading it!**
+**Note**
 
-> **⚠️ `Use local LLM bundle? [Y/n]`**
->
-> This decides whether AI summarization runs on your machine. Choose carefully.
+> **⚠️ `Use local LLM bundle? [Y/n]`** — This decides whether AI summarization runs on your machine. Choose based on your hardware. A local GPU is required for LLM features.
 
 | Answer | What you get | Requirements |
 |--------|-------------|--------------|
-| **Y** (default) | Full experience — AI summary, paper topics, daily briefing | NVIDIA GPU, ~13GB VRAM |
-| **N** | Source curation only, no AI summarization | Docker only |
+| **Y** (default) | Full experience — daily briefing, paper topic grouping, and more | NVIDIA GPU, ~13GB VRAM |
+| **N** | Source curation only, no summarization | Docker |
 
-No GPU? No problem — pick `N` and you still get the full dashboard with 30+ sources, leaderboards, and engagement rankings. The AI stuff is a bonus, not a requirement.
+- No GPU? No problem — pick `N` and you still get the full dashboard with 40+ sources, leaderboards, and engagement rankings. AI features are a bonus, not a requirement.
 
-Once it's up, open **http://localhost:3000** and watch it load. On a remote server, swap in your server IP.
-
-Want to skip the question entirely? Pass the flag directly:
-
-```bash
-bash scripts/docker-up.sh --with-llm      # always include LLM
-bash scripts/docker-up.sh --without-llm   # always skip LLM
-```
-
-Hit the **RELOAD** button (top-right) anytime to re-collect all sources and re-run LLM features — no restart needed.
+- Once it's up, open **http://localhost:3000**. On a remote server, replace localhost with your server IP.
 
 <details>
 <summary><b>Screenshot: With GPU (full AI features)</b></summary>
@@ -105,18 +104,17 @@ Hit the **RELOAD** button (top-right) anytime to re-collect all sources and re-r
 
 ***
 
-## First Time Here? Welcome Aboard 🚀
+## Features
 
-Never used Docker? Not sure what a "local LLM" is? No worries — we've got you covered.
+1. <img src="https://img.shields.io/badge/Normal-blue" height="16"/> — Hit the **RELOAD** button (top-right) anytime to re-collect all sources and re-run LLM features. Data is updated daily across sources, so reload whenever you want the latest.
 
-- **[Getting Started (No GPU)](./docs/00_getting_started_no_gpu.md)** — a step-by-step walkthrough from zero to dashboard. No GPU needed, no terminal wizardry required. Start here if `git clone` already sounds scary. (Need a more detailed check)
-- **[Operational Playbook](./docs/06_operational_playbook.md)** — the full setup guide with verification steps, troubleshooting, and advanced options. For when you're ready to go deeper. (Need a more detailed check)
+2. <img src="https://img.shields.io/badge/Normal-blue" height="16"/> — Use **Manage Panels** in the Side Panel to select which information to display and control the panel order.
+
+3. <img src="https://img.shields.io/badge/LLM-purple" height="16"/> — After LLM processing completes, a pop-up appears automatically. On confirmation, you'll see the summary, arxiv domain grouping, and domain sub-titles in the Side Panel's paper section.
 
 ***
 
 ## Tech Stack & Documentation
-
-React + FastAPI + Redis + Docker Compose — with optional local LLM via Ollama.
 
 Full tech stack details and all technical docs: **[docs/README.md](./docs/README.md)**
 
@@ -157,17 +155,15 @@ Full tech stack details and all technical docs: **[docs/README.md](./docs/README
 
 > **PR and Contributing Process docs — TBD.**
 
-For now: fork, branch, PR. We'll review and merge.
+- For now: fork, branch, PR. We'll review and merge.
 
-Coding agents (Codex, Claude, Cursor, etc.) are absolutely welcome — this project was built with them, after all. 🤖
-
-Got ideas or questions? [Open an issue](https://github.com/sparkorbit/sparkorbit/issues). We're friendly.
+- Coding agents (Codex, Claude, Cursor, etc.) are absolutely welcome — this project was built with them, after all. Got ideas or questions? [Open an issue](https://github.com/sparkorbit/sparkorbit/issues). We're friendly.
 
 ***
 
 ## Known Issues
 
-- **LLM processing can be unstable** — local LLM summarization (Ollama) may occasionally fail or produce unexpected results depending on your GPU, available VRAM, and model load. If it hangs or errors out, try reloading or restarting with `--without-llm`. The core dashboard works fine without it. We're actively checking and improving stability on this.
+- **LLM processing can be unstable** — local LLM summarization (Ollama) may occasionally fail or produce unexpected results depending on your GPU, available VRAM, and model load. If it hangs or errors out, try reloading or restarting with `bash scripts/docker-up.sh --without-llm`. The core dashboard works fine without it. We're actively checking and improving stability on this.
 - **Cross-platform edge cases** — we've tested on Linux, macOS, and partially on Windows. Everything works, but depending on your Docker version, WSL configuration, or network setup, unexpected errors may occur. If you run into any issues, please [open an issue](https://github.com/sparkorbit/sparkorbit/issues) — we want to know about it.
 
 ***
