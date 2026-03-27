@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, useMemo, type CSSProperties } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  type CSSProperties,
+} from "react";
 
 import type { FeedPanel as FeedPanelData } from "../../content/dashboardContent";
 import { formatDisplayDate } from "../../features/dashboard/display";
@@ -7,7 +13,6 @@ import { categoryAccentColor } from "./styles";
 const htmlEntityDecoder =
   typeof document !== "undefined" ? document.createElement("textarea") : null;
 const COMPACT_PANEL_HEIGHT_PX = 460;
-
 
 function formatFeedScore(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
@@ -52,7 +57,10 @@ export function SourcePanel({
   const [shouldReveal, setShouldReveal] = useState(true);
   useEffect(() => {
     setShouldReveal(true);
-    const timer = setTimeout(() => setShouldReveal(false), panelData.items.length * 60 + 800);
+    const timer = setTimeout(
+      () => setShouldReveal(false),
+      panelData.items.length * 60 + 800,
+    );
     return () => clearTimeout(timer);
   }, [revealKey, panelData.items.length]);
 
@@ -67,7 +75,9 @@ export function SourcePanel({
     }
 
     const syncLayout = () => {
-      setIsCompactLayout(observedElement.clientHeight < COMPACT_PANEL_HEIGHT_PX);
+      setIsCompactLayout(
+        observedElement.clientHeight < COMPACT_PANEL_HEIGHT_PX,
+      );
     };
 
     syncLayout();
@@ -113,7 +123,9 @@ export function SourcePanel({
             const resolvedNote = decodeHtmlEntities(item.note);
             const resolvedTimestamp = formatDisplayDate(item.timestamp);
             const resolvedTimestampLabel =
-              item.timestampLabel && item.timestampLabel !== "Published" && item.timestampLabel !== "Created"
+              item.timestampLabel &&
+              item.timestampLabel !== "Published" &&
+              item.timestampLabel !== "Created"
                 ? `${item.timestampLabel} `
                 : "";
             const scoreLabel =
@@ -133,7 +145,9 @@ export function SourcePanel({
                   shouldReveal ? "orbit-hacker-reveal" : "",
                 ].join(" ")}
                 style={{
-                  ...(shouldReveal ? { "--hacker-delay": `${index * 60}ms` } as CSSProperties : {}),
+                  ...(shouldReveal
+                    ? ({ "--hacker-delay": `${index * 60}ms` } as CSSProperties)
+                    : {}),
                   backgroundColor: isSelected
                     ? `color-mix(in srgb, ${catColor} 15%, var(--color-orbit-bg-elevated))`
                     : isOdd
@@ -142,7 +156,12 @@ export function SourcePanel({
                 }}
                 onClick={() => onSelectItem?.(item.documentId)}
               >
-                <div className={["flex min-h-0", shouldReveal ? "orbit-hacker-reveal__content" : ""].join(" ")}>
+                <div
+                  className={[
+                    "flex min-h-0",
+                    shouldReveal ? "orbit-hacker-reveal__content" : "",
+                  ].join(" ")}
+                >
                   {/* category color bar */}
                   <div
                     className="w-[3px] shrink-0 transition-opacity duration-150"
@@ -156,33 +175,36 @@ export function SourcePanel({
                     <div className="min-w-0 flex-1 px-3 py-1.5">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <h3 className={[
-                            "orbit-line-clamp-1 orbit-wrap-anywhere min-w-0 font-display text-[0.68rem] leading-[1.3] transition-colors duration-150",
-                            isSelected
-                              ? "font-bold text-orbit-accent"
-                              : "font-semibold text-orbit-text group-hover/item:text-orbit-accent",
-                          ].join(" ")}>
+                          <h3
+                            className={[
+                              "orbit-line-clamp-1 font-semibold orbit-wrap-anywhere min-w-0 font-display text-[0.78rem] leading-[1.3] transition-colors duration-150",
+                              isSelected
+                                ? " text-orbit-accent"
+                                : "text-orbit-text group-hover/item:text-orbit-accent",
+                            ].join(" ")}
+                          >
                             {resolvedTitle}
                           </h3>
                           {resolvedMeta ? (
-                            <p className="orbit-line-clamp-1 orbit-wrap-anywhere mt-0.5 text-[0.52rem] leading-[1.35] text-orbit-accent-dim">
+                            <p className="orbit-line-clamp-1 orbit-wrap-anywhere mt-0.5 text-[0.62rem] leading-[1.35] text-orbit-accent-dim">
                               {resolvedMeta}
                             </p>
                           ) : null}
                         </div>
-                        {(scoreLabel || resolvedTimestamp) ? (
+                        {scoreLabel || resolvedTimestamp ? (
                           <div className="flex shrink-0 items-center gap-1.5">
                             {scoreLabel ? (
                               <span
-                                className="font-mono text-[0.5rem] tabular-nums tracking-[0.06em]"
+                                className="font-mono text-[0.6rem] tabular-nums tracking-[0.06em]"
                                 style={{ color: catColor, opacity: 0.9 }}
                               >
                                 {scoreLabel}
                               </span>
                             ) : null}
                             {resolvedTimestamp ? (
-                              <span className="font-mono text-[0.5rem] tabular-nums uppercase tracking-[0.08em] text-orbit-muted">
-                                {resolvedTimestampLabel}{resolvedTimestamp}
+                              <span className="font-mono text-[0.6rem] tabular-nums uppercase tracking-[0.08em] text-orbit-muted">
+                                {resolvedTimestampLabel}
+                                {resolvedTimestamp}
                               </span>
                             ) : null}
                           </div>
@@ -191,37 +213,40 @@ export function SourcePanel({
                     </div>
                   ) : (
                     <div className="min-w-0 flex-1 px-3 py-2">
-                      <h3 className={[
-                        "orbit-line-clamp-2 orbit-wrap-anywhere min-w-0 font-display text-[0.72rem] leading-[1.3] transition-colors duration-150",
-                        isSelected
-                          ? "font-bold text-orbit-accent"
-                          : "font-semibold text-orbit-text group-hover/item:text-orbit-accent",
-                      ].join(" ")}>
+                      <h3
+                        className={[
+                          "orbit-line-clamp-2 orbit-wrap-anywhere min-w-0 font-display text-[0.78rem] leading-[1.3] transition-colors duration-150",
+                          isSelected
+                            ? "font-bold text-orbit-accent"
+                            : "font-semibold text-orbit-text group-hover/item:text-orbit-accent",
+                        ].join(" ")}
+                      >
                         {resolvedTitle}
                       </h3>
                       {resolvedMeta ? (
-                        <p className="orbit-line-clamp-1 orbit-wrap-anywhere mt-1 text-[0.56rem] leading-[1.4] text-orbit-accent-dim">
+                        <p className="orbit-line-clamp-1 orbit-wrap-anywhere mt-1 text-[0.66rem] leading-[1.4] text-orbit-accent-dim">
                           {resolvedMeta}
                         </p>
                       ) : null}
                       {resolvedNote ? (
-                        <p className="orbit-line-clamp-2 orbit-wrap-anywhere mt-1 text-[0.58rem] leading-[1.45] text-orbit-muted">
+                        <p className="orbit-line-clamp-2 orbit-wrap-anywhere mt-1 text-[0.68rem] leading-[1.45] text-orbit-muted">
                           {resolvedNote}
                         </p>
                       ) : null}
-                      {(scoreLabel || resolvedTimestamp) ? (
+                      {scoreLabel || resolvedTimestamp ? (
                         <div className="mt-1 flex items-center justify-end gap-2">
                           {scoreLabel ? (
                             <span
-                              className="font-mono text-[0.52rem] tabular-nums tracking-[0.06em]"
+                              className="font-mono text-[0.62rem] tabular-nums tracking-[0.06em]"
                               style={{ color: catColor, opacity: 0.9 }}
                             >
                               {scoreLabel}
                             </span>
                           ) : null}
                           {resolvedTimestamp ? (
-                            <span className="font-mono text-[0.52rem] tabular-nums uppercase tracking-[0.08em] text-orbit-muted">
-                              {resolvedTimestampLabel}{resolvedTimestamp}
+                            <span className="font-mono text-[0.62rem] tabular-nums uppercase tracking-[0.08em] text-orbit-muted">
+                              {resolvedTimestampLabel}
+                              {resolvedTimestamp}
                             </span>
                           ) : null}
                         </div>

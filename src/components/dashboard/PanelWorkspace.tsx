@@ -969,7 +969,7 @@ function PanelBoard({
                       <span className="flex min-w-0 items-center gap-2 overflow-hidden">
                         {parsedTitle.tag ? (
                           <span
-                            className="shrink-0 border px-2 py-0.5 font-mono text-[0.56rem] font-bold uppercase tracking-[0.12em]"
+                            className="shrink-0 border px-2 py-0.5 font-mono text-[0.66rem] font-bold uppercase tracking-[0.12em]"
                             style={{
                               borderColor: item.accentColor
                                 ? `color-mix(in srgb, ${item.accentColor} 55%, var(--color-orbit-border))`
@@ -984,11 +984,11 @@ function PanelBoard({
                           </span>
                         ) : null}
                         {displayTitle ? (
-                          <span className="orbit-token-ellipsis font-display text-[0.74rem] font-semibold tracking-[-0.01em] text-orbit-text">
+                          <span className="orbit-token-ellipsis font-display text-[0.84rem] font-semibold tracking-[-0.01em] text-orbit-text">
                             {displayTitle}
                           </span>
                         ) : parsedTitle.tag ? null : (
-                          <span className="font-mono text-[0.52rem] uppercase tracking-[0.14em] text-orbit-muted">
+                          <span className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-muted">
                             untitled
                           </span>
                         )}
