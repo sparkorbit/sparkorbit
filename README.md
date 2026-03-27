@@ -32,6 +32,7 @@
 
 > **Tested on:** Linux, macOS, and Windows.
 > Edge cases may exist depending on Docker/WSL setup — see [Known Issues](#known-issues)
+>
 > **Don't want to install?** We're considering a live demo server so you can try SparkOrbit right from your browser. No promises yet — stay tuned.
 
 ***
@@ -64,6 +65,7 @@ bash scripts/docker-up.sh
 **Note**
 
 > ⚠️ If Docker is missing, the script checks your environment first and offers guided installation help before continuing.
+>
 > **⚠️ `Use local LLM bundle? [Y/n]`** — This decides whether AI summarization runs on your machine. Choose based on your hardware. A local GPU is required for LLM features.
 
 | Answer | What you get | Requirements |

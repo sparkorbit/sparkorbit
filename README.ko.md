@@ -32,6 +32,7 @@
 
 > **테스트 완료:** Linux, macOS, Windows 모두 확인했습니다.
 > Docker/WSL 환경에 따라 예외가 있을 수 있습니다 — [Known Issues](#known-issues) 참고
+>
 > **설치 없이 사용하고 싶습니다:** 브라우저에서 바로 체험할 수 있는 데모 서버를 검토 중입니다. 아직 확정은 아닙니다.
 
 ***
@@ -64,7 +65,8 @@ bash scripts/docker-up.sh
 **주의**  
 
 > ⚠️ Docker가 없으면 스크립트가 먼저 현재 환경을 확인한 뒤, 설치를 도와주는 안내를 제공합니다.
-> **⚠️ `Use local LLM bundle? [Y/n]`** -- AI 요약 기능의 사용 여부를 결정합니다. 본인의 장비에 맞춰 사용하세요. LLM을 사용하기 위해서는 local GPU가 필요합니다. 
+>
+> **⚠️ `Use local LLM bundle? [Y/n]`** — AI 요약 기능의 사용 여부를 결정합니다. 본인의 장비에 맞춰 사용하세요. LLM을 사용하기 위해서는 local GPU가 필요합니다.
 
 | 선택 | 제공되는 기능 | 요구 사항 |
 |------|-------------|-----------|
@@ -95,11 +97,11 @@ GPU가 없어도 괜찮습니다 — `N`을 선택하면 40개 이상의 소스,
 
 ## Features (부가 기능)
 
-1. <img src="https://img.shields.io/badge/Normal-blue" height="16"/> --  오른쪽 상단의 **RELOAD** 버튼을 누르면 언제든 모든 소스를 다시 수집하고 LLM 기능을 재실행할 수 있습니다 — 여러 데이터는 매일매일 새롭게 공유되므로, 이들을 놓치지 않기 위해서는 필요할 때 RELOAD를 눌러 데이터를 최신화 할 수 있습니다.
+1. <img src="https://img.shields.io/badge/Normal-blue" height="20"/> --  오른쪽 상단의 **RELOAD** 버튼을 누르면 언제든 모든 소스를 다시 수집하고 LLM 기능을 재실행할 수 있습니다 — 여러 데이터는 매일매일 새롭게 공유되므로, 이들을 놓치지 않기 위해서는 필요할 때 RELOAD를 눌러 데이터를 최신화 할 수 있습니다.
 
-2. <img src="https://img.shields.io/badge/Normal-blue" height="16"/> -- Side Panel의 Manage Panels을 활용하여 확인하고 싶은 정보들만 선택하거나 패널 노출의 순서를 제어할 수 있습니다.
+2. <img src="https://img.shields.io/badge/Normal-blue" height="20"/> -- Side Panel의 Manage Panels을 활용하여 확인하고 싶은 정보들만 선택하거나 패널 노출의 순서를 제어할 수 있습니다.
 
-3. <img src="https://img.shields.io/badge/LLM-purple" height="16"/> -- LLM processing 이후 pop-up 창이 자동으로 뜨게 되고, 확인시에 summary, arxiv domain 정리 그리고 Side Panel의 paper에도 domain sub-title이 노출됩니다.
+3. <img src="https://img.shields.io/badge/LLM-purple" height="20"/> -- LLM processing 이후 pop-up 창이 자동으로 뜨게 되고, 확인시에 summary, arxiv domain 정리 그리고 Side Panel의 paper에도 domain sub-title이 노출됩니다.
 
 ***
 
