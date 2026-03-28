@@ -806,6 +806,9 @@ RSS_SOURCES: list[SourceConfig] = [
     SourceConfig("naver_cloud_blog_rss", "company_kr", "rss", "https://rss.blog.naver.com/n_cloudplatform.xml", "blog", "rss", ("company", "kr", "naver"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
     SourceConfig("qwen_blog_rss", "company_cn", "rss", "https://qwenlm.github.io/blog/index.xml", "blog", "rss", ("company", "cn", "qwen"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
     SourceConfig("salesforce_ai_research_rss", "company", "rss", "https://www.salesforce.com/blog/category/ai-research/feed/", "blog", "rss", ("company", "salesforce"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("google_research_blog", "company", "rss", "https://research.google/blog/rss/", "blog", "rss", ("company", "google", "research"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("geeknews_rss", "community", "rss", "https://news.hada.io/rss/news", "news", "rss", ("community", "kr", "geeknews"), default_limit=LOW_SIGNAL_COMMUNITY_LIMIT),
+    SourceConfig("lobsters_ai_rss", "community", "rss", "https://lobste.rs/t/ai.rss", "post", "rss", ("community", "lobsters", "ai"), default_limit=LOW_SIGNAL_COMMUNITY_LIMIT),
 ]
 
 

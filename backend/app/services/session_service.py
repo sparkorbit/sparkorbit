@@ -672,7 +672,9 @@ SOURCE_DISPLAY_NAMES = {
     "github_mindspore_repos": "MindSpore GitHub",
     "github_paddlepaddle_repos": "PaddlePaddle GitHub",
     "github_tencent_hunyuan_repos": "Tencent Hunyuan GitHub",
+    "geeknews_rss": "GeekNews",
     "google_ai_blog": "Google AI News",
+    "google_research_blog": "Google Research Blog",
     "groq_newsroom": "Groq News",
     "hf_blog": "Hugging Face Blog",
     "hf_daily_papers": "Hugging Face Daily Papers",
@@ -682,6 +684,7 @@ SOURCE_DISPLAY_NAMES = {
     "kakao_tech_rss": "Kakao Tech",
     "lg_ai_research_blog": "LG AI Research Blog",
     "lmarena_overview": "LMArena",
+    "lobsters_ai_rss": "Lobsters AI",
     "microsoft_research": "Microsoft Research",
     "mistral_news": "Mistral AI News",
     "naver_cloud_blog_rss": "NAVER Cloud Blog",
@@ -2433,9 +2436,25 @@ def build_briefing_input(
 ) -> dict[str, Any]:
     from datetime import datetime, timedelta, timezone
 
-    max_papers = 16
-    max_models = 6
-    max_community = 8
+    max_papers = 15
+    max_models = 5
+    max_community = 5
+    # Papers need broader coverage, while models/community can lean more on ranking signals.
+    paper_group_limits = (
+        ("arxiv", 10),
+        ("hf_daily", 3),
+        ("other", 2),
+    )
+    model_source_limits = (
+        ("hf_trending_models", 3),
+        ("hf_models_new", 2),
+    )
+    community_core_limit = 3
+    community_hf_priority_sources = (
+        "hf_daily_papers",
+        "hf_trending_models",
+        "hf_models_new",
+    )
     today = datetime.now(timezone.utc)
     cutoff_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -2525,11 +2544,7 @@ def build_briefing_input(
     papers: list[dict[str, str]] = []
     paper_ids: set[str] = set()
     paper_docs = category_docs.get("papers", [])
-    for source_group, per_group_limit in (
-        ("arxiv", 10),
-        ("hf_daily", 3),
-        ("other", 3),
-    ):
+    for source_group, per_group_limit in paper_group_limits:
         for doc in paper_docs:
             if len(papers) >= max_papers:
                 break
@@ -2552,20 +2567,20 @@ def build_briefing_input(
 
     community: list[dict[str, str]] = []
     community_ids: set[str] = set()
-    for doc in category_docs.get("community", [])[:5]:
+    for doc in category_docs.get("community", [])[:community_core_limit]:
         _append_community_doc(community, community_ids, doc)
-    for source in ("hf_daily_papers", "hf_trending_models", "hf_models_new"):
+    for source in community_hf_priority_sources:
         for doc in source_docs.get(source, [])[:1]:
             _append_community_doc(community, community_ids, doc)
             if len(community) >= max_community:
                 break
         if len(community) >= max_community:
             break
-    for doc in category_docs.get("community", [])[5:]:
+    for doc in category_docs.get("community", [])[community_core_limit:]:
         _append_community_doc(community, community_ids, doc)
         if len(community) >= max_community:
             break
-    for source in ("hf_daily_papers", "hf_trending_models", "hf_models_new"):
+    for source in community_hf_priority_sources:
         for doc in source_docs.get(source, [])[1:]:
             _append_community_doc(community, community_ids, doc)
             if len(community) >= max_community:
@@ -2575,10 +2590,7 @@ def build_briefing_input(
 
     models: list[dict[str, Any]] = []
     model_ids: set[str] = set()
-    for source, per_source_limit in (
-        ("hf_trending_models", 4),
-        ("hf_models_new", 2),
-    ):
+    for source, per_source_limit in model_source_limits:
         for doc in source_docs.get(source, [])[:per_source_limit]:
             document_id = str(doc.get("document_id") or "")
             if not document_id or document_id in model_ids or len(models) >= max_models:
