@@ -107,10 +107,10 @@ When you're done, stop the containers and start them again next time with `docke
 
 ```bash
 git pull
-bash scripts/docker-up.sh
+bash scripts/docker-update.sh
 ```
 
-If some time has passed since your last session, pull before starting up — updates can land at any time. The app runs from Docker images, so you need to re-run `docker-up.sh` after pulling for updating configuations.
+If some time has passed since your last session, pull before starting up — updates can land at any time. `docker-update.sh` skips the first-time setup prompts and rebuilds only the changed layers using your saved LLM mode.
 
 ***
 

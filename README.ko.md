@@ -107,10 +107,10 @@ bash scripts/docker-down.sh
 
 ```bash
 git pull
-bash scripts/docker-up.sh
+bash scripts/docker-update.sh
 ```
 
-오랜만에 다시 쓴다면, 실행 전에 `git pull`부터 하세요 — 언제 업데이트가 들어올지 모릅니다. Docker 이미지를 새로 빌드해야 하니까, pull 후에 `docker-up.sh`를 다시 돌려야 합니다. 
+오랜만에 다시 쓴다면, 실행 전에 `git pull`부터 하세요 — 언제 업데이트가 들어올지 모릅니다. `docker-update.sh`는 초기 설정 과정 없이 변경된 부분만 빌드하고, 이전에 선택한 LLM 모드를 그대로 사용합니다.
 
 ***
 

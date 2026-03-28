@@ -121,7 +121,10 @@ export function SourcePanel({
             const resolvedTitle = decodeHtmlEntities(item.title);
             const resolvedMeta = decodeHtmlEntities(item.meta);
             const resolvedNote = decodeHtmlEntities(item.note);
-            const resolvedTimestamp = formatDisplayDate(item.timestamp);
+            const isObservedOnly = item.timestampLabel === "Observed";
+            const resolvedTimestamp = isObservedOnly
+              ? null
+              : formatDisplayDate(item.timestamp);
             const resolvedTimestampLabel =
               item.timestampLabel &&
               item.timestampLabel !== "Published" &&
