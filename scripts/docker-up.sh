@@ -355,6 +355,7 @@ ensure_docker_prerequisites() {
   fi
 }
 
+MODE_FILE="${ROOT_DIR}/.sparkorbit-mode"
 USE_LLM=""
 EXTRA_ARGS=()
 
@@ -369,6 +370,22 @@ done
 ensure_docker_prerequisites
 
 if [[ -z "${USE_LLM}" ]]; then
+  if [[ -f "${MODE_FILE}" ]]; then
+    saved="$(cat "${MODE_FILE}")"
+    case "${saved}" in
+      yes|no) USE_LLM="${saved}" ;;
+    esac
+    if [[ -n "${USE_LLM}" ]]; then
+      if [[ "${USE_LLM}" == "yes" ]]; then
+        echo "  Using saved mode: LLM ON (from previous session)"
+      else
+        echo "  Using saved mode: LLM OFF (from previous session)"
+      fi
+    fi
+  fi
+fi
+
+if [[ -z "${USE_LLM}" ]]; then
   if [[ -t 0 ]]; then
     echo ""
     echo "  Local LLM bundle is recommended and enabled by default."
@@ -376,16 +393,23 @@ if [[ -z "${USE_LLM}" ]]; then
     echo "  Requires: NVIDIA GPU with ~4GB VRAM (6-8GB recommended for full context)"
     echo "  Model: qwen3.5:4b (~3.4GB download)"
     echo ""
-    printf "\n\033[1;33m⚠️  Use local LLM bundle? [Y/n] \033[0m"
-    read -r reply
-    case "${reply}" in
-      n|N|no|NO) USE_LLM="no"  ;;
-      *)         USE_LLM="yes" ;;
-    esac
+    while true; do
+      printf "\033[1;33m⚠️  Use local LLM bundle? [Y/n] \033[0m"
+      read -r reply
+      case "${reply}" in
+        y|Y|yes|YES|"") USE_LLM="yes"; break ;;
+        n|N|no|NO)      USE_LLM="no";  break ;;
+        *)
+          echo "  Please enter Y or N."
+          ;;
+      esac
+    done
   else
     USE_LLM="yes"
   fi
 fi
+
+echo "${USE_LLM}" > "${MODE_FILE}"
 
 compose_args=(-f "${BASE_COMPOSE}")
 if [[ "${USE_LLM}" == "yes" ]]; then

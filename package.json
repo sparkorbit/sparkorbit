@@ -13,7 +13,7 @@
     "docker:up": "bash scripts/docker-up.sh",
     "docker:up:llm": "bash scripts/docker-up.sh --with-llm",
     "docker:up:no-llm": "bash scripts/docker-up.sh --without-llm",
-    "docker:down": "docker compose -f docker-compose.yml -f docker-compose.llm.yml down --remove-orphans",
+    "docker:down": "bash scripts/docker-down.sh",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:e2e": "playwright test",

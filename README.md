@@ -30,14 +30,14 @@
 
 ***
 
-> **Tested on:** Linux, macOS, and Windows.
+> **Tested on:** Linux and macOS. Windows is partially tested (via WSL).
 > Edge cases may exist depending on Docker/WSL setup — see [Known Issues](#known-issues)
 >
 > **Don't want to install?** We're considering a live demo server so you can try SparkOrbit right from your browser. No promises yet — stay tuned.
 
 ***
 
-## What It Does
+## 🔭 What It Does
 
 **Tired of AI [FOMO (Fear Of Missing Out)](https://en.wikipedia.org/wiki/Fear_of_missing_out)?** New papers every hour, model drops you missed, benchmark shakeups you heard about too late — stop drowning in tabs. SparkOrbit pulls everything into one screen so you can catch up in a few minutes.
 
@@ -45,14 +45,14 @@
 - **Rank** — every item sorted by what matters: likes, downloads, stars, scores. Not just "newest first."
 - **Compare** — AI Model Leaderboard shows the latest rankings across Text, Code, Vision, Image, Video, and Search side by side. **No more hunting for the current SoTA**.
 - **Summarize** — local LLM (Qwen 3.5 4B) reads everything and generates a daily briefing + paper topic grouping. Runs on your GPU, stays on your machine.
-- **One command** — `bash scripts/docker-up.sh` and you're live. Add `--with-llm` for full AI features with GPU, or `--without-llm` to skip. Docker handles the rest.
+- **One command** — Just all-in-one command. Docker handles the rest.
 - **Fully open-source** — run it, fork it, extend it. Add your own sources and widen the orbit with us.
 
 
 
 ***
 
-## Quick Start
+## 🚀 Quick Start
 
 Three lines. That's it.
 
@@ -77,12 +77,6 @@ bash scripts/docker-up.sh
 
 - Once it's up, open **http://localhost:3000**. On a remote server, replace localhost with your server IP.
 
-**Stopping**
-
-```bash
-docker compose down
-```
-
 <details>
 <summary><b>Screenshot: With GPU (full AI features)</b></summary>
 <br/>
@@ -99,9 +93,28 @@ docker compose down
 </p>
 </details>
 
+<br>
+
+**Stopping**
+
+```bash
+bash scripts/docker-down.sh
+```
+
+When you're done, stop the containers and start them again next time with `docker-up.sh`. Keeping them running wastes resources when you're not using the dashboard.
+
+**Updating**
+
+```bash
+git pull
+bash scripts/docker-up.sh
+```
+
+If some time has passed since your last session, pull before starting up — updates can land at any time. The app runs from Docker images, so you need to re-run `docker-up.sh` after pulling for updating configuations.
+
 ***
 
-## Features
+## ✨ Features
 
 1. <img src="https://img.shields.io/badge/Normal-blue" height="16"/> — Hit the **RELOAD** button (top-right) to re-collect all sources and re-run LLM features. Sources publish new data every day, so **we strongly recommend reloading at least once a day** to stay current.
 
@@ -111,15 +124,13 @@ docker compose down
 
 ***
 
-## Tech Stack & Documentation
+## 🧩 Tech Stack & Documentation
 
 Full tech stack details and all technical docs: **[docs/README.md](./docs/README.md)**
 
 ***
 
-## Contributors
-
-<p align="center">Built with caffeine and curiosity by:</p>
+## 👥 Contributors
 
 <div align="center">
 <table>
@@ -148,7 +159,7 @@ Full tech stack details and all technical docs: **[docs/README.md](./docs/README
 
 ***
 
-## Contributing
+## 🤝 Contributing
 
 > **PR and Contributing Process docs — TBD.**
 
@@ -158,10 +169,10 @@ Full tech stack details and all technical docs: **[docs/README.md](./docs/README
 
 ***
 
-## Known Issues
+## ⚠️ Known Issues
 
 - **LLM processing can be unstable** — local LLM summarization (Ollama) may occasionally fail or produce unexpected results depending on your GPU, available VRAM, and model load. If it hangs or errors out, try reloading or restarting with `bash scripts/docker-up.sh --without-llm`. The core dashboard works fine without it. We're actively checking and improving stability on this.
-- **Cross-platform edge cases** — we've tested on Linux, macOS, and partially on Windows. Everything works, but depending on your Docker version, WSL configuration, or network setup, unexpected errors may occur. If you run into any issues, please [open an issue](https://github.com/sparkorbit/sparkorbit/issues) — we want to know about it.
+- **Cross-platform edge cases** — fully tested on Linux and macOS. Windows support is partial (WSL only) — depending on your Docker version, WSL configuration, or network setup, unexpected errors may occur. If you run into any issues, please [open an issue](https://github.com/sparkorbit/sparkorbit/issues) — we want to know about it.
 
 ***
 
@@ -179,7 +190,7 @@ If you searched for any of these, you're in the right place:
 
 ***
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
 - [**WorldMonitor**](https://github.com/koala73/worldmonitor) — the original inspiration for building an all-in-one monitoring dashboard. SparkOrbit started from the idea of bringing that concept into the AI space.
 
