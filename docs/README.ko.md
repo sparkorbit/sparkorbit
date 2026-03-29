@@ -37,7 +37,7 @@ SparkOrbit 프로젝트 기술 문서의 시작점입니다.
 | [Sections](./02_sections/README.ko.md) | source와 필드 관련 섹션 인덱스 |
 | [Sources](./02_sections/02_1_sources.ko.md) | source 목록과 선정 기준 |
 | [Fields](./02_sections/02_2_fields.ko.md) | normalized field contract 안내 페이지 |
-| [Runtime Flow](./03_runtime_flow_draft.ko.md) | backend, Redis session, polling 흐름 안내 |
+| [Runtime Flow](./03_runtime_flow.ko.md) | backend, Redis session, polling 흐름 안내 |
 | [LLM Usage](./04_llm_usage.ko.md) | LLM 레이어 한국어 안내 페이지 |
 | [Collection Pipeline](./05_data_collection_pipeline.ko.md) | 수집 파이프라인 구조와 산출물 안내 |
 | [UI Design Guide](./06_ui_design_guide.ko.md) | UI 문서 한국어 안내 페이지 |
@@ -50,12 +50,12 @@ SparkOrbit 프로젝트 기술 문서의 시작점입니다.
 
 1. 제품 목표와 현재 범위는 [Overall Flow](./01_overall_flow.ko.md)부터 읽습니다.
 2. source 목록은 [Sources](./02_sections/02_1_sources.ko.md), 필드 계약은 [Fields](./02_sections/02_2_fields.ko.md)를 봅니다.
-3. backend, Redis session, polling 흐름은 [Runtime Flow](./03_runtime_flow_draft.ko.md)를 봅니다.
+3. backend, Redis session, polling 흐름은 [Runtime Flow](./03_runtime_flow.ko.md)를 봅니다.
 4. collection pipeline과 frontend 규칙은 [Collection Pipeline](./05_data_collection_pipeline.ko.md), [UI Design Guide](./06_ui_design_guide.ko.md)를 봅니다.
 5. LLM enrichment 관련 내용은 [LLM Usage](./04_llm_usage.ko.md)를 봅니다.
 
 ## 마이그레이션 참고
 
-- 인덱스와 문서 정책은 영어 기준으로 정리하기 시작했습니다.
-- `01`, `02.1`, `03`, `05`, `07`은 영어 기준 문서 흐름을 먼저 정리했습니다.
-- `02.2`, `04`, `06`, `08`은 아직 영어 재작성 단계가 남아 있어, 한국어 페이지도 현재는 안내용 성격이 더 강합니다.
+- 인덱스와 문서 정책은 영어 기준으로 정리되어 있습니다.
+- 영어 기준 문서 재작성이 완료되었습니다.
+- 한국어 대응 페이지(`.ko.md`)는 별도 관리하며 필요에 따라 확장합니다.

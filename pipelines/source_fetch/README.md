@@ -1,9 +1,9 @@
 # Source Fetch
 
-37개 AI/Tech source에서 데이터를 수집하는 collection pipeline.
+44개 AI/Tech source에서 데이터를 수집하는 collection pipeline.
 Redis 없이 `raw -> normalized` 파일로 저장한다.
 후속 LLM 판정/분류 코드는 [pipelines/llm_enrich](../llm_enrich/) 에서 따로 관리한다.
-실제 setup / run / verification 절차의 canonical 문서는 [docs/06_operational_playbook.md](../../docs/06_operational_playbook.md) 이고, 이 README는 collection quick reference로 유지한다.
+이 README는 collection quick reference로 유지한다.
 
 ## Setup
 

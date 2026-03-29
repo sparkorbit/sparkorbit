@@ -1,4 +1,4 @@
-[Index](./README.ko.md) · [🇺🇸 English](./04_llm_usage.md) · [03. Runtime Flow](./03_runtime_flow_draft.ko.md) · **04. LLM Usage**
+[Index](./README.ko.md) · [🇺🇸 English](./04_llm_usage.md) · [03. Runtime Flow](./03_runtime_flow.ko.md) · **04. LLM Usage**
 
 ---
 

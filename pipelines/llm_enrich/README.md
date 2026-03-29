@@ -2,7 +2,7 @@
 
 `pipelines/source_fetch` 가 만든 normalized run output을 읽어, local LLM 기반 판정/분류를 수행하는 pipeline.
 현재 범위는 `Company / Release` panel용 filtering과 `company_domain` 분류다.
-실제 setup / run / verification 절차의 canonical 문서는 [docs/06_operational_playbook.md](../../docs/06_operational_playbook.md) 이고, 이 README는 LLM pipeline quick reference로 유지한다.
+이 README는 LLM pipeline quick reference로 유지한다.
 
 ## Setup
 

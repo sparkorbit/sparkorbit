@@ -24,8 +24,8 @@ import httpx
 DEFAULT_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:4b")
 DEFAULT_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "180"))
-DEFAULT_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.7"))
-DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "131072"))
+DEFAULT_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.1"))
+DEFAULT_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "16384"))
 DEFAULT_TOP_P = float(os.environ.get("OLLAMA_TOP_P", "0.8"))
 DEFAULT_TOP_K = int(os.environ.get("OLLAMA_TOP_K", "20"))
 DEFAULT_MIN_P = float(os.environ.get("OLLAMA_MIN_P", "0.0"))
@@ -64,14 +64,6 @@ PAPER_DOMAINS = [
 ]
 
 PAPER_SOURCES = {
-    "arxiv_rss_cs_ai",
-    "arxiv_rss_cs_lg",
-    "arxiv_rss_cs_cl",
-    "arxiv_rss_cs_cv",
-    "arxiv_rss_cs_ro",
-    "arxiv_rss_cs_ir",
-    "arxiv_rss_cs_cr",
-    "arxiv_rss_stat_ml",
     "hf_daily_papers",
 }
 
@@ -417,7 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--chunk-size", type=int, default=100, help="Papers per batch. Default: 100")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
-    parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
+    parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE, help="Sampling temperature. Default: 0.1")
     parser.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX)
     parser.add_argument("--top-p", type=float, default=DEFAULT_TOP_P)
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)

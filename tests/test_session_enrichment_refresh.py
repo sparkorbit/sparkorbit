@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 # Make backend importable when running from repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -26,6 +28,12 @@ RUN_FIXTURE_DIR = (
     / "runs"
     / "2026-03-25T150713Z_data-test"
 )
+
+
+def require_run_fixture(path: Path) -> Path:
+    if not path.exists():
+        pytest.skip(f"Run artifact not found: {path}")
+    return path
 
 
 class StubSummaryGenerator:
@@ -78,7 +86,7 @@ class StubBriefingGenerator:
 
 def test_force_refresh_reruns_document_summaries_and_briefing() -> None:
     store = MemoryStore()
-    publish_result = publish_run(store, RUN_FIXTURE_DIR, queue=False)
+    publish_result = publish_run(store, require_run_fixture(RUN_FIXTURE_DIR), queue=False)
     session_id = str(publish_result["session_id"])
 
     initial_meta = get_json(store, session_key(session_id, "meta"))

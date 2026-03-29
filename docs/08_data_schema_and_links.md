@@ -1,4 +1,4 @@
-[Index](./README.md) · [🇰🇷 한국어](./08_data_schema_and_links.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md) · **08. Data Schema & Links**
+[Index](./README.md) · [🇰🇷 한국어](./08_data_schema_and_links.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow](./03_runtime_flow.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md) · **08. Data Schema & Links**
 
 ---
 
@@ -8,9 +8,6 @@
 >
 > Defines the data schema, join keys, and link relationships from collection through LLM labels, session merge, and briefing.
 > New pipeline stages and frontend features should follow the schema relationships defined here.
-
-Migration note:
-This page is still being rewritten into the English-first structure. Some detailed sections below remain from the older shared draft, and the dedicated Korean companion page now lives at [08_data_schema_and_links.ko.md](./08_data_schema_and_links.ko.md).
 
 ### Monitor Sync Rule
 
@@ -486,7 +483,7 @@ LLM enrichment를 실행하지 않은 run에서는:
 | `source` | `doc.source` | 수집 소스 |
 | `source_group` | 계산: `arxiv` \| `hf_daily` \| `other` | 그룹 분류 |
 
-선별: 최대 16건. arxiv 10, hf_daily 3, other 3 (soft limit).
+선별: 최대 15건. arxiv 10, hf_daily 3, other 2 (soft limit).
 
 ### company 아이템
 
@@ -512,7 +509,7 @@ LLM enrichment를 실행하지 않은 run에서는:
 | `freshness` | `doc.discovery.freshness_bucket` | 신선도 버킷 |
 | `trend_rank` | `doc.metadata.trending_position` | 트렌딩 순위 |
 
-선별: hf_trending 4, hf_new 2 (soft limit). 최대 6건.
+선별: hf_trending 3, hf_new 2를 먼저 담고, 남는 슬롯은 전체 모델 목록에서 추가 선별. 최대 5건.
 
 ### community 아이템
 
@@ -521,7 +518,7 @@ LLM enrichment를 실행하지 않은 run에서는:
 | `title` | `doc.title` (120자 제한) | 제목 |
 | `source` | `doc.source` | 수집 소스 |
 
-선별: community 카테고리 5건 + hf_daily/trending/new 각 1건 + 나머지. 최대 8건.
+선별: community 카테고리 상위 3건 + HF Daily Papers 1건 + HF model feed 1건(우선 trending, 없으면 new)을 먼저 담고, 남는 슬롯은 나머지 community/HF 항목으로 채움. 최대 5건.
 
 ### session overview
 

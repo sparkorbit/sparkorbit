@@ -301,11 +301,6 @@ def _has_company_issue(session_overview: dict[str, Any]) -> bool:
 
 
 def _build_hf_signal_sentence(session_overview: dict[str, Any]) -> str:
-    hf_community_sources = {
-        str(source)
-        for source in (session_overview.get("hf_community_sources") or [])
-        if source
-    }
     hf_model_sources = {
         str(source)
         for source in (
@@ -315,19 +310,11 @@ def _build_hf_signal_sentence(session_overview: dict[str, Any]) -> str:
         )
         if source
     }
-    has_hf_daily = "hf_daily_papers" in hf_community_sources
     has_hf_hype = bool(
         hf_model_sources & {"hf_trending_models", "hf_models_new"}
     )
-    if has_hf_daily and has_hf_hype:
-        return (
-            "Hugging Face daily papers and model feeds are also reinforcing the same "
-            "daily flow."
-        )
-    if has_hf_daily:
-        return "Hugging Face Daily Papers is also reinforcing the current paper flow."
     if has_hf_hype:
-        return "Hugging Face model feeds are also surfacing today's fresh model activity."
+        return "Hugging Face model feeds are also surfacing today’s fresh model activity."
     return ""
 
 
@@ -337,14 +324,14 @@ def _build_today_intro(session_overview: dict[str, Any]) -> str:
     company_enabled = bool(session_overview.get("company_filtering_enabled"))
     if paper_phrase and _has_company_issue(session_overview):
         base = (
-            f"Today’s flow leans most clearly toward {paper_phrase}, with company "
-            "updates playing a secondary role in the overall picture."
+            f"Today’s HF Daily Papers highlight {paper_phrase}, with company "
+            "updates playing a secondary role."
         )
     elif paper_phrase:
         base = (
-            f"Today’s flow leans most clearly toward {paper_phrase}."
+            f"Today’s HF Daily Papers highlight {paper_phrase}."
             if not company_enabled
-            else f"Today’s flow leans most clearly toward {paper_phrase}, with no single "
+            else f"Today’s HF Daily Papers highlight {paper_phrase}, with no single "
             "company issue standing out."
         )
     elif _has_company_issue(session_overview):

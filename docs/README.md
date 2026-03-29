@@ -36,7 +36,7 @@ Technical documentation root for the SparkOrbit project.
 | [Sections](./02_sections/README.md) | Sources and field-contract entry point |
 | [Sources](./02_sections/02_1_sources.md) | Complete source list and adapters |
 | [Fields](./02_sections/02_2_fields.md) | Normalized data contract, field semantics, ranking rules |
-| [Runtime Flow](./03_runtime_flow_draft.md) | Backend, Redis session, polling-based serving |
+| [Runtime Flow](./03_runtime_flow.md) | Backend, Redis session, polling-based serving |
 | [LLM Usage](./04_llm_usage.md) | Summary provider, paper classifier, company filter |
 | [Collection Pipeline](./05_data_collection_pipeline.md) | Pipeline architecture and run artifacts |
 | [UI Design Guide](./06_ui_design_guide.md) | Visual tokens, loading states, workspace layout |
@@ -49,12 +49,12 @@ Technical documentation root for the SparkOrbit project.
 
 1. For the product goal and current scope, read [Overall Flow](./01_overall_flow.md).
 2. Source list and collection: [Sources](./02_sections/02_1_sources.md), field contract: [Fields](./02_sections/02_2_fields.md).
-3. Backend, Redis session, and polling flow: [Runtime Flow](./03_runtime_flow_draft.md).
+3. Backend, Redis session, and polling flow: [Runtime Flow](./03_runtime_flow.md).
 4. Collection pipeline: [Data Collection](./05_data_collection_pipeline.md), frontend rules: [UI Design Guide](./06_ui_design_guide.md).
 5. LLM enrichment and summary: [LLM Usage](./04_llm_usage.md).
 
 ## Migration Note
 
 - The index and language policy are now English-first.
-- The English-first rewrite is complete for `01`, `02.1`, `03`, `05`, and `07`.
-- `02.2`, `04`, `06`, and `08` still contain older shared-draft sections and will be rewritten next.
+- The English-first rewrite is complete for `01`, `02.1`, `03`, `04`, `05`, `06`, `07`, and `08`.
+- Korean companion pages (`.ko.md`) are maintained separately and expanded as needed.

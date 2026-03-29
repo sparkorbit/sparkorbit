@@ -34,7 +34,7 @@ def test_source_specific_default_limits_are_exposed() -> None:
     sources = {source.name: source for source in resolve_sources(["all"])}
 
     assert effective_limit(sources["arxiv_rss_cs_ai"], None) == 16
-    assert effective_limit(sources["hf_daily_papers"], None) == 16
+    assert effective_limit(sources["hf_daily_papers"], None) == 50
     assert effective_limit(sources["hn_topstories"], None) == 10
     assert effective_limit(sources["github_curated_repos"], None) == 10
     assert effective_limit(sources["arxiv_rss_cs_ai"], 3) == 3

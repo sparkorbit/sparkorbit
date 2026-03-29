@@ -437,6 +437,90 @@ export function LlmReadyNotice({
   );
 }
 
+export function LlmFailureNotice({
+  isOpen,
+  modelName,
+  errorCode,
+  message,
+  reportPath,
+  onConfirm,
+}: {
+  isOpen: boolean;
+  modelName?: string | null;
+  errorCode?: string | null;
+  message: string;
+  reportPath?: string | null;
+  onConfirm: () => void;
+}) {
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[78] flex items-center justify-center bg-orbit-bg/72 p-4">
+      <aside className="orbit-hacker-reveal pointer-events-auto relative w-full max-w-md overflow-hidden border border-orbit-border-strong bg-orbit-bg-elevated shadow-[0_18px_48px_rgba(0,0,0,0.4)]">
+        <div
+          aria-hidden="true"
+          className="orbit-grid pointer-events-none absolute inset-0 opacity-15"
+        />
+        <div
+          aria-hidden="true"
+          className="orbit-scanlines pointer-events-none absolute inset-0 opacity-10"
+        />
+
+        <div className="orbit-hacker-reveal__content relative z-10">
+          <div className="border-b border-orbit-border-strong bg-orbit-bg px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex border border-orbit-border-strong bg-orbit-panel px-2 py-0.5 font-mono text-[0.54rem] uppercase tracking-[0.16em] text-orbit-accent">
+                LLM fallback
+              </span>
+              {modelName ? (
+                <span className="inline-flex border border-orbit-border bg-orbit-bg px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
+                  {modelName}
+                </span>
+              ) : null}
+              {errorCode ? (
+                <span className="inline-flex border border-orbit-border bg-orbit-bg px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
+                  {errorCode}
+                </span>
+              ) : null}
+            </div>
+            <h2 className="mt-2 font-display text-[1rem] font-semibold text-orbit-text">
+              LLM enrichment failed, but collection is still live.
+            </h2>
+            <p className="mt-2 text-[0.76rem] leading-[1.62] text-orbit-muted">
+              SparkOrbit switched to the same collection-only view as without-LLM mode. Share the code below if you report this run.
+            </p>
+          </div>
+
+          <div className="space-y-3 px-4 py-3">
+            <p className="text-[0.74rem] leading-[1.6] text-orbit-text">
+              {message}
+            </p>
+            {reportPath ? (
+              <div className="border border-orbit-border bg-orbit-bg px-3 py-2">
+                <p className="font-mono text-[0.48rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+                  saved report
+                </p>
+                <p className="orbit-wrap-anywhere mt-1 font-mono text-[0.58rem] leading-[1.55] text-orbit-muted">
+                  {reportPath}
+                </p>
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="inline-flex border border-orbit-accent bg-orbit-panel px-3 py-2 font-mono text-[0.62rem] uppercase tracking-[0.14em] text-orbit-accent transition-colors duration-150 hover:bg-orbit-bg"
+              onClick={onConfirm}
+            >
+              acknowledge
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 export function ReloadConfirmModal({
   isOpen,
   onConfirm,

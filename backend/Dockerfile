@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY backend/requirements.txt /tmp/backend-requirements.txt
+COPY backend/requirements.lock.txt /tmp/backend-requirements.txt
 COPY pipelines/source_fetch/requirements.lock.txt /tmp/source-fetch-requirements.txt
 
 RUN pip install --no-cache-dir \

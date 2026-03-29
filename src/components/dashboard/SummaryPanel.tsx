@@ -71,7 +71,7 @@ function statusLabel(status: DashboardSummaryLlmState["status"]) {
     return "processing";
   }
   if (status === "error") {
-    return "error";
+    return "fallback";
   }
   return "off";
 }
@@ -91,7 +91,8 @@ export function SummaryPanel({
 }: SummaryPanelProps) {
   const paperDigest = digests.find((digest) => digest.id === "papers") ?? null;
   const isPaperDigestSelected = selectedDigestId === paperDigest?.id;
-  const showSourceCounts = llm.status === "disabled";
+  const showSourceCounts =
+    llm.status === "disabled" || llm.status === "error";
 
   return (
     <DashboardPanel style={style}>
@@ -131,18 +132,36 @@ export function SummaryPanel({
               {llm.stageLabel ? (
                 <span className="font-mono text-[0.52rem] uppercase tracking-[0.12em] text-orbit-muted">
                   — {llm.stageLabel}
-                  {typeof llm.stageProgressPercent === "number" ? ` ${llm.stageProgressPercent}%` : ""}
                 </span>
               ) : null}
             </div>
-            {llm.modelName ? (
-              <span className="inline-flex border border-orbit-border bg-orbit-bg px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
-                {llm.modelName}
-              </span>
-            ) : null}
+            <div className="flex items-center gap-2">
+              {typeof llm.stageProgressPercent === "number" ? (
+                <span className="font-mono text-[0.62rem] font-semibold tabular-nums tracking-[0.1em] text-orbit-accent">
+                  {llm.stageProgressPercent}%
+                </span>
+              ) : null}
+              {llm.modelName ? (
+                <span className="inline-flex border border-orbit-border bg-orbit-bg px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
+                  {llm.modelName}
+                </span>
+              ) : null}
+            </div>
           </div>
+          {typeof llm.stageProgressPercent === "number" ? (
+            <div className="mt-2 h-1 overflow-hidden border border-orbit-border bg-orbit-bg">
+              <div
+                className="h-full bg-orbit-accent transition-[width] duration-500 ease-out"
+                style={{ width: `${Math.max(0, Math.min(llm.stageProgressPercent, 100))}%` }}
+              />
+            </div>
+          ) : (
+            <div className="mt-2 h-1 overflow-hidden border border-orbit-border bg-orbit-bg">
+              <div className="h-full w-1/4 animate-pulse bg-orbit-accent/40" />
+            </div>
+          )}
           <p className="mt-1.5 font-mono text-[0.48rem] uppercase tracking-[0.1em] text-orbit-accent-dim">
-            usually takes about 3 minutes. a popup will appear when complete.
+            a popup will appear when complete.
           </p>
         </section>
       ) : null}
@@ -169,19 +188,29 @@ export function SummaryPanel({
         </section>
       ) : null}
 
-      {llm.status === "disabled" ? (
+      {llm.status === "disabled" || llm.status === "error" ? (
         <section className={`mb-2 border px-3 py-2.5 ${statusTone(llm.status)}`}>
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.18em] text-orbit-accent-dim">
               LLM Summary
             </span>
             <span className="inline-flex border border-orbit-border bg-orbit-bg px-2 py-0.5 font-mono text-[0.5rem] uppercase tracking-[0.12em] text-orbit-muted">
-              off
+              {llm.status === "error" ? "fallback" : "off"}
             </span>
           </div>
           <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
             {llm.message}
           </p>
+          {llm.failureCode ? (
+            <p className="mt-2 font-mono text-[0.54rem] uppercase tracking-[0.12em] text-orbit-accent-dim">
+              error code: {llm.failureCode}
+            </p>
+          ) : null}
+          {llm.failureReportPath ? (
+            <p className="orbit-wrap-anywhere mt-1.5 font-mono text-[0.5rem] leading-[1.5] text-orbit-muted">
+              saved to {llm.failureReportPath}
+            </p>
+          ) : null}
         </section>
       ) : null}
 

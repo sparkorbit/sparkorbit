@@ -1,4 +1,4 @@
-[Index](./README.ko.md) · [🇺🇸 English](./01_overall_flow.md) · **01. Overall Flow** · [02. Sections](./02_sections/README.ko.md) · [03. Runtime Flow](./03_runtime_flow_draft.ko.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.ko.md)
+[Index](./README.ko.md) · [🇺🇸 English](./01_overall_flow.md) · **01. Overall Flow** · [02. Sections](./02_sections/README.ko.md) · [03. Runtime Flow](./03_runtime_flow.ko.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.ko.md)
 
 ---
 
@@ -25,5 +25,5 @@
 ## 다음으로 읽기
 
 - source 목록: [02.1 Sources](./02_sections/02_1_sources.ko.md)
-- 런타임 흐름: [03. Runtime Flow](./03_runtime_flow_draft.ko.md)
+- 런타임 흐름: [03. Runtime Flow](./03_runtime_flow.ko.md)
 - 수집 파이프라인: [05. Data Collection Pipeline](./05_data_collection_pipeline.ko.md)

@@ -10,6 +10,7 @@ import {
 import {
   ConsoleHeader,
   GitHubStarPrompt,
+  LlmFailureNotice,
   LlmReadyNotice,
   ReloadConfirmModal,
   SettingsModal,
@@ -67,6 +68,7 @@ import type {
 } from "./types/jobProgress";
 
 const GITHUB_STAR_PROMPT_STORAGE_KEY = "sparkorbit-github-star-prompt-v1";
+const LLM_FAILURE_NOTICE_STORAGE_KEY = "sparkorbit-llm-failure-notice-v1";
 const LLM_READY_NOTICE_STORAGE_KEY = "sparkorbit-llm-ready-notice-v1";
 const GITHUB_STAR_PROMPT_DELAY_MS = 3 * 60 * 1000;
 const GITHUB_STAR_PROMPT_VISIBLE_MS = 20 * 1000;
@@ -123,6 +125,41 @@ function writeGitHubStarPromptState(value: "accepted" | "dismissed") {
 
 function llmReadyNoticeStorageKey(sessionId: string) {
   return `${LLM_READY_NOTICE_STORAGE_KEY}:${sessionId}`;
+}
+
+function llmFailureNoticeStorageKey(sessionId: string, errorCode: string) {
+  return `${LLM_FAILURE_NOTICE_STORAGE_KEY}:${sessionId}:${errorCode}`;
+}
+
+function hasSeenLlmFailureNotice(sessionId: string, errorCode: string) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return (
+      window.localStorage.getItem(
+        llmFailureNoticeStorageKey(sessionId, errorCode),
+      ) === "seen"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function markLlmFailureNoticeSeen(sessionId: string, errorCode: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      llmFailureNoticeStorageKey(sessionId, errorCode),
+      "seen",
+    );
+  } catch {
+    // ignore storage failures
+  }
 }
 
 function hasSeenLlmReadyNotice(sessionId: string) {
@@ -430,6 +467,7 @@ function App() {
   const [selectedPaperDomain, setSelectedPaperDomain] = useState<string | null>(
     null,
   );
+  const [isLlmFailureNoticeOpen, setIsLlmFailureNoticeOpen] = useState(false);
   const [isLlmReadyNoticeOpen, setIsLlmReadyNoticeOpen] = useState(false);
   const [isReloadConfirmOpen, setIsReloadConfirmOpen] = useState(false);
   const [isInitialConnectionPending, setIsInitialConnectionPending] =
@@ -892,9 +930,36 @@ function App() {
     setHasGitHubStarPromptShown(false);
     setIsGitHubStarPromptOpen(false);
     setGitHubStarPromptSignalLevel(1);
+    setIsLlmFailureNoticeOpen(false);
     setIsLlmReadyNoticeOpen(false);
     previousLlmStatusRef.current = null;
   }, [dashboard.session.sessionId]);
+
+  useEffect(() => {
+    const sessionId = dashboard.session.sessionId;
+    const llmStatus = dashboard.summary.llm.status;
+    const failureCode = dashboard.summary.llm.failureCode;
+
+    if (
+      sessionId === EMPTY_DASHBOARD.session.sessionId ||
+      llmStatus !== "error" ||
+      !failureCode
+    ) {
+      setIsLlmFailureNoticeOpen(false);
+      return;
+    }
+
+    if (hasSeenLlmFailureNotice(sessionId, failureCode)) {
+      setIsLlmFailureNoticeOpen(false);
+      return;
+    }
+
+    setIsLlmFailureNoticeOpen(true);
+  }, [
+    dashboard.session.sessionId,
+    dashboard.summary.llm.failureCode,
+    dashboard.summary.llm.status,
+  ]);
 
   useEffect(() => {
     const sessionId = dashboard.session.sessionId;
@@ -1457,6 +1522,18 @@ function App() {
     setIsLlmReadyNoticeOpen(false);
   }
 
+  function handleConfirmLlmFailureNotice() {
+    const sessionId = dashboard.session.sessionId;
+    const errorCode = dashboard.summary.llm.failureCode;
+    if (
+      sessionId !== EMPTY_DASHBOARD.session.sessionId &&
+      errorCode
+    ) {
+      markLlmFailureNoticeSeen(sessionId, errorCode);
+    }
+    setIsLlmFailureNoticeOpen(false);
+  }
+
   return (
     <div
       data-orbit-motion={uiSettings.motionEnabled ? "on" : "off"}
@@ -1502,6 +1579,16 @@ function App() {
         onAccept={handleAcceptGitHubStarPrompt}
         onLater={handleLaterGitHubStarPrompt}
         onDismissForever={handleDismissGitHubStarPrompt}
+      />
+      <LlmFailureNotice
+        isOpen={isLlmFailureNoticeOpen}
+        modelName={dashboard.summary.llm.modelName}
+        errorCode={dashboard.summary.llm.failureCode}
+        message={
+          dashboard.summary.llm.failureMessage ?? dashboard.summary.llm.message
+        }
+        reportPath={dashboard.summary.llm.failureReportPath}
+        onConfirm={handleConfirmLlmFailureNotice}
       />
       <LlmReadyNotice
         isOpen={isLlmReadyNoticeOpen}

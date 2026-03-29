@@ -1,4 +1,4 @@
-[Index](../README.md) · [🇰🇷 한국어](./02_1_sources.ko.md) · [01. Overall Flow](../01_overall_flow.md) · [02. Sections](./README.md) · **02.1 Sources** · [03. Runtime Flow](../03_runtime_flow_draft.md) · [04. LLM Usage](../04_llm_usage.md) · [05. Data Collection Pipeline](../05_data_collection_pipeline.md) · [06. UI Design Guide](../06_ui_design_guide.md)
+[Index](../README.md) · [🇰🇷 한국어](./02_1_sources.ko.md) · [01. Overall Flow](../01_overall_flow.md) · [02. Sections](./README.md) · **02.1 Sources** · [03. Runtime Flow](../03_runtime_flow.md) · [04. LLM Usage](../04_llm_usage.md) · [05. Data Collection Pipeline](../05_data_collection_pipeline.md) · [06. UI Design Guide](../06_ui_design_guide.md)
 
 ---
 
@@ -157,6 +157,6 @@ For compressed sources such as LMArena, raw information like `top_entries` shoul
 
 ## Related Docs
 
-- Redis/session/serving flow: [03. Runtime Flow](../03_runtime_flow_draft.md)
+- Redis/session/serving flow: [03. Runtime Flow](../03_runtime_flow.md)
 - LLM classification and filtering: [04. LLM Usage](../04_llm_usage.md)
 - Normalized field contract: [02.2 Fields](./02_2_fields.md)

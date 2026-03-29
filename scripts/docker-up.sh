@@ -405,7 +405,9 @@ if [[ -z "${USE_LLM}" ]]; then
       esac
     done
   else
-    USE_LLM="yes"
+    USE_LLM="no"
+    echo "  Non-interactive shell detected; defaulting to LLM OFF."
+    echo "  Use --with-llm to opt in to the local model download."
   fi
 fi
 

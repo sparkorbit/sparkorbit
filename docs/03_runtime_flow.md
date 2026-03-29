@@ -1,4 +1,4 @@
-[Index](./README.md) · [🇰🇷 한국어](./03_runtime_flow_draft.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · **03. Runtime Flow** · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md)
+[Index](./README.md) · [🇰🇷 한국어](./03_runtime_flow.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · **03. Runtime Flow** · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md)
 
 ---
 
@@ -8,7 +8,7 @@
 > Last updated: 2026-03-27
 
 > Note
-> The filename still keeps `_draft`, but the content below describes the real implemented flow across `backend/app`, Redis, and frontend polling.
+> This document describes the real implemented flow across `backend/app`, Redis, and frontend polling.
 
 ## Purpose
 
@@ -210,6 +210,13 @@ There is no separate cluster or event layer yet.
 | `POST` | `/api/sessions/reload` | Start a new reload run |
 | `GET` | `/api/jobs/active?surface=dashboard` | Active job lookup |
 | `GET` | `/api/jobs/{job_id}` | Progress polling snapshot |
+
+### SSE Streaming Endpoints
+
+| Method | Path | Role |
+|--------|------|------|
+| `GET` | `/api/dashboard/stream` | Server-Sent Events stream for real-time dashboard updates |
+| `GET` | `/api/jobs/{job_id}/stream` | Server-Sent Events stream for job progress tracking |
 
 ## Frontend Reading Rules
 

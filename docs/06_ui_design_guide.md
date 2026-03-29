@@ -1,4 +1,4 @@
-[Index](./README.md) · [🇰🇷 한국어](./06_ui_design_guide.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · **06. UI Design Guide**
+[Index](./README.md) · [🇰🇷 한국어](./06_ui_design_guide.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [03. Runtime Flow](./03_runtime_flow.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · **06. UI Design Guide**
 
 ---
 
@@ -8,9 +8,6 @@
 > Last updated: 2026-03-26
 
 ## Purpose
-
-English-first migration note:
-This page is still being rewritten from the older shared draft. The dedicated Korean companion page now lives at [06_ui_design_guide.ko.md](./06_ui_design_guide.ko.md), and the detailed rules below will be moved to the same structure gradually.
 
 이 문서는 현재 `src/` 아래 React dashboard의 시각 언어와 상태 표현 규칙을 설명한다.
 
@@ -61,9 +58,9 @@ SparkOrbit의 현재 UI는 futuristic landing page보다 운영 콘솔과 해커
 
 | Role | Font |
 |------|------|
-| 제목, 본문 | `IBM Plex Sans KR` |
-| 상태, 수치, 라벨, 메타 | `IBM Plex Mono` |
-| Fallback | `Noto Sans KR` |
+| 제목, 본문 | `Inter` |
+| 상태, 수치, 라벨, 메타 | `JetBrains Mono` |
+| Fallback (한국어) | `Pretendard Variable` |
 
 규칙:
 

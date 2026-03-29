@@ -94,12 +94,17 @@ export type BriefingStatus = "ready" | "processing" | "disabled" | "error";
 export type DashboardSummaryLlmState = {
   enabled: boolean;
   status: BriefingStatus;
+  fallbackModeActive?: boolean;
   modelName?: string | null;
   summaryReady: boolean;
   filteringReady: boolean;
   labeledPaperCount: number;
   totalPaperCount: number;
   message: string;
+  failureCode?: string | null;
+  failureMessage?: string | null;
+  failureReportPath?: string | null;
+  errorCount?: number;
   stageLabel?: string | null;
   stageDetail?: string | null;
   stageProgressCurrent?: number;

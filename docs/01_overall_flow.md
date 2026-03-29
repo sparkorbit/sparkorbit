@@ -1,4 +1,4 @@
-[Index](./README.md) · [🇰🇷 한국어](./01_overall_flow.ko.md) · **01. Overall Flow** · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md)
+[Index](./README.md) · [🇰🇷 한국어](./01_overall_flow.ko.md) · **01. Overall Flow** · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [03. Runtime Flow](./03_runtime_flow.md) · [04. LLM Usage](./04_llm_usage.md) · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md)
 
 ---
 
@@ -136,7 +136,7 @@ flowchart LR
 - [02. Sections](./02_sections/README.md)
 - [02.1 Sources](./02_sections/02_1_sources.md)
 - [02.2 Fields](./02_sections/02_2_fields.md)
-- [03. Runtime Flow](./03_runtime_flow_draft.md)
+- [03. Runtime Flow](./03_runtime_flow.md)
 - [04. LLM Usage](./04_llm_usage.md)
 - [05. Data Collection Pipeline](./05_data_collection_pipeline.md)
 - [06. UI Design Guide](./06_ui_design_guide.md)

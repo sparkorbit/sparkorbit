@@ -1,9 +1,28 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .core.constants import DEFAULT_API_HOST, DEFAULT_API_PORT, DEFAULT_REDIS_URL
 from .core.store import RedisStore
+
+
+def _allowed_origins() -> list[str]:
+    raw = os.environ.get("SPARKORBIT_ALLOWED_ORIGINS", "")
+    if raw.strip():
+        seen: list[str] = []
+        for item in raw.split(","):
+            origin = item.strip().rstrip("/")
+            if origin and origin not in seen:
+                seen.append(origin)
+        if seen:
+            return seen
+    return [
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
 
 def create_app(store: Any | None = None):
@@ -27,7 +46,7 @@ def create_app(store: Any | None = None):
     app.state.store = resolved_store
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=_allowed_origins(),
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],

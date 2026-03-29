@@ -40,8 +40,17 @@ from ..core.constants import (
     SOURCE_CATEGORY_LABELS,
     SUMMARY_EXCLUDED_TEXT_SCOPES,
 )
+from ..core.error_codes import (
+    LLM_BRIEFING_GENERATION_FAILED,
+    LLM_BRIEFING_GENERATOR_INIT_FAILED,
+    LLM_MODEL_NOT_READY,
+    LLM_OFFLINE_LABELING_FAILED,
+    get_llm_error_definition,
+)
 from ..core.store import RedisLike
+from ..schemas.session import ReloadSessionPayload
 from .collector import collect_run
+from .collector import resolve_requested_sources
 from .job_progress import build_poll_path, get_or_create_job_tracker
 from .summary_provider import (
     BriefingGenerator,
@@ -66,6 +75,7 @@ logger = logging.getLogger(__name__)
 SESSION_DOCUMENT_SUMMARIES_FILENAME = "session_document_summaries.ndjson"
 SESSION_CATEGORY_DIGESTS_FILENAME = "session_category_digests.ndjson"
 SESSION_BRIEFINGS_FILENAME = "session_briefings.ndjson"
+SESSION_LLM_ERRORS_FILENAME = "session_llm_errors.ndjson"
 OPEN_LLM_LEADERBOARD_REFERENCE_URL = "https://huggingface.co/datasets/open-llm-leaderboard/contents"
 LLM_DISABLED_PROVIDER_VALUES = frozenset({"", "off", "none", "disabled", "false", "0"})
 
@@ -125,6 +135,28 @@ def reset_session_reload_state(
     set_session_reload_running(False)
     if store is not None and clear_state:
         store.delete(RELOAD_STATE_KEY)
+
+
+def normalize_reload_output_dir(output_dir: str | Path | None) -> str | None:
+    if output_dir is None:
+        return None
+    candidate = Path(output_dir).expanduser()
+    if not candidate.is_absolute():
+        candidate = DEFAULT_RUNS_DIR / candidate
+    resolved = candidate.resolve(strict=False)
+    allowed_root = DEFAULT_RUNS_DIR.resolve(strict=False)
+    try:
+        resolved.relative_to(allowed_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"output_dir must stay within {DEFAULT_RUNS_DIR}."
+        ) from exc
+    return str(resolved)
+
+
+def validate_reload_sources(sources: list[str] | None) -> list[str] | None:
+    resolve_requested_sources(sources)
+    return sources
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -2387,11 +2419,107 @@ def build_session_briefing_rows(
             "body_en": briefing.get("body_en"),
             "category_summaries": briefing.get("category_summaries") or {},
             "error": briefing.get("error"),
+            "error_code": briefing.get("error_code"),
             "model_name": run_meta.get("model_name"),
             "prompt_version": run_meta.get("prompt_version"),
             "generated_at": run_meta.get("generated_at"),
         }
     ]
+
+
+def build_llm_error_report(
+    *,
+    error_code: str | None,
+    stage: str,
+    message: str,
+    session_id: str,
+    run_id: str,
+    model_name: str | None = None,
+    prompt_version: str | None = None,
+) -> dict[str, Any]:
+    definition = get_llm_error_definition(error_code)
+    return {
+        "artifact_type": "session_llm_error",
+        "session_id": session_id,
+        "run_id": run_id,
+        "error_code": definition["code"],
+        "title": definition["title"],
+        "summary": definition["summary"],
+        "user_action": definition["user_action"],
+        "stage": stage,
+        "message": compact_text(message, 500),
+        "model_name": model_name,
+        "prompt_version": prompt_version,
+        "occurred_at": now_utc_iso(),
+    }
+
+
+def normalize_llm_error_reports(
+    meta: dict[str, Any],
+    briefing: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    reports: list[dict[str, Any]] = []
+    raw_reports = meta.get("llm_error_reports")
+    if isinstance(raw_reports, list):
+        for raw_report in raw_reports:
+            if not isinstance(raw_report, dict):
+                continue
+            definition = get_llm_error_definition(raw_report.get("error_code"))
+            reports.append(
+                {
+                    "error_code": definition["code"],
+                    "title": raw_report.get("title") or definition["title"],
+                    "summary": raw_report.get("summary") or definition["summary"],
+                    "user_action": raw_report.get("user_action")
+                    or definition["user_action"],
+                    "stage": raw_report.get("stage"),
+                    "message": raw_report.get("message"),
+                    "model_name": raw_report.get("model_name"),
+                    "prompt_version": raw_report.get("prompt_version"),
+                    "occurred_at": raw_report.get("occurred_at"),
+                }
+            )
+    if reports:
+        return reports
+    if briefing is not None and briefing.get("error"):
+        run_meta = briefing.get("run_meta") or {}
+        reports.append(
+            build_llm_error_report(
+                error_code=briefing.get("error_code"),
+                stage="generating_briefing",
+                message=str(briefing.get("error") or "LLM enrichment failed."),
+                session_id=str(meta.get("session_id") or ""),
+                run_id=str(meta.get("run_id") or meta.get("session_id") or ""),
+                model_name=run_meta.get("model_name"),
+                prompt_version=run_meta.get("prompt_version"),
+            )
+        )
+    return reports
+
+
+def build_session_llm_error_rows(
+    llm_errors: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, error_report in enumerate(llm_errors):
+        rows.append(
+            {
+                "error_id": f"{error_report.get('session_id')}:llm:{error_report.get('error_code')}:{index}",
+                "artifact_type": error_report.get("artifact_type") or "session_llm_error",
+                "session_id": error_report.get("session_id"),
+                "run_id": error_report.get("run_id"),
+                "error_code": error_report.get("error_code"),
+                "title": error_report.get("title"),
+                "summary": error_report.get("summary"),
+                "user_action": error_report.get("user_action"),
+                "stage": error_report.get("stage"),
+                "message": error_report.get("message"),
+                "model_name": error_report.get("model_name"),
+                "prompt_version": error_report.get("prompt_version"),
+                "occurred_at": error_report.get("occurred_at"),
+            }
+        )
+    return rows
 
 
 def persist_session_runtime_artifacts(
@@ -2402,6 +2530,7 @@ def persist_session_runtime_artifacts(
     documents_by_id: dict[str, dict[str, Any]],
     digests_by_category: dict[str, dict[str, Any]],
     briefing: dict[str, Any] | None,
+    llm_errors: list[dict[str, Any]],
     provider_name: str,
 ) -> None:
     labels_dir = run_dir / "labels"
@@ -2423,6 +2552,10 @@ def persist_session_runtime_artifacts(
         labels_dir / SESSION_BRIEFINGS_FILENAME,
         build_session_briefing_rows(session_id, run_id, briefing),
     )
+    write_ndjson(
+        labels_dir / SESSION_LLM_ERRORS_FILENAME,
+        build_session_llm_error_rows(llm_errors),
+    )
 
 
 def _is_recent(doc: dict[str, Any], cutoff_date: str) -> bool:
@@ -2436,15 +2569,9 @@ def build_briefing_input(
 ) -> dict[str, Any]:
     from datetime import datetime, timedelta, timezone
 
-    max_papers = 15
+    max_papers = 30
     max_models = 5
     max_community = 5
-    # Papers need broader coverage, while models/community can lean more on ranking signals.
-    paper_group_limits = (
-        ("arxiv", 10),
-        ("hf_daily", 3),
-        ("other", 2),
-    )
     model_source_limits = (
         ("hf_trending_models", 3),
         ("hf_models_new", 2),
@@ -2499,14 +2626,6 @@ def build_briefing_input(
                 counter[value] += 1
         return [value for value, _count in counter.most_common(limit)]
 
-    def _paper_source_group(doc: dict[str, Any]) -> str:
-        source = str(doc.get("source") or "")
-        if source.startswith("arxiv_rss_"):
-            return "arxiv"
-        if source == "hf_daily_papers":
-            return "hf_daily"
-        return "other"
-
     def _append_community_doc(
         target: list[dict[str, str]],
         selected_ids: set[str],
@@ -2523,45 +2642,22 @@ def build_briefing_input(
         )
         selected_ids.add(document_id)
 
-    def _append_paper_doc(
-        target: list[dict[str, str]],
-        selected_ids: set[str],
-        doc: dict[str, Any],
-    ) -> None:
+    papers: list[dict[str, str]] = []
+    paper_ids: set[str] = set()
+    hf_daily_docs = source_docs.get("hf_daily_papers", [])
+    for doc in hf_daily_docs:
         document_id = str(doc.get("document_id") or "")
-        if not document_id or document_id in selected_ids or len(target) >= max_papers:
-            return
-        target.append(
+        if not document_id or document_id in paper_ids or len(papers) >= max_papers:
+            continue
+        papers.append(
             {
                 "title": _title(doc),
                 "domain": (doc.get("labels") or {}).get("paper_domain", "others"),
-                "source": str(doc.get("source") or ""),
-                "source_group": _paper_source_group(doc),
+                "source": "hf_daily_papers",
+                "source_group": "hf_daily",
             }
         )
-        selected_ids.add(document_id)
-
-    papers: list[dict[str, str]] = []
-    paper_ids: set[str] = set()
-    paper_docs = category_docs.get("papers", [])
-    for source_group, per_group_limit in paper_group_limits:
-        for doc in paper_docs:
-            if len(papers) >= max_papers:
-                break
-            if _paper_source_group(doc) != source_group:
-                continue
-            group_selected = sum(
-                1 for row in papers if str(row.get("source_group") or "") == source_group
-            )
-            if group_selected >= per_group_limit:
-                continue
-            _append_paper_doc(papers, paper_ids, doc)
-        if len(papers) >= max_papers:
-            break
-    for doc in paper_docs:
-        if len(papers) >= max_papers:
-            break
-        _append_paper_doc(papers, paper_ids, doc)
+        paper_ids.add(document_id)
 
     company: list[dict[str, str]] = []
 
@@ -2822,6 +2918,9 @@ def build_summary_llm_state(
 ) -> dict[str, Any]:
     briefing_status = _resolve_briefing_status(meta, briefing)
     enabled = _briefing_provider_enabled()
+    llm_errors = normalize_llm_error_reports(meta, briefing)
+    primary_error = llm_errors[-1] if llm_errors else None
+    llm_failure_active = enabled and bool(llm_errors)
     total_paper_count = len(paper_documents)
     labeled_paper_count = sum(
         1
@@ -2829,7 +2928,7 @@ def build_summary_llm_state(
         if "paper_domain" in (document.get("labels") or {})
     )
     filtering_ready = total_paper_count == 0 or labeled_paper_count >= total_paper_count
-    summary_ready = briefing_status == "ready"
+    summary_ready = briefing_status == "ready" and not llm_failure_active
     loading_stage = str(meta.get("loading_stage") or "")
     loading_status = str(meta.get("status") or "published")
     stage_progress_current = int(meta.get("loading_progress_current") or 0)
@@ -2843,9 +2942,16 @@ def build_summary_llm_state(
     if not enabled:
         status = "disabled"
         message = "LLM summarization and paper grouping are off. The overview is based on collected source data."
-    elif briefing_status == "error":
+    elif llm_failure_active or briefing_status == "error":
         status = "error"
-        message = "LLM summarization failed. Source data is still available while the monitor stays live."
+        failure_code = str(primary_error.get("error_code") or "").strip() if primary_error else ""
+        extra_errors = max(0, len(llm_errors) - 1)
+        message = (
+            f"LLM enrichment failed ({failure_code}). "
+            "The dashboard is continuing with collected source data only."
+        )
+        if extra_errors:
+            message = f"{message} {extra_errors} additional LLM issue(s) were also recorded."
     elif summary_ready and filtering_ready:
         status = "ready"
         message = "LLM summarization and paper grouping are ready."
@@ -2862,12 +2968,17 @@ def build_summary_llm_state(
     return {
         "enabled": enabled,
         "status": status,
+        "fallbackModeActive": status in {"disabled", "error"},
         "modelName": model_name,
         "summaryReady": summary_ready,
         "filteringReady": filtering_ready,
         "labeledPaperCount": labeled_paper_count,
         "totalPaperCount": total_paper_count,
         "message": message,
+        "failureCode": primary_error.get("error_code") if primary_error else None,
+        "failureMessage": primary_error.get("message") if primary_error else None,
+        "failureReportPath": meta.get("llm_error_report_path"),
+        "errorCount": len(llm_errors),
         "stageLabel": (
             loading_stage_label(loading_stage, loading_status)
             if status == "processing" and loading_stage
@@ -3028,9 +3139,10 @@ def build_dashboard_payload(
     )
     paper_documents = sort_documents(category_documents.get("papers", []))
     summary_llm = build_summary_llm_state(meta, briefing, paper_documents)
+    fallback_mode_active = bool(summary_llm.get("fallbackModeActive"))
     paper_domain_overview = (
         build_paper_domain_overview(paper_documents)
-        if summary_llm.get("enabled")
+        if summary_llm.get("enabled") and not fallback_mode_active
         else []
     )
 
@@ -3055,7 +3167,7 @@ def build_dashboard_payload(
                     feed_panel_counts,
                     feed_document_counts,
                 )
-                if not summary_llm.get("enabled")
+                if fallback_mode_active
                 else []
             ),
             "digests": digests,
@@ -3641,7 +3753,11 @@ def publish_run(
 
 
 def enqueue_session_for_enrichment(store: RedisLike, session_id: str) -> None:
-    store.rpush(QUEUE_SESSION_ENRICH_KEY, json_dumps({"session_id": session_id}))
+    payload = json_dumps({"session_id": session_id})
+    queued_items = store.lrange(QUEUE_SESSION_ENRICH_KEY, 0, -1)
+    if payload in queued_items:
+        return
+    store.rpush(QUEUE_SESSION_ENRICH_KEY, payload)
 
 
 def dequeue_session_for_enrichment(store: RedisLike) -> str | None:
@@ -4120,13 +4236,29 @@ def run_session_enrichment(
         )
 
     run_dir_str = get_json(store, artifact_root_key(session_id))
-    if llm_model_available and run_dir_str:
+    offline_labeling_enabled = _briefing_provider_enabled()
+    offline_labeling_failed = False
+    run_id = str(run_manifest.get("run_id") or session_id)
+    llm_error_reports: list[dict[str, Any]] = []
+    if offline_labeling_enabled and llm_model_available and run_dir_str:
         enriched = run_offline_llm_enrichment(
             store,
             session_id,
             Path(run_dir_str),
             progress_callback=handle_offline_labeling_progress,
         )
+        offline_labeling_failed = not enriched
+        if offline_labeling_failed:
+            llm_error_reports.append(
+                build_llm_error_report(
+                    error_code=LLM_OFFLINE_LABELING_FAILED,
+                    stage="offline_labeling",
+                    message="Offline paper labeling failed, so SparkOrbit stayed in source-coverage fallback mode.",
+                    session_id=session_id,
+                    run_id=run_id,
+                    model_name=OLLAMA_MODEL,
+                )
+            )
         if enriched:
             # Reload documents after label merge so briefing sees domains
             documents_by_id = get_documents_by_id(store, session_id, feed_lists)
@@ -4139,10 +4271,21 @@ def run_session_enrichment(
 
     briefing: dict[str, Any] | None = None
     if not llm_model_available and _briefing_provider_enabled():
+        llm_error_reports.append(
+            build_llm_error_report(
+                error_code=LLM_MODEL_NOT_READY,
+                stage="waiting_model",
+                message=f"Local model {OLLAMA_MODEL} is not ready yet.",
+                session_id=session_id,
+                run_id=run_id,
+                model_name=OLLAMA_MODEL,
+            )
+        )
         briefing = {
             "body_en": None,
             "category_summaries": {},
             "error": f"Local model {OLLAMA_MODEL} is not ready yet.",
+            "error_code": LLM_MODEL_NOT_READY,
             "run_meta": {
                 "model_name": OLLAMA_MODEL,
                 "prompt_version": None,
@@ -4150,7 +4293,30 @@ def run_session_enrichment(
             },
         }
     if briefing_generator is None and llm_model_available and _briefing_provider_enabled():
-        briefing_generator = build_briefing_generator()
+        try:
+            briefing_generator = build_briefing_generator()
+        except Exception as exc:
+            llm_error_reports.append(
+                build_llm_error_report(
+                    error_code=LLM_BRIEFING_GENERATOR_INIT_FAILED,
+                    stage="building_briefing_generator",
+                    message=f"Failed to build briefing generator: {exc}",
+                    session_id=session_id,
+                    run_id=run_id,
+                    model_name=OLLAMA_MODEL,
+                )
+            )
+            briefing = {
+                "body_en": None,
+                "category_summaries": {},
+                "error": f"Failed to build briefing generator: {exc}",
+                "error_code": LLM_BRIEFING_GENERATOR_INIT_FAILED,
+                "run_meta": {
+                    "model_name": OLLAMA_MODEL,
+                    "prompt_version": None,
+                    "generated_at": now_utc_iso(),
+                },
+            }
     if briefing_generator is not None and briefing is None:
         meta["loading_stage"] = "generating_briefing"
         meta["loading_detail"] = "Aggregating collection results to generate the daily briefing."
@@ -4169,17 +4335,57 @@ def run_session_enrichment(
             session_id=session_id,
         )
         briefing_input = build_briefing_input(documents_by_id, feed_lists)
-        briefing = briefing_generator.generate_briefing(briefing_input)
-        set_json_with_ttl(store, session_key(session_id, "briefing"), briefing)
-
-        # Merge LLM-generated category summaries into digests
-        cat_summaries = briefing.get("category_summaries") or {}
-        for cat_key, cat_summary in cat_summaries.items():
-            if cat_summary and cat_key in digests_by_category:
-                digests_by_category[cat_key]["summary"] = compact_text(cat_summary, 500)
-                set_json_with_ttl(
-                    store, digest_key(session_id, cat_key), digests_by_category[cat_key]
+        try:
+            briefing = briefing_generator.generate_briefing(briefing_input)
+            if briefing.get("error"):
+                briefing["error_code"] = str(
+                    briefing.get("error_code") or LLM_BRIEFING_GENERATION_FAILED
                 )
+                llm_error_reports.append(
+                    build_llm_error_report(
+                        error_code=briefing.get("error_code"),
+                        stage="generating_briefing",
+                        message=str(briefing.get("error") or "Briefing generation failed."),
+                        session_id=session_id,
+                        run_id=run_id,
+                        model_name=getattr(briefing_generator, "model_name", OLLAMA_MODEL),
+                        prompt_version=getattr(briefing_generator, "prompt_version", None),
+                    )
+                )
+            set_json_with_ttl(store, session_key(session_id, "briefing"), briefing)
+
+            # Merge LLM-generated category summaries into digests
+            cat_summaries = briefing.get("category_summaries") or {}
+            for cat_key, cat_summary in cat_summaries.items():
+                if cat_summary and cat_key in digests_by_category:
+                    digests_by_category[cat_key]["summary"] = compact_text(cat_summary, 500)
+                    set_json_with_ttl(
+                        store, digest_key(session_id, cat_key), digests_by_category[cat_key]
+                    )
+        except Exception as exc:
+            llm_error_reports.append(
+                build_llm_error_report(
+                    error_code=LLM_BRIEFING_GENERATION_FAILED,
+                    stage="generating_briefing",
+                    message=f"Briefing generation failed: {exc}",
+                    session_id=session_id,
+                    run_id=run_id,
+                    model_name=getattr(briefing_generator, "model_name", OLLAMA_MODEL),
+                    prompt_version=getattr(briefing_generator, "prompt_version", None),
+                )
+            )
+            briefing = {
+                "body_en": None,
+                "category_summaries": {},
+                "error": f"Briefing generation failed: {exc}",
+                "error_code": LLM_BRIEFING_GENERATION_FAILED,
+                "run_meta": {
+                    "model_name": getattr(briefing_generator, "model_name", OLLAMA_MODEL),
+                    "prompt_version": getattr(briefing_generator, "prompt_version", None),
+                    "generated_at": now_utc_iso(),
+                },
+            }
+            set_json_with_ttl(store, session_key(session_id, "briefing"), briefing)
 
         meta["loading_progress_current"] = 1
         meta["loading_detail"] = (
@@ -4201,15 +4407,32 @@ def run_session_enrichment(
 
     meta["digests_ready"] = True
     meta["summaries_ready"] = summaries_ready
-    meta["llm_refresh_required"] = False
-    meta["llm_refresh_completed_at"] = now_utc_iso()
-    meta["updated_at"] = now_utc_iso()
-    meta["status"] = "partial_error" if summary_errors else "ready"
-    meta["loading_stage"] = meta["status"]
     briefing_error = briefing.get("error") if briefing else None
+    degraded = bool(
+        summary_errors
+        or briefing_error
+        or offline_labeling_failed
+        or (not llm_model_available and offline_labeling_enabled)
+    )
+    meta["llm_refresh_required"] = degraded
+    meta["llm_refresh_completed_at"] = None if degraded else now_utc_iso()
+    meta["updated_at"] = now_utc_iso()
+    artifact_root = resolve_session_artifact_root(store, session_id, run_manifest)
+    meta["llm_error_reports"] = llm_error_reports
+    meta["llm_error_report_path"] = (
+        str(artifact_root / "labels" / SESSION_LLM_ERRORS_FILENAME)
+        if llm_error_reports
+        else None
+    )
+    meta["status"] = "partial_error" if degraded else "ready"
+    meta["loading_stage"] = meta["status"]
     if summary_errors:
         meta["loading_detail"] = (
             f"Pattern pass completed {summaries_ready} item(s), {summary_errors} fault(s) remaining."
+        )
+    elif offline_labeling_failed:
+        meta["loading_detail"] = (
+            "Document summaries are ready, but offline paper labeling failed."
         )
     elif briefing_error:
         meta["loading_detail"] = (
@@ -4252,12 +4475,13 @@ def run_session_enrichment(
     set_json_with_ttl(store, session_key(session_id, "dashboard"), dashboard)
     try:
         persist_session_runtime_artifacts(
-            resolve_session_artifact_root(store, session_id, run_manifest),
+            artifact_root,
             session_id=session_id,
-            run_id=str(run_manifest.get("run_id") or session_id),
+            run_id=run_id,
             documents_by_id=documents_by_id,
             digests_by_category=digests_by_category,
             briefing=briefing,
+            llm_errors=llm_error_reports,
             provider_name=provider_name,
         )
     except Exception as exc:  # pragma: no cover
@@ -4440,6 +4664,7 @@ def run_session_reload(
     output_dir: str | Path | None = None,
     run_label: str = DEFAULT_RUN_LABEL,
     timeout: float = 30.0,
+    queue: bool = True,
     job_id: str | None = None,
 ) -> None:
     resolved_job_id = job_id or str(uuid.uuid4())
@@ -4450,12 +4675,23 @@ def run_session_reload(
         job_type="session_loading",
     )
     try:
+        validated = ReloadSessionPayload(
+            limit=limit,
+            run_label=run_label,
+            sources=sources,
+            output_dir=output_dir,
+            timeout=timeout,
+            queue=queue,
+        )
+        validate_reload_sources(validated.sources)
+        resolved_output_dir = normalize_reload_output_dir(validated.output_dir)
+
         def handle_collect_progress(event: dict[str, Any]) -> None:
             tracker.handle_event(event)
             update_session_reload_state(
                 store,
                 status="collecting",
-                run_label=run_label,
+                run_label=validated.run_label,
                 stage=str(event.get("stage") or "fetching_sources"),
                 detail=str(
                     event.get("detail")
@@ -4519,25 +4755,29 @@ def run_session_reload(
             )
 
         run_manifest, run_dir = collect_run(
-            sources=sources,
-            limit=limit,
-            output_dir=output_dir,
-            run_label=run_label,
-            timeout=timeout,
+            sources=validated.sources,
+            limit=validated.limit,
+            output_dir=resolved_output_dir,
+            run_label=validated.run_label,
+            timeout=validated.timeout,
             progress_callback=handle_collect_progress,
         )
         result = publish_run(
             store,
             run_dir,
-            queue=True,
+            queue=validated.queue,
             progress_callback=handle_publish_progress,
         )
         update_session_reload_state(
             store,
             status="published",
-            run_label=run_label,
+            run_label=validated.run_label,
             stage="published",
-            detail="Original source curation is ready. LLM paper grouping and summary will continue in the background.",
+            detail=(
+                "Original source curation is ready. LLM paper grouping and summary will continue in the background."
+                if validated.queue
+                else "Original source curation is ready. Background enrichment was skipped for this reload."
+            ),
             progress_current=1,
             progress_total=1,
             current_source=None,
@@ -4756,11 +4996,21 @@ def reload_session(
     timeout: float = 30.0,
     queue: bool = True,
 ) -> dict[str, Any]:
-    _, run_dir = collect_run(
-        sources=sources,
+    validated = ReloadSessionPayload(
         limit=limit,
-        output_dir=output_dir,
         run_label=run_label,
+        sources=sources,
+        output_dir=output_dir,
         timeout=timeout,
+        queue=queue,
     )
-    return publish_run(store, run_dir, queue=queue)
+    validate_reload_sources(validated.sources)
+    resolved_output_dir = normalize_reload_output_dir(validated.output_dir)
+    _, run_dir = collect_run(
+        sources=validated.sources,
+        limit=validated.limit,
+        output_dir=resolved_output_dir,
+        run_label=validated.run_label,
+        timeout=validated.timeout,
+    )
+    return publish_run(store, run_dir, queue=validated.queue)

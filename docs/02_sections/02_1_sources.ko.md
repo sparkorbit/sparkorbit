@@ -25,5 +25,5 @@
 ## 함께 보면 좋은 문서
 
 - 필드 계약: [02.2 Fields](./02_2_fields.ko.md)
-- 런타임 흐름: [03. Runtime Flow](../03_runtime_flow_draft.ko.md)
+- 런타임 흐름: [03. Runtime Flow](../03_runtime_flow.ko.md)
 - 수집 파이프라인: [05. Data Collection Pipeline](../05_data_collection_pipeline.ko.md)

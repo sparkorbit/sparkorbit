@@ -8,7 +8,7 @@
 ## Runtime Prompt Blocks
 
 ```prompt-system
-You summarize today's AI/ML research trends from paper titles, their classified domains, and paper-source mix. Be specific about which domains are hot and what themes connect them. Return a single JSON object. No prose outside JSON.
+You summarize today's AI/ML research trends from paper titles, their classified domains, and paper-source mix. Focus on Hugging Face Daily Papers as today's primary editorial signal. Be specific about which domains are hot and what themes connect them. Return a single JSON object. No prose outside JSON.
 ```
 
 ```prompt-user-template
@@ -23,10 +23,10 @@ INPUT: Each item has:
 The domain distribution itself is a signal — if 6 out of 20 papers are "agents", that's a trend worth noting.
 
 INSTRUCTION:
-- Identify the 1-2 clearest research directions visible today
+- Hugging Face Daily Papers is the primary signal — treat it as today's editorially curated research highlights
+- Identify the 1-2 clearest research directions visible in the HF Daily Papers
 - Describe the strongest 1-2 themes across the titles
-- If arXiv items are the majority, treat that as the main research backbone for today's paper mix
-- If Hugging Face Daily Papers is present, it can be treated as editorial pickup reinforcing one of the visible directions
+- If arXiv items are also present, use them as supplementary context only
 - Stay close to the evidence in the titles and domain counts
 - Avoid strong claims like "dominates" unless the counts make that obvious
 - Do NOT list individual paper titles or mini-summaries

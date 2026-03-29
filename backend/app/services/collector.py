@@ -11,6 +11,16 @@ from ..core.constants import (
 )
 
 
+def resolve_requested_sources(sources: list[str] | None = None) -> list[Any]:
+    scripts_dir = str(SOURCE_FETCH_SCRIPTS_DIR)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+
+    from source_fetch.adapters import resolve_sources  # type: ignore
+
+    return resolve_sources(sources or ["all"])
+
+
 def collect_run(
     *,
     sources: list[str] | None = None,
@@ -25,6 +35,8 @@ def collect_run(
         sys.path.insert(0, scripts_dir)
 
     from source_fetch.pipeline import run_collection  # type: ignore
+
+    resolve_requested_sources(sources)
 
     return run_collection(
         sources=sources or ["all"],

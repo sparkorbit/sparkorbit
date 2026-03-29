@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import sys
+from collections import Counter
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
+import pytest
 
 # Make backend importable when running from repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -44,9 +46,15 @@ SECOND_RUN_FIXTURE_DIR = (
 )
 
 
+def require_run_fixture(path: Path) -> Path:
+    if not path.exists():
+        pytest.skip(f"Run artifact not found: {path}")
+    return path
+
+
 def build_client() -> TestClient:
     store = MemoryStore()
-    publish_run(store, RUN_FIXTURE_DIR, queue=False)
+    publish_run(store, require_run_fixture(RUN_FIXTURE_DIR), queue=False)
     return TestClient(create_app(store))
 
 
@@ -107,8 +115,8 @@ def test_all_dashboard_feed_items_and_digests_resolve() -> None:
 
 def test_document_detail_must_use_visible_dashboard_session() -> None:
     store = MemoryStore()
-    publish_run(store, RUN_FIXTURE_DIR, queue=False)
-    publish_run(store, SECOND_RUN_FIXTURE_DIR, queue=False)
+    publish_run(store, require_run_fixture(RUN_FIXTURE_DIR), queue=False)
+    publish_run(store, require_run_fixture(SECOND_RUN_FIXTURE_DIR), queue=False)
     client = TestClient(create_app(store))
 
     first_dashboard = client.get(
@@ -235,9 +243,171 @@ def test_briefing_input_skips_company_filtering_outputs() -> None:
     assert briefing_input["session"]["company_filtering_enabled"] is False
 
 
+def test_briefing_input_keeps_paper_source_mix_with_fifteen_item_cap() -> None:
+    documents_by_id = {}
+    feed_lists = {
+        "arxiv_rss_cs_ai": [],
+        "hf_daily_papers": [],
+        "custom_papers_feed": [],
+    }
+
+    for index in range(12):
+        document_id = f"arxiv-{index}"
+        documents_by_id[document_id] = {
+            "document_id": document_id,
+            "source": "arxiv_rss_cs_ai",
+            "source_category": "papers",
+            "title": f"ArXiv paper {index}",
+            "published_at": f"2099-01-01T0{index}:00:00Z",
+            "sort_at": f"2099-01-01T0{index}:00:00Z",
+            "labels": {"paper_domain": "agents"},
+        }
+        feed_lists["arxiv_rss_cs_ai"].append(document_id)
+
+    for index in range(4):
+        document_id = f"hf-{index}"
+        documents_by_id[document_id] = {
+            "document_id": document_id,
+            "source": "hf_daily_papers",
+            "source_category": "papers",
+            "title": f"HF paper {index}",
+            "published_at": f"2099-01-01T1{index}:00:00Z",
+            "sort_at": f"2099-01-01T1{index}:00:00Z",
+            "labels": {"paper_domain": "reasoning"},
+        }
+        feed_lists["hf_daily_papers"].append(document_id)
+
+    for index in range(4):
+        document_id = f"other-{index}"
+        documents_by_id[document_id] = {
+            "document_id": document_id,
+            "source": "custom_papers_feed",
+            "source_category": "papers",
+            "title": f"Other paper {index}",
+            "published_at": f"2099-01-01T2{index}:00:00Z",
+            "sort_at": f"2099-01-01T2{index}:00:00Z",
+            "labels": {"paper_domain": "vision"},
+        }
+        feed_lists["custom_papers_feed"].append(document_id)
+
+    briefing_input = build_briefing_input(documents_by_id, feed_lists)
+
+    assert len(briefing_input["papers"]) == 15
+    assert Counter(item["source_group"] for item in briefing_input["papers"]) == {
+        "arxiv": 10,
+        "hf_daily": 3,
+        "other": 2,
+    }
+
+
+def test_briefing_input_keeps_model_lane_mix_with_five_item_cap() -> None:
+    documents_by_id = {}
+    feed_lists = {
+        "hf_trending_models": [],
+        "hf_models_new": [],
+    }
+
+    for index in range(10):
+        document_id = f"trending-{index}"
+        documents_by_id[document_id] = {
+            "document_id": document_id,
+            "source": "hf_trending_models",
+            "source_category": "models",
+            "title": f"Trending model {index}",
+            "published_at": f"2099-01-02T0{index}:00:00Z",
+            "sort_at": f"2099-01-02T0{index}:00:00Z",
+            "ranking": {"feed_score": 1000 - index, "priority_reason": "hot_now"},
+            "engagement_primary": {"value": 100 - index},
+            "engagement": {"likes": 100 - index, "downloads": 0},
+            "discovery": {
+                "primary_reason": "trending_feed",
+                "freshness_bucket": "active",
+            },
+            "metadata": {"trending_position": index + 1},
+        }
+        feed_lists["hf_trending_models"].append(document_id)
+
+    for index in range(10):
+        document_id = f"new-{index}"
+        documents_by_id[document_id] = {
+            "document_id": document_id,
+            "source": "hf_models_new",
+            "source_category": "models",
+            "title": f"New model {index}",
+            "published_at": f"2099-01-02T1{index}:00:00Z",
+            "sort_at": f"2099-01-02T1{index}:00:00Z",
+            "ranking": {"feed_score": 100 - index, "priority_reason": "fresh_and_hot"},
+            "engagement_primary": {"value": 10 - index},
+            "engagement": {"likes": 10 - index, "downloads": 1000 - index},
+            "discovery": {
+                "primary_reason": "new_model_feed",
+                "freshness_bucket": "new",
+            },
+            "metadata": {},
+        }
+        feed_lists["hf_models_new"].append(document_id)
+
+    briefing_input = build_briefing_input(documents_by_id, feed_lists)
+
+    assert len(briefing_input["models"]) == 5
+    assert Counter(item["source"] for item in briefing_input["models"]) == {
+        "hf_trending_models": 3,
+        "hf_models_new": 2,
+    }
+
+
+def test_briefing_input_keeps_community_focus_with_hf_signals_at_five_item_cap() -> None:
+    documents_by_id = {}
+    feed_lists = {
+        "hn_topstories": [],
+        "hf_daily_papers": [],
+        "hf_trending_models": [],
+        "hf_models_new": [],
+    }
+
+    for index in range(5):
+        document_id = f"community-{index}"
+        documents_by_id[document_id] = {
+            "document_id": document_id,
+            "source": "hn_topstories",
+            "source_category": "community",
+            "title": f"Community topic {index}",
+            "published_at": f"2099-01-03T0{index}:00:00Z",
+            "sort_at": f"2099-01-03T0{index}:00:00Z",
+            "ranking": {"feed_score": 100 - index},
+        }
+        feed_lists["hn_topstories"].append(document_id)
+
+    for source, suffix in (
+        ("hf_daily_papers", "daily"),
+        ("hf_trending_models", "trend"),
+        ("hf_models_new", "new"),
+    ):
+        document_id = f"hf-{suffix}"
+        documents_by_id[document_id] = {
+            "document_id": document_id,
+            "source": source,
+            "source_category": "models" if source != "hf_daily_papers" else "papers",
+            "title": f"HF signal {suffix}",
+            "published_at": "2099-01-03T10:00:00Z",
+            "sort_at": "2099-01-03T10:00:00Z",
+            "ranking": {"feed_score": 500},
+        }
+        feed_lists[source].append(document_id)
+
+    briefing_input = build_briefing_input(documents_by_id, feed_lists)
+
+    assert len(briefing_input["community"]) == 5
+    assert Counter(item["source"] for item in briefing_input["community"]) == {
+        "hn_topstories": 3,
+        "hf_daily_papers": 1,
+        "hf_trending_models": 1,
+    }
+
+
 def test_rebuilt_category_digests_reflect_labeled_paper_domains() -> None:
     store = MemoryStore()
-    publish_run(store, RUN_FIXTURE_DIR, queue=False)
+    publish_run(store, require_run_fixture(RUN_FIXTURE_DIR), queue=False)
     session_id = RUN_FIXTURE_DIR.name
     meta = get_json(store, session_key(session_id, "meta"))
     assert isinstance(meta, dict)

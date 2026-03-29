@@ -1,4 +1,4 @@
-[Index](./README.ko.md) · [🇺🇸 English](./06_ui_design_guide.md) · [03. Runtime Flow](./03_runtime_flow_draft.ko.md) · **06. UI Design Guide**
+[Index](./README.ko.md) · [🇺🇸 English](./06_ui_design_guide.md) · [03. Runtime Flow](./03_runtime_flow.ko.md) · **06. UI Design Guide**
 
 ---
 

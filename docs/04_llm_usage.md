@@ -1,4 +1,4 @@
-[Index](./README.md) · [🇰🇷 한국어](./04_llm_usage.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow](./03_runtime_flow_draft.md) · **04. LLM Usage** · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md)
+[Index](./README.md) · [🇰🇷 한국어](./04_llm_usage.ko.md) · [01. Overall Flow](./01_overall_flow.md) · [02. Sections](./02_sections/README.md) · [02.1 Sources](./02_sections/02_1_sources.md) · [02.2 Fields](./02_sections/02_2_fields.md) · [03. Runtime Flow](./03_runtime_flow.md) · **04. LLM Usage** · [05. Data Collection Pipeline](./05_data_collection_pipeline.md) · [06. UI Design Guide](./06_ui_design_guide.md)
 
 ---
 
@@ -10,9 +10,6 @@
 > Basic local setup and run commands currently live in the repository [README](../README.md).
 
 ---
-
-Migration note:
-This page is still being rewritten into the English-first structure. Some detailed sections below remain from the older shared draft, and the dedicated Korean companion page now lives at [04_llm_usage.ko.md](./04_llm_usage.ko.md).
 
 ## 0. 현재 구현 상태 요약
 
