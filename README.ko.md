@@ -122,6 +122,40 @@ bash scripts/docker-update.sh
 
 3. <img src="https://img.shields.io/badge/LLM-purple" height="20"/> — LLM 처리가 끝나면 팝업이 자동으로 뜹니다. 확인하면 요약, arxiv 도메인 분류, Side Panel 논문 섹션에 도메인별 소제목이 나타납니다.
 
+<details>
+<summary><b>스크린샷</b></summary>
+<br/>
+
+**AI Model Leaderboard** — Text, Image, Code, Video, Document 분야의 모델 랭킹을 한눈에 비교합니다.
+
+<p align="center">
+  <img src="./docs/images/feature_leaderboard.jpg" alt="AI Model Leaderboard" width="100%"/>
+</p>
+
+**Side Panel** — 트렌딩 모델, 커뮤니티 피드, 40개 이상 소스의 뉴스를 한 화면에서 확인합니다.
+
+<p align="center">
+  <img src="./docs/images/feature_sidepanel.png" alt="Side Panel — 모델, 커뮤니티, 뉴스" width="100%"/>
+</p>
+
+<p align="center">
+  <img src="./docs/images/feature_sidepanel_company.png" alt="Side Panel — 기업 피드" width="100%"/>
+</p>
+
+**LLM Ready 알림** — 로컬 LLM 처리가 완료되면 팝업으로 요약과 논문 주제 분류가 준비되었음을 알려줍니다.
+
+<p align="center">
+  <img src="./docs/images/feature_llm_ready.png" alt="LLM Ready 팝업" width="400"/>
+</p>
+
+**LLM 브리핑 출력** — 로컬 Qwen 3.5 4B가 생성한 데일리 요약입니다.
+
+<p align="center">
+  <img src="./docs/images/feature_llm_output.png" alt="LLM 브리핑 출력" width="100%"/>
+</p>
+
+</details>
+
 ***
 
 ## 🧩 Tech Stack & Documentation
