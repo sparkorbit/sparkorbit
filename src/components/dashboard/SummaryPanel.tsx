@@ -83,14 +83,11 @@ export function SummaryPanel({
   llm,
   paperDomains,
   sourceCounts,
-  selectedDigestId,
   selectedPaperDomain,
-  onSelectDigest,
   onSelectPaperDomain,
   style,
 }: SummaryPanelProps) {
   const paperDigest = digests.find((digest) => digest.id === "papers") ?? null;
-  const isPaperDigestSelected = selectedDigestId === paperDigest?.id;
   const showSourceCounts =
     llm.status === "disabled" || llm.status === "error";
 
@@ -268,20 +265,10 @@ export function SummaryPanel({
           </div>
 
           {paperDigest ? (
-            <button
-              type="button"
-              className={[
-                "mt-2 w-full border px-3 py-2.5 text-left transition-colors duration-150",
-                onSelectDigest ? "cursor-pointer hover:border-orbit-accent/60" : "cursor-default",
-                isPaperDigestSelected ? "border-orbit-accent" : "border-orbit-border",
-              ].join(" ")}
+            <div
+              className="mt-2 w-full border border-orbit-border px-3 py-2.5"
               style={{
-                backgroundColor: `color-mix(in srgb, ${categoryAccentColor("Paper")} ${isPaperDigestSelected ? "10%" : "4%"}, var(--color-orbit-bg))`,
-              }}
-              onClick={() => {
-                if (paperDigest && onSelectDigest) {
-                  onSelectDigest(paperDigest);
-                }
+                backgroundColor: `color-mix(in srgb, ${categoryAccentColor("Paper")} 4%, var(--color-orbit-bg))`,
               }}
             >
               <h3 className="orbit-wrap-anywhere font-display text-[0.82rem] font-semibold leading-[1.38] text-orbit-text">
@@ -290,7 +277,7 @@ export function SummaryPanel({
               <p className="orbit-wrap-anywhere mt-1.5 text-[0.72rem] leading-[1.6] text-orbit-muted">
                 {paperDigest.summary}
               </p>
-            </button>
+            </div>
           ) : (
             <p className="mt-2 text-[0.72rem] leading-[1.6] text-orbit-muted">
               No paper summary is available yet.
