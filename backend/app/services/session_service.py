@@ -2583,7 +2583,7 @@ def build_briefing_input(
         "hf_models_new",
     )
     today = datetime.now(timezone.utc)
-    cutoff_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    cutoff_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
 
     category_docs: dict[str, list[dict[str, Any]]] = {}
     source_docs: dict[str, list[dict[str, Any]]] = {}
@@ -2933,11 +2933,24 @@ def build_summary_llm_state(
     loading_status = str(meta.get("status") or "published")
     stage_progress_current = int(meta.get("loading_progress_current") or 0)
     stage_progress_total = int(meta.get("loading_progress_total") or 0)
-    stage_progress_percent = (
-        int(round((stage_progress_current / stage_progress_total) * 100))
-        if stage_progress_total > 0
-        else None
-    )
+    # Compute unified LLM progress %: offline_labeling = 0-70%, generating_briefing = 70-100%
+    _llm_stage_ranges = {
+        "offline_labeling": (0, 70),
+        "generating_briefing": (70, 100),
+    }
+    if loading_stage in _llm_stage_ranges and stage_progress_total > 0:
+        lo, hi = _llm_stage_ranges[loading_stage]
+        ratio = min(stage_progress_current / stage_progress_total, 1.0)
+        stage_progress_percent = int(round(lo + (hi - lo) * ratio))
+    elif loading_stage in _llm_stage_ranges:
+        lo, _hi = _llm_stage_ranges[loading_stage]
+        stage_progress_percent = lo
+    else:
+        stage_progress_percent = (
+            int(round((stage_progress_current / stage_progress_total) * 100))
+            if stage_progress_total > 0
+            else None
+        )
 
     if not enabled:
         status = "disabled"
