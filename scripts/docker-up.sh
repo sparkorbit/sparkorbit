@@ -370,22 +370,6 @@ done
 ensure_docker_prerequisites
 
 if [[ -z "${USE_LLM}" ]]; then
-  if [[ -f "${MODE_FILE}" ]]; then
-    saved="$(cat "${MODE_FILE}")"
-    case "${saved}" in
-      yes|no) USE_LLM="${saved}" ;;
-    esac
-    if [[ -n "${USE_LLM}" ]]; then
-      if [[ "${USE_LLM}" == "yes" ]]; then
-        echo "  Using saved mode: LLM ON (from previous session)"
-      else
-        echo "  Using saved mode: LLM OFF (from previous session)"
-      fi
-    fi
-  fi
-fi
-
-if [[ -z "${USE_LLM}" ]]; then
   if [[ -t 0 ]]; then
     echo ""
     echo "  Local LLM bundle is recommended and enabled by default."
@@ -425,6 +409,7 @@ echo "  ║   SparkOrbit — AI World Monitor                      ║"
 echo "  ║                                                      ║"
 echo "  ║   Open your browser now:                             ║"
 echo "  ║   → http://localhost:3000                            ║"
+echo "  ║   → http://<server-ip>:3000                          ║"
 echo "  ║                                                      ║"
 echo "  ╚══════════════════════════════════════════════════════╝"
 echo ""
@@ -442,6 +427,7 @@ if [[ "${USE_LLM}" == "yes" ]]; then
 fi
 echo ""
 echo "  You can open http://localhost:3000 right away."
+echo "  If this machine is a server, http://<server-ip>:3000 works too."
 echo "  The loading screen shows real-time progress as each step completes."
 echo ""
 if [[ "${USE_LLM}" == "yes" ]]; then
@@ -465,4 +451,5 @@ echo ""
 echo "  ✓ All containers started successfully."
 echo ""
 echo "  → http://localhost:3000"
+echo "  → http://<server-ip>:3000"
 echo ""

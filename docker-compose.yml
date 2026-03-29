@@ -4,7 +4,7 @@ services:
     container_name: sparkorbit-redis
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
-      - "127.0.0.1:${SPARKORBIT_REDIS_HOST_PORT:-6380}:6379"
+      - "${SPARKORBIT_REDIS_BIND_HOST:-127.0.0.1}:${SPARKORBIT_REDIS_HOST_PORT:-6380}:6379"
     volumes:
       - redis-data:/data
     restart: unless-stopped
@@ -20,7 +20,7 @@ services:
     depends_on:
       - redis
     ports:
-      - "127.0.0.1:8787:8787"
+      - "${SPARKORBIT_BACKEND_BIND_HOST:-127.0.0.1}:8787:8787"
     volumes:
       - run-data:/app/pipelines/source_fetch/data/runs
     restart: unless-stopped
@@ -49,7 +49,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "127.0.0.1:3000:80"
+      - "${SPARKORBIT_FRONTEND_BIND_HOST:-0.0.0.0}:3000:80"
     restart: unless-stopped
 
 volumes:

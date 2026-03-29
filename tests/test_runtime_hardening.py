@@ -293,15 +293,21 @@ def test_run_session_enrichment_records_llm_error_code_and_report(
     )
 
 
-def test_compose_ports_bind_to_loopback_by_default() -> None:
+def test_compose_ports_keep_internal_services_local_but_publish_frontend() -> None:
     root = Path(__file__).resolve().parents[1]
     compose_text = (root / "docker-compose.yml").read_text(encoding="utf-8")
     llm_compose_text = (root / "docker-compose.llm.yml").read_text(encoding="utf-8")
 
-    assert '127.0.0.1:${SPARKORBIT_REDIS_HOST_PORT:-6380}:6379' in compose_text
-    assert '127.0.0.1:8787:8787' in compose_text
-    assert '127.0.0.1:3000:80' in compose_text
-    assert '127.0.0.1:${SPARKORBIT_OLLAMA_HOST_PORT:-11434}:11434' in llm_compose_text
+    assert (
+        '${SPARKORBIT_REDIS_BIND_HOST:-127.0.0.1}:${SPARKORBIT_REDIS_HOST_PORT:-6380}:6379'
+        in compose_text
+    )
+    assert '${SPARKORBIT_BACKEND_BIND_HOST:-127.0.0.1}:8787:8787' in compose_text
+    assert '${SPARKORBIT_FRONTEND_BIND_HOST:-0.0.0.0}:3000:80' in compose_text
+    assert (
+        '${SPARKORBIT_OLLAMA_BIND_HOST:-127.0.0.1}:${SPARKORBIT_OLLAMA_HOST_PORT:-11434}:11434'
+        in llm_compose_text
+    )
 
 
 def test_noninteractive_docker_up_defaults_to_llm_off() -> None:

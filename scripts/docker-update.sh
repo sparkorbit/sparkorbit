@@ -39,4 +39,5 @@ docker compose "${compose_args[@]}" up --build -d --remove-orphans
 echo ""
 echo "  ✓ Update complete."
 echo "  → http://localhost:3000"
+echo "  → http://<server-ip>:3000"
 echo ""

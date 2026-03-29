@@ -3,7 +3,7 @@ services:
     image: ollama/ollama:latest
     container_name: sparkorbit-ollama
     ports:
-      - "127.0.0.1:${SPARKORBIT_OLLAMA_HOST_PORT:-11434}:11434"
+      - "${SPARKORBIT_OLLAMA_BIND_HOST:-127.0.0.1}:${SPARKORBIT_OLLAMA_HOST_PORT:-11434}:11434"
     volumes:
       - ollama-data:/root/.ollama
     environment:
