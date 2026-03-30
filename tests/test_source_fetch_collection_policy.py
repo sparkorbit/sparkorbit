@@ -6,6 +6,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 # Make source_fetch importable when running from repo root.
 sys.path.insert(
     0,
@@ -28,6 +30,46 @@ def test_model_registry_keeps_trending_and_new_only() -> None:
     assert "hf_trending_models" in sources
     assert "hf_models_new" in sources
     assert "hf_models_likes" not in sources
+
+
+def test_retired_source_is_not_collectable() -> None:
+    sources = {source.name for source in resolve_sources(["all"])}
+
+    assert "lg_ai_research_blog" not in sources
+    assert "nvidia_deep_learning" not in sources
+    assert "upstage_blog" not in sources
+    with pytest.raises(KeyError, match="Unknown source: lg_ai_research_blog"):
+        resolve_sources(["lg_ai_research_blog"])
+    with pytest.raises(KeyError, match="Unknown source: nvidia_deep_learning"):
+        resolve_sources(["nvidia_deep_learning"])
+    with pytest.raises(KeyError, match="Unknown source: upstage_blog"):
+        resolve_sources(["upstage_blog"])
+
+
+def test_nvidia_source_uses_research_publications_listing() -> None:
+    sources = {source.name: source for source in resolve_sources(["all"])}
+
+    source = sources["nvidia_research_ai"]
+
+    assert source.method == "scrape"
+    assert source.parser == "html_listing_with_detail"
+    assert source.doc_type == "paper"
+    assert source.endpoint == "https://research.nvidia.com/research-area/machine-learning-artificial-intelligence"
+    assert source.extra.get("include_prefixes") == ["/publication/"]
+    assert source.extra.get("detail_body_selectors") == [".field--name-body"]
+
+
+def test_nvidia_press_releases_use_official_newsroom_rss() -> None:
+    sources = {source.name: source for source in resolve_sources(["all"])}
+
+    source = sources["nvidia_press_releases"]
+
+    assert source.method == "rss"
+    assert source.parser == "rss"
+    assert source.doc_type == "news"
+    assert source.endpoint == "https://nvidianews.nvidia.com/cats/press_release.xml"
+    assert source.extra.get("fetch_detail") is True
+    assert source.extra.get("detail_body_selectors") == [".article-body"]
 
 
 def test_source_specific_default_limits_are_exposed() -> None:

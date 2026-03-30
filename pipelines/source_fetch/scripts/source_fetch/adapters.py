@@ -798,7 +798,8 @@ RSS_SOURCES: list[SourceConfig] = [
     SourceConfig("openai_news_rss", "company", "rss", "https://openai.com/news/rss.xml", "blog", "rss", ("company", "openai"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
     SourceConfig("google_ai_blog", "company", "rss", "https://blog.google/technology/ai/rss/", "blog", "rss", ("company", "google"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
     SourceConfig("microsoft_research", "company", "rss", "https://www.microsoft.com/en-us/research/feed/", "blog", "rss", ("company", "microsoft"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
-    SourceConfig("nvidia_deep_learning", "company", "rss", "https://blogs.nvidia.com/blog/category/deep-learning/feed/", "blog", "rss", ("company", "nvidia"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("nvidia_press_releases", "company", "rss", "https://nvidianews.nvidia.com/cats/press_release.xml", "news", "rss", ("company", "nvidia", "press"), {"fetch_detail": True, "detail_body_selectors": [".article-body"]}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
+    SourceConfig("nvidia_research_ai", "company", "scrape", "https://research.nvidia.com/research-area/machine-learning-artificial-intelligence", "paper", "html_listing_with_detail", ("company", "nvidia", "research"), {"include_prefixes": ["/publication/"], "detail_body_selectors": [".field--name-body"], "note": "NVIDIA Research AI publications page. Detail pages provide abstract, authors, publication date, and canonical links."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
     SourceConfig("apple_ml", "company", "rss", "https://machinelearning.apple.com/rss.xml", "blog", "rss", ("company", "apple"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
     SourceConfig("amazon_science", "company", "rss", "https://www.amazon.science/index.rss", "blog", "rss", ("company", "amazon"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
     SourceConfig("hf_blog", "company", "rss", "https://huggingface.co/blog/feed.xml", "blog", "rss", ("company", "huggingface"), {"fetch_detail": True}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS),
@@ -827,7 +828,6 @@ register(SourceConfig("reddit_machinelearning", "community", "json", "https://ww
 register(SourceConfig("reddit_localllama", "community", "json", "https://www.reddit.com/r/LocalLLaMA/.json?limit=20", "post", "reddit_listing", ("community", "reddit", "localllama"), default_limit=DEFAULT_SOURCE_LIMIT))
 register(SourceConfig("open_llm_leaderboard", "benchmark", "api", "https://datasets-server.huggingface.co/rows?dataset=open-llm-leaderboard/contents&config=default&split=train&offset=0&length=20", "benchmark", "open_llm_leaderboard", ("benchmark", "leaderboard")))
 register(SourceConfig("samsung_research_posts", "company_kr", "api", "https://research.samsung.com/blogMain/list.json", "blog", "samsung_research_posts", ("company", "kr", "samsung"), default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
-register(SourceConfig("lg_ai_research_blog", "company_kr", "api", "https://www.lgresearch.ai/api/board/blog/list", "blog", "lg_ai_research_api", ("company", "kr", "lgai"), {"kind": "blog"}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
 register(SourceConfig("github_curated_repos", "community", "api", "https://api.github.com/repos", "repo", "github_watchlist_repos", ("community", "github"), {"repos": ["huggingface/transformers", "vllm-project/vllm", "openai/openai-python", "ggerganov/llama.cpp", "ollama/ollama", "langchain-ai/langchain", "sgl-project/sglang", "BerriAI/litellm", "microsoft/autogen", "run-llama/llama_index"]}, default_limit=GITHUB_WATCHLIST_LIMIT))
 register(SourceConfig("github_tencent_hunyuan_repos", "company_cn", "api", "https://api.github.com/orgs/Tencent-Hunyuan/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "tencent"), {"org": "Tencent-Hunyuan"}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
 register(SourceConfig("github_paddlepaddle_repos", "company_cn", "api", "https://api.github.com/orgs/PaddlePaddle/repos?sort=updated&per_page=20", "repo", "github_org_repos", ("company", "cn", "paddlepaddle"), {"org": "PaddlePaddle"}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
@@ -838,7 +838,6 @@ register(SourceConfig("deepmind_blog", "company", "scrape", "https://deepmind.go
 register(SourceConfig("mistral_news", "company", "scrape", "https://mistral.ai/news/", "news", "html_listing_with_detail", ("company", "mistral"), {"include_prefixes": ["/news/"], "exclude_exact": ["/news/", "/news"], "note": "List page exposes product/update cards; detail fetch adds fuller descriptions."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
 register(SourceConfig("stability_news", "company", "scrape", "https://stability.ai/news-updates", "news", "html_listing_with_detail", ("company", "stability"), {"include_prefixes": ["/news-updates/"], "exclude_exact": ["/news-updates"], "note": "Squarespace news listing; detail pages provide cleaner title/body than list cards."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
 register(SourceConfig("groq_newsroom", "company", "scrape", "https://groq.com/newsroom", "news", "html_listing_with_detail", ("company", "groq"), {"include_prefixes": ["/newsroom/"], "exclude_exact": ["/newsroom"], "note": "Newsroom cards are visible on the list page; detail pages add full body text."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
-register(SourceConfig("upstage_blog", "company_kr", "scrape", "https://www.upstage.ai/blog", "blog", "html_listing_with_detail", ("company", "kr", "upstage"), {"include_contains": ["/blog/"], "exclude_exact": ["/blog"], "note": "List page is rich enough for title/category/date hints; detail fetch adds body and meta."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
 register(SourceConfig("deepseek_updates", "company_cn", "scrape", "https://api-docs.deepseek.com/updates/", "release_note", "html_listing_with_detail", ("company", "cn", "deepseek"), {"include_prefixes": ["/news/"], "exclude_exact": ["/updates/", "/updates"], "note": "Docs changelog page exposes release links and date hints; detail pages add changelog body."}, default_limit=DEFAULT_SOURCE_LIMIT, max_age_days=COMPANY_MAX_AGE_DAYS))
 register(SourceConfig("lmarena_overview", "benchmark", "scrape", "https://arena.ai/leaderboard", "benchmark_panel", "lmarena_overview", ("benchmark", "lmarena")))
 
@@ -910,7 +909,12 @@ def fetch_rss_source(client: httpx.Client, config: SourceConfig, run_id: str, li
             detail_response.raise_for_status()
             detail_fetch_id = f"fetch_detail_{idx + 1:03d}"
             result.raw_responses.append(RawResponse(filename=f"{detail_fetch_id}.html", body=detail_response.content))
-            detail_fields = extract_detail_fields(BeautifulSoup(detail_response.text, "html.parser"), entry.get("title"), published_at)
+            detail_fields = extract_detail_fields(
+                BeautifulSoup(detail_response.text, "html.parser"),
+                entry.get("title"),
+                published_at,
+                body_selectors=config.extra.get("detail_body_selectors"),
+            )
             description = detail_fields.get("description") or description
             body_text = detail_fields.get("body_text") or body_text
             published_at = detail_fields.get("published_at") or published_at

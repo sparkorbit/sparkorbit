@@ -45,8 +45,8 @@ Implementation status can differ by source. This page distinguishes between sour
 | **Papers** | arXiv (cs.AI, cs.LG, cs.CL, cs.CV, cs.RO, cs.IR, cs.CR, stat.ML), Hugging Face daily papers | Research papers |
 | **Models** | Hugging Face models (likes/new/trending) | Model cards, kept separate from papers |
 | **Community** | Hacker News, Reddit, GitHub | Reaction, popularity, and open-source signals |
-| **Company / Release** | OpenAI, Google AI Blog, Microsoft Research, NVIDIA, Apple ML, Amazon Science, Anthropic, DeepMind, Mistral | Company announcements, research, releases |
-| **KR Company Additions** | Samsung Research, Kakao Tech, LG AI Research, NAVER Cloud Blog, Upstage | Korean channel coverage |
+| **Company / Release** | OpenAI, Google AI Blog, Microsoft Research, NVIDIA Press Releases, NVIDIA Research, Apple ML, Amazon Science, Anthropic, DeepMind, Mistral | Company announcements, research, releases |
+| **KR Company Additions** | Samsung Research, Kakao Tech, NAVER Cloud Blog | Korean channel coverage |
 | **CN Company Additions** | Qwen, DeepSeek, Tencent-Hunyuan, PaddlePaddle, ByteDance, MindSpore | China ecosystem coverage |
 | **Benchmarks** | LMArena, Open LLM Leaderboard | Snapshot sources for the benchmark panel |
 
@@ -87,7 +87,8 @@ Implementation status can differ by source. This page distinguishes between sour
 | **OpenAI** | RSS | Primary official announcement source |
 | **Google AI Blog** | RSS | Primary research-writing source |
 | **Microsoft Research** | RSS | Primary research and systems source |
-| **NVIDIA** | RSS | Primary AI and deep-learning blog source |
+| **NVIDIA Press Releases** | RSS | Market-moving corporate announcements with a cleaner signal than the broad newsroom feed |
+| **NVIDIA Research** | Scrape | AI research publications page is more information-dense than the marketing blog |
 | **Apple ML** | RSS | Primary ML research update source |
 | **Amazon Science** | RSS | Primary science and research source |
 | **Hugging Face Blog** | RSS | Primary open-ecosystem signal source |
@@ -104,9 +105,7 @@ Implementation status can differ by source. This page distinguishes between sour
 |-----|--------|-------------|
 | **Samsung Research** | API-like POST JSON | Structured public endpoint looks stable |
 | **Kakao Tech** | RSS | Public technical blog |
-| **LG AI Research** | API / Page | Keep the blog. Split news into watchlist because public detail URLs are unstable |
 | **NAVER Cloud Blog** | RSS | Adds AI and cloud coverage |
-| **Upstage** | Scrape | Keeps track of a Korean AI startup channel |
 
 ## 2.1.5 China Additions
 
