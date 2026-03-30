@@ -500,7 +500,7 @@ LLM enrichment를 실행하지 않은 run에서는:
 | 필드 | 출처 | 설명 |
 |------|------|------|
 | `title` | `doc.title` (120자 제한) | 모델명 |
-| `source` | `doc.source` | `hf_trending_models`, `hf_models_new` |
+| `source` | `doc.source` | `hf_trending_models` |
 | `likes` | `doc.engagement_primary.value` | 좋아요 수 |
 | `downloads` | `doc.engagement.downloads` | 다운로드 수 |
 | `feed_score` | `doc.ranking.feed_score` | 정렬 점수 |
@@ -509,7 +509,7 @@ LLM enrichment를 실행하지 않은 run에서는:
 | `freshness` | `doc.discovery.freshness_bucket` | 신선도 버킷 |
 | `trend_rank` | `doc.metadata.trending_position` | 트렌딩 순위 |
 
-선별: hf_trending 3, hf_new 2를 먼저 담고, 남는 슬롯은 전체 모델 목록에서 추가 선별. 최대 5건.
+선별: `hf_trending_models`를 최대 5건까지 우선 담는다.
 
 ### community 아이템
 

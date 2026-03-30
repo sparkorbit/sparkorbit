@@ -89,7 +89,7 @@ SparkOrbit의 현재 UI는 futuristic landing page보다 운영 콘솔과 해커
 금지 예시:
 
 - `Arxiv RSS Cs AI`
-- `hf_models_new`
+- `hf_trending_models`
 - `openai_news_rss`
 
 ## Monitor Sync Rule

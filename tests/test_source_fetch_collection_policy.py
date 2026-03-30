@@ -24,20 +24,23 @@ from source_fetch.models import SourceConfig
 from source_fetch.pipeline import apply_source_collection_policy, effective_limit
 
 
-def test_model_registry_keeps_trending_and_new_only() -> None:
+def test_model_registry_keeps_trending_only() -> None:
     sources = {source.name: source for source in resolve_sources(["all"])}
 
     assert "hf_trending_models" in sources
-    assert "hf_models_new" in sources
+    assert "hf_models_new" not in sources
     assert "hf_models_likes" not in sources
 
 
 def test_retired_source_is_not_collectable() -> None:
     sources = {source.name for source in resolve_sources(["all"])}
 
+    assert "hf_models_new" not in sources
     assert "lg_ai_research_blog" not in sources
     assert "nvidia_deep_learning" not in sources
     assert "upstage_blog" not in sources
+    with pytest.raises(KeyError, match="Unknown source: hf_models_new"):
+        resolve_sources(["hf_models_new"])
     with pytest.raises(KeyError, match="Unknown source: lg_ai_research_blog"):
         resolve_sources(["lg_ai_research_blog"])
     with pytest.raises(KeyError, match="Unknown source: nvidia_deep_learning"):

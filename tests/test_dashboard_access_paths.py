@@ -300,11 +300,10 @@ def test_briefing_input_keeps_paper_source_mix_with_fifteen_item_cap() -> None:
     }
 
 
-def test_briefing_input_keeps_model_lane_mix_with_five_item_cap() -> None:
+def test_briefing_input_keeps_trending_model_lane_with_five_item_cap() -> None:
     documents_by_id = {}
     feed_lists = {
         "hf_trending_models": [],
-        "hf_models_new": [],
     }
 
     for index in range(10):
@@ -327,32 +326,11 @@ def test_briefing_input_keeps_model_lane_mix_with_five_item_cap() -> None:
         }
         feed_lists["hf_trending_models"].append(document_id)
 
-    for index in range(10):
-        document_id = f"new-{index}"
-        documents_by_id[document_id] = {
-            "document_id": document_id,
-            "source": "hf_models_new",
-            "source_category": "models",
-            "title": f"New model {index}",
-            "published_at": f"2099-01-02T1{index}:00:00Z",
-            "sort_at": f"2099-01-02T1{index}:00:00Z",
-            "ranking": {"feed_score": 100 - index, "priority_reason": "fresh_and_hot"},
-            "engagement_primary": {"value": 10 - index},
-            "engagement": {"likes": 10 - index, "downloads": 1000 - index},
-            "discovery": {
-                "primary_reason": "new_model_feed",
-                "freshness_bucket": "new",
-            },
-            "metadata": {},
-        }
-        feed_lists["hf_models_new"].append(document_id)
-
     briefing_input = build_briefing_input(documents_by_id, feed_lists)
 
     assert len(briefing_input["models"]) == 5
     assert Counter(item["source"] for item in briefing_input["models"]) == {
-        "hf_trending_models": 3,
-        "hf_models_new": 2,
+        "hf_trending_models": 5,
     }
 
 
@@ -362,7 +340,6 @@ def test_briefing_input_keeps_community_focus_with_hf_signals_at_five_item_cap()
         "hn_topstories": [],
         "hf_daily_papers": [],
         "hf_trending_models": [],
-        "hf_models_new": [],
     }
 
     for index in range(5):
@@ -381,7 +358,6 @@ def test_briefing_input_keeps_community_focus_with_hf_signals_at_five_item_cap()
     for source, suffix in (
         ("hf_daily_papers", "daily"),
         ("hf_trending_models", "trend"),
-        ("hf_models_new", "new"),
     ):
         document_id = f"hf-{suffix}"
         documents_by_id[document_id] = {

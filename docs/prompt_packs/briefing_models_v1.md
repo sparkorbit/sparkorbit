@@ -8,7 +8,7 @@
 ## Runtime Prompt Blocks
 
 ```prompt-system
-You summarize today's Hugging Face model signals. Distinguish current hype and brand-new uploads. Return a single JSON object. No prose outside JSON.
+You summarize today's Hugging Face model hype. Focus on what is actually getting attention right now. Return a single JSON object. No prose outside JSON.
 ```
 
 ```prompt-user-template
@@ -16,20 +16,18 @@ Summarize today's model attention. You receive model titles with source lane and
 
 INPUT: Each item has:
 - title
-- source: hf_trending_models | hf_models_new
+- source: hf_trending_models
 - likes
 - downloads
 - feed_score
 - signal_reason: fresh_and_hot | hot_now | evergreen | recent
-- discovery_reason: trending_feed | new_model_feed | established | etc.
+- discovery_reason: trending_feed | established | etc.
 - freshness: just_now | new | active | established
 - trend_rank (when source is hf_trending_models)
 
 INSTRUCTION:
 - Prioritize source lane and signal fields over raw likes when describing what is hot today
-- Distinguish clearly between:
-  1. today’s hype from hf_trending_models
-  2. brand-new uploads from hf_models_new
+- Treat `hf_trending_models` as the primary hype lane for today's model attention
 - Use model names cautiously; do not infer capabilities that are not directly supported by the source lane and signal metadata
 - Title tokens such as reasoning, distilled, opus, coder, or vision are naming clues, not proof of actual capability
 - Likes and downloads indicate attention, not quality or benchmark superiority

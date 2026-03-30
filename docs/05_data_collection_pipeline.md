@@ -133,11 +133,10 @@ Computed from the difference between `sort_at` (publish/update time) and `fetche
 
 #### Source/Type Bonus
 
-Certain sources or content types inherently signal higher relevance. For example, `hf_models_new` means a just-published model (+25), and top positions on trending feeds receive rank-based bonuses. These bonuses are independent of each other and accumulate.
+Certain sources or content types inherently signal higher relevance. For example, top positions on trending feeds receive rank-based bonuses. These bonuses are independent of each other and accumulate.
 
 | Condition | Bonus |
 |---|---|
-| `hf_models_new` source | +25 |
 | `hf_trending_models` or `trending` tag | +20 |
 | Release/release_note + freshness ≤ recent | +10 |
 | `trending_position` ≤ 3 / ≤ 10 / ≤ 20 | +12 / +7 / +3 |

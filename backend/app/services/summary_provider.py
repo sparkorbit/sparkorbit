@@ -310,11 +310,9 @@ def _build_hf_signal_sentence(session_overview: dict[str, Any]) -> str:
         )
         if source
     }
-    has_hf_hype = bool(
-        hf_model_sources & {"hf_trending_models", "hf_models_new"}
-    )
+    has_hf_hype = bool(hf_model_sources & {"hf_trending_models"})
     if has_hf_hype:
-        return "Hugging Face model feeds are also surfacing today’s fresh model activity."
+        return "Hugging Face trending models are also surfacing today's model activity."
     return ""
 
 
@@ -408,10 +406,6 @@ def _sorted_model_items(
     )
 
 
-def _has_model_traction(item: dict[str, Any]) -> bool:
-    return _int_or_zero(item.get("likes")) > 0 or _int_or_zero(item.get("downloads")) > 0
-
-
 def _build_models_section(
     session_overview: dict[str, Any],
     model_items: list[dict[str, Any]],
@@ -421,8 +415,7 @@ def _build_models_section(
     if not model_items:
         return _truncate_sentences(fallback_summary, 1)
     trending = _sorted_model_items(model_items, "hf_trending_models")
-    fresh = _sorted_model_items(model_items, "hf_models_new")
-    top_signal = trending[0] if trending else fresh[0] if fresh else None
+    top_signal = trending[0] if trending else None
     parts: list[str] = []
 
     if top_signal is not None:
@@ -435,16 +428,6 @@ def _build_models_section(
     ][:2]
     if trending_others:
         parts.append(f"Also trending on Hugging Face: {_join_names(trending_others)}.")
-
-    fresh_with_traction = [_model_display_name(item) for item in fresh if _has_model_traction(item)][:2]
-    if fresh_with_traction:
-        parts.append(
-            f"Fresh uploads with early traction: {_join_names(fresh_with_traction)}."
-        )
-    elif fresh:
-        parts.append(
-            "Fresh uploads are active, with attention still spread across several new entries."
-        )
 
     if parts:
         return " ".join(parts[:3])

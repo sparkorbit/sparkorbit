@@ -821,7 +821,6 @@ def register(config: SourceConfig) -> None:
 
 
 register(SourceConfig("hf_daily_papers", "papers", "api", "https://huggingface.co/api/daily_papers", "paper", "hf_daily_papers", ("paper", "huggingface"), default_limit=PAPER_DAILY_LIMIT))
-register(SourceConfig("hf_models_new", "models", "api", "https://huggingface.co/api/models?sort=createdAt&direction=-1&limit=20", "model", "hf_models_listing", ("model", "huggingface", "new"), {"sort": "createdAt", "direction": "-1"}, default_limit=DEFAULT_SOURCE_LIMIT))
 register(SourceConfig("hf_trending_models", "models", "api", "https://huggingface.co/api/trending?type=model", "model_trending", "hf_trending", ("model", "huggingface", "trending"), default_limit=DEFAULT_SOURCE_LIMIT))
 register(SourceConfig("hn_topstories", "community", "api", "https://hacker-news.firebaseio.com/v0/topstories.json", "post", "hn_topstories", ("community", "hn"), default_limit=LOW_SIGNAL_COMMUNITY_LIMIT))
 register(SourceConfig("reddit_machinelearning", "community", "json", "https://www.reddit.com/r/MachineLearning/.json?limit=20", "post", "reddit_listing", ("community", "reddit", "machinelearning"), default_limit=DEFAULT_SOURCE_LIMIT))

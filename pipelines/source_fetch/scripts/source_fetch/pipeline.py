@@ -240,9 +240,6 @@ def compute_discovery_profile(document: dict[str, Any]) -> dict[str, Any]:
     spark_score = freshness_score
     reasons: list[str] = []
 
-    if source == "hf_models_new":
-        spark_score += 25
-        reasons.append("new_model_feed")
     if source == "hf_trending_models" or "trending" in tags:
         spark_score += 20
         reasons.append("trending_feed")

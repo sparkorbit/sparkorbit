@@ -2574,14 +2574,12 @@ def build_briefing_input(
     max_models = 5
     max_community = 5
     model_source_limits = (
-        ("hf_trending_models", 3),
-        ("hf_models_new", 2),
+        ("hf_trending_models", 5),
     )
     community_core_limit = 3
     community_hf_priority_sources = (
         "hf_daily_papers",
         "hf_trending_models",
-        "hf_models_new",
     )
     today = datetime.now(timezone.utc)
     cutoff_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")

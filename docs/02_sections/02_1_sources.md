@@ -43,7 +43,7 @@ Implementation status can differ by source. This page distinguishes between sour
 | Group | Main sources | Notes |
 |------|--------------|-------|
 | **Papers** | arXiv (cs.AI, cs.LG, cs.CL, cs.CV, cs.RO, cs.IR, cs.CR, stat.ML), Hugging Face daily papers | Research papers |
-| **Models** | Hugging Face models (likes/new/trending) | Model cards, kept separate from papers |
+| **Models** | Hugging Face trending models | Model cards, kept separate from papers |
 | **Community** | Hacker News, Reddit, GitHub | Reaction, popularity, and open-source signals |
 | **Company / Release** | OpenAI, Google AI Blog, Microsoft Research, NVIDIA Press Releases, NVIDIA Research, Apple ML, Amazon Science, Anthropic, DeepMind, Mistral | Company announcements, research, releases |
 | **KR Company Additions** | Samsung Research, Kakao Tech, NAVER Cloud Blog | Korean channel coverage |
@@ -68,8 +68,6 @@ Implementation status can differ by source. This page distinguishes between sour
 
 | Source | Method | Why keep it |
 |--------|--------|-------------|
-| **HF models likes** | API | Long-term popularity and baseline reference |
-| **HF models new** | API | Detect newly uploaded models |
 | **HF trending models** | API | Detect what is surging right now |
 
 ## 2.1.2 Community / Developer
