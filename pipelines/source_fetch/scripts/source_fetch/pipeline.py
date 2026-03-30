@@ -218,16 +218,16 @@ def compute_discovery_profile(document: dict[str, Any]) -> dict[str, Any]:
     if age_hours is not None:
         if age_hours <= 12:
             freshness_bucket = "just_now"
-            freshness_score = 70
+            freshness_score = 50
         elif age_hours <= 48:
             freshness_bucket = "new"
-            freshness_score = 55
+            freshness_score = 39
         elif age_hours <= 168:
             freshness_bucket = "recent"
-            freshness_score = 35
+            freshness_score = 25
         elif age_hours <= 720:
             freshness_bucket = "active"
-            freshness_score = 15
+            freshness_score = 11
         else:
             freshness_bucket = "established"
             freshness_score = 0
@@ -265,22 +265,38 @@ def compute_discovery_profile(document: dict[str, Any]) -> dict[str, Any]:
     votes = engagement.get("votes") or 0
     comments = engagement.get("comments") or 0
 
-    if likes >= 25:
-        spark_score += 5
-    if likes >= 100:
-        spark_score += 10
+    if likes >= 10:
+        spark_score += 4
+    if likes >= 50:
+        spark_score += 6
+    if likes >= 200:
+        spark_score += 8
     if likes >= 500:
-        spark_score += 10
+        spark_score += 8
     if downloads >= 1_000:
         spark_score += 5
     if downloads >= 10_000:
         spark_score += 10
-    if stars >= 100:
+    if stars >= 50:
+        spark_score += 5
+    if stars >= 200:
         spark_score += 8
-    if score >= 50 or votes >= 1_000:
-        spark_score += 8
-    if comments >= 30:
+    if score >= 10:
         spark_score += 4
+    if score >= 50:
+        spark_score += 6
+    if score >= 200:
+        spark_score += 8
+    if votes >= 500:
+        spark_score += 6
+    if votes >= 2_000:
+        spark_score += 8
+    if comments >= 5:
+        spark_score += 3
+    if comments >= 20:
+        spark_score += 4
+    if comments >= 50:
+        spark_score += 5
 
     spark_score = max(0, min(100, int(round(spark_score))))
     spark_bucket = "steady"
