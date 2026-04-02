@@ -75,6 +75,50 @@ def test_nvidia_press_releases_use_official_newsroom_rss() -> None:
     assert source.extra.get("detail_body_selectors") == [".article-body"]
 
 
+def test_anthropic_sources_cover_news_engineering_and_research() -> None:
+    sources = {source.name: source for source in resolve_sources(["all"])}
+
+    engineering = sources["anthropic_engineering"]
+    research = sources["anthropic_research"]
+
+    assert engineering.method == "scrape"
+    assert engineering.parser == "html_listing_with_detail"
+    assert engineering.doc_type == "blog"
+    assert engineering.endpoint == "https://www.anthropic.com/engineering"
+    assert engineering.extra.get("include_prefixes") == ["/engineering/"]
+
+    assert research.method == "scrape"
+    assert research.parser == "html_listing_with_detail"
+    assert research.doc_type == "blog"
+    assert research.endpoint == "https://www.anthropic.com/research"
+    assert research.extra.get("include_prefixes") == ["/research/"]
+
+
+def test_expanded_company_sources_cover_openai_rss_and_blog_sections() -> None:
+    sources = {source.name: source for source in resolve_sources(["all"])}
+
+    openai_news_rss = sources["openai_news_rss"]
+    microsoft_ai_blog = sources["microsoft_ai_blog"]
+    groq_blog = sources["groq_blog"]
+
+    assert openai_news_rss.method == "rss"
+    assert openai_news_rss.parser == "rss"
+    assert openai_news_rss.doc_type == "blog"
+    assert openai_news_rss.endpoint == "https://openai.com/news/rss.xml"
+
+    assert microsoft_ai_blog.method == "scrape"
+    assert microsoft_ai_blog.parser == "html_listing_with_detail"
+    assert microsoft_ai_blog.doc_type == "blog"
+    assert microsoft_ai_blog.endpoint == "https://blogs.microsoft.com/blog/tag/ai/"
+    assert microsoft_ai_blog.extra.get("include_contains") == ["/blog/20"]
+
+    assert groq_blog.method == "scrape"
+    assert groq_blog.parser == "html_listing_with_detail"
+    assert groq_blog.doc_type == "blog"
+    assert groq_blog.endpoint == "https://groq.com/blog"
+    assert groq_blog.extra.get("include_prefixes") == ["/blog/"]
+
+
 def test_source_specific_default_limits_are_exposed() -> None:
     sources = {source.name: source for source in resolve_sources(["all"])}
 

@@ -687,7 +687,9 @@ def sanitize_document_for_monitor(document: Any) -> Any:
 
 SOURCE_DISPLAY_NAMES = {
     "amazon_science": "Amazon Science",
+    "anthropic_engineering": "Anthropic Engineering",
     "anthropic_news": "Anthropic News",
+    "anthropic_research": "Anthropic Research",
     "apple_ml": "Apple ML",
     "arxiv_rss_cs_ai": "ARXIV - AI",
     "arxiv_rss_cs_cl": "ARXIV - Language AI",
@@ -707,6 +709,7 @@ SOURCE_DISPLAY_NAMES = {
     "geeknews_rss": "GeekNews",
     "google_ai_blog": "Google AI News",
     "google_research_blog": "Google Research Blog",
+    "groq_blog": "Groq Blog",
     "groq_newsroom": "Groq News",
     "hf_blog": "Hugging Face Blog",
     "hf_daily_papers": "Hugging Face Daily Papers",
@@ -718,12 +721,14 @@ SOURCE_DISPLAY_NAMES = {
     "lmarena_overview": "LMArena",
     "lobsters_ai_rss": "Lobsters AI",
     "microsoft_research": "Microsoft Research",
+    "microsoft_ai_blog": "Microsoft AI Blog",
     "mistral_news": "Mistral AI News",
     "naver_cloud_blog_rss": "NAVER Cloud Blog",
     "nvidia_press_releases": "NVIDIA Press Releases",
     "nvidia_research_ai": "NVIDIA Research",
     "open_llm_leaderboard": "Open LLM Leaderboard",
     "openai_news_rss": "OpenAI News",
+    "openai_research": "OpenAI Research",
     "qwen_blog_rss": "Qwen Blog",
     "reddit_localllama": "Reddit - LocalLLaMA",
     "reddit_machinelearning": "Reddit - MachineLearning",
@@ -742,6 +747,94 @@ SOURCE_CATEGORY_TITLE_LABELS = {
     "company_cn": "Company CN",
     "benchmark": "Benchmark",
 }
+
+COMPANY_PANEL_CATEGORIES = frozenset({"company", "company_kr", "company_cn"})
+COMPANY_PANEL_SOURCE_PREFIX = "company_panel"
+COMPANY_SOURCE_GROUPS = {
+    "amazon_science": "amazon",
+    "anthropic_engineering": "anthropic",
+    "anthropic_news": "anthropic",
+    "anthropic_research": "anthropic",
+    "apple_ml": "apple",
+    "deepmind_blog": "deepmind",
+    "deepseek_updates": "deepseek",
+    "github_bytedance_repos": "bytedance",
+    "github_mindspore_repos": "mindspore",
+    "github_paddlepaddle_repos": "paddlepaddle",
+    "github_tencent_hunyuan_repos": "tencent_hunyuan",
+    "google_ai_blog": "google",
+    "google_research_blog": "google",
+    "groq_blog": "groq",
+    "groq_newsroom": "groq",
+    "hf_blog": "huggingface",
+    "kakao_tech_rss": "kakao",
+    "lg_ai_research_api": "lgai",
+    "microsoft_research": "microsoft",
+    "microsoft_ai_blog": "microsoft",
+    "mistral_news": "mistral",
+    "naver_cloud_blog_rss": "naver",
+    "nvidia_press_releases": "nvidia",
+    "nvidia_research_ai": "nvidia",
+    "openai_news_rss": "openai",
+    "openai_research": "openai",
+    "qwen_blog_rss": "qwen",
+    "salesforce_ai_research_rss": "salesforce",
+    "samsung_research_posts": "samsung",
+    "stability_news": "stability",
+}
+COMPANY_GROUP_DISPLAY_NAMES = {
+    "amazon": "Amazon",
+    "anthropic": "Anthropic",
+    "apple": "Apple",
+    "bytedance": "ByteDance",
+    "deepmind": "Google DeepMind",
+    "deepseek": "DeepSeek",
+    "google": "Google",
+    "groq": "Groq",
+    "huggingface": "Hugging Face",
+    "kakao": "Kakao",
+    "lgai": "LG AI Research",
+    "mindspore": "MindSpore",
+    "microsoft": "Microsoft",
+    "mistral": "Mistral AI",
+    "naver": "NAVER",
+    "nvidia": "NVIDIA",
+    "openai": "OpenAI",
+    "paddlepaddle": "PaddlePaddle",
+    "qwen": "Qwen",
+    "salesforce": "Salesforce",
+    "samsung": "Samsung",
+    "stability": "Stability AI",
+    "tencent": "Tencent Hunyuan",
+    "tencent_hunyuan": "Tencent Hunyuan",
+}
+COMPANY_GROUP_EXCLUDED_TAGS = frozenset({
+    "benchmark",
+    "blog",
+    "company",
+    "company_cn",
+    "company_kr",
+    "community",
+    "content",
+    "github",
+    "model",
+    "model_trending",
+    "models",
+    "news",
+    "newsroom",
+    "paper",
+    "papers",
+    "post",
+    "press",
+    "release",
+    "release_note",
+    "releases",
+    "repo",
+    "research",
+    "rss",
+    "story",
+    "updates",
+})
 
 def prettify_source_name(source: str) -> str:
     normalized_source = str(source or "").strip()
@@ -792,8 +885,65 @@ def prettify_source_category_title(category: Any) -> str:
     return SOURCE_CATEGORY_TITLE_LABELS.get(resolved, prettify_source_name(resolved))
 
 
+def _build_company_panel_source(category: str, company_key: str) -> str:
+    return f"{COMPANY_PANEL_SOURCE_PREFIX}:{category}:{company_key}"
+
+
+def _parse_company_panel_source(source: str) -> tuple[str, str] | None:
+    prefix = f"{COMPANY_PANEL_SOURCE_PREFIX}:"
+    if not source.startswith(prefix):
+        return None
+    _, category, company_key = source.split(":", 2)
+    return category, company_key
+
+
+def _company_group_label(company_key: str) -> str:
+    return COMPANY_GROUP_DISPLAY_NAMES.get(company_key, prettify_source_name(company_key))
+
+
+def resolve_company_group(document: dict[str, Any]) -> tuple[str, str] | None:
+    category = str(document.get("source_category") or "").strip()
+    if category not in COMPANY_PANEL_CATEGORIES:
+        return None
+
+    source = str(document.get("source") or "").strip()
+    metadata = document.get("metadata") or {}
+    company_key = str(metadata.get("company_key") or "").strip().lower()
+    company_name = str(metadata.get("company_name") or "").strip()
+
+    if not company_key and company_name:
+        company_key = re.sub(r"[^a-z0-9]+", "_", company_name.lower()).strip("_")
+
+    source_lower = source.lower()
+    if not company_key:
+        company_key = COMPANY_SOURCE_GROUPS.get(source)
+    if not company_key:
+        tags = document.get("tags") or []
+        if isinstance(tags, list):
+            for raw_tag in tags:
+                candidate = str(raw_tag or "").strip().lower()
+                if (
+                    candidate
+                    and candidate != source_lower
+                    and candidate not in COMPANY_GROUP_EXCLUDED_TAGS
+                    and candidate not in {"kr", "cn"}
+                    and not candidate.startswith("company_")
+                ):
+                    company_key = candidate
+                    break
+    if not company_key:
+        return None
+    return company_key, company_name or _company_group_label(company_key)
+
+
 def build_feed_panel_title(category: Any, source: str) -> str:
-    readable = prettify_source_name(str(source or "").strip())
+    normalized_source = str(source or "").strip()
+    company_panel = _parse_company_panel_source(normalized_source)
+    if company_panel is not None:
+        _company_category, company_key = company_panel
+        readable = _company_group_label(company_key)
+    else:
+        readable = prettify_source_name(normalized_source)
     category_label = prettify_source_category_title(category)
     if readable == "-":
         return f"[{category_label}]"
@@ -1268,8 +1418,30 @@ def _build_community_feed_meta(document: dict[str, Any]) -> str:
 
 
 def _build_company_feed_meta(document: dict[str, Any]) -> str:
-    del document
-    return ""
+    source_label = build_document_badge(document)
+    doc_type_label = prettify_doc_type(document.get("doc_type"))
+    if source_label and doc_type_label and source_label != doc_type_label:
+        return f"{doc_type_label} · {source_label}"
+    return source_label or doc_type_label
+
+
+def _build_company_source_labels(documents: Iterable[dict[str, Any]]) -> list[str]:
+    labels: list[str] = []
+    for document in documents:
+        label = prettify_source_name(str(document.get("source") or "").strip())
+        if label != "-" and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def _format_source_label_mix(labels: list[str], *, limit: int = 2) -> str | None:
+    if not labels:
+        return None
+    visible = " / ".join(labels[:limit])
+    extra_count = len(labels) - limit
+    if extra_count > 0:
+        return f"{visible} +{extra_count}"
+    return visible
 
 
 def build_feed_meta(document: dict[str, Any]) -> str:
@@ -1402,7 +1574,7 @@ def build_feed_panel_summary(
                 else f"{len(documents)} discussions"
             )
 
-    if category in {"company", "company_kr", "company_cn"}:
+    if category in COMPANY_PANEL_CATEGORIES:
         repo_count = sum(1 for doc in documents if str(doc.get("doc_type") or "") == "repo")
         release_count = sum(
             1 for doc in documents if str(doc.get("doc_type") or "") == "release"
@@ -1414,6 +1586,16 @@ def build_feed_panel_summary(
             if release_count:
                 mix_parts.append(f"{release_count} releases")
             return f"{len(documents)} items · {' / '.join(mix_parts)}"
+
+        source_mix = _format_source_label_mix(_build_company_source_labels(documents))
+        if source_mix:
+            return f"{len(documents)} updates · {source_mix}"
+
+        company_panel = _parse_company_panel_source(source)
+        if company_panel is not None:
+            _company_category, company_key = company_panel
+            return f"{len(documents)} updates · {_company_group_label(company_key)}"
+
         return f"{len(documents)} updates · {prettify_source_name(source)}"
 
     return None
@@ -3022,7 +3204,7 @@ def build_dashboard_feed_collections(
     documents_by_id: dict[str, dict[str, Any]],
     feed_lists: dict[str, list[str]],
 ) -> tuple[
-    list[tuple[str, list[dict[str, Any]]]],
+    list[dict[str, Any]],
     dict[str, list[dict[str, Any]]],
     Counter[str],
     Counter[str],
@@ -3032,16 +3214,23 @@ def build_dashboard_feed_collections(
     }
     feed_panel_counts: Counter[str] = Counter()
     feed_document_counts: Counter[str] = Counter()
+    company_groups: dict[str, dict[str, Any]] = {}
 
-    def _feed_sort_key(item: tuple[str, list[str]]) -> tuple[int, str]:
+    def _feed_sort_key(item: dict[str, Any]) -> tuple[int, str]:
+        return (
+            _FEED_CATEGORY_ORDER.get(str(item.get("category") or "community"), 99),
+            str(item.get("sort_label") or item.get("source_label") or item.get("id") or ""),
+        )
+
+    def _raw_feed_sort_key(item: tuple[str, list[str]]) -> tuple[int, str]:
         source = item[0]
         doc_ids = item[1]
         first_doc = documents_by_id.get(doc_ids[0]) if doc_ids else None
-        cat = str((first_doc or {}).get("source_category") or "community")
-        return (_FEED_CATEGORY_ORDER.get(cat, 99), source)
+        category = str((first_doc or {}).get("source_category") or "community")
+        return (_FEED_CATEGORY_ORDER.get(category, 99), source)
 
-    ordered_feeds: list[tuple[str, list[dict[str, Any]]]] = []
-    for source, document_ids in sorted(feed_lists.items(), key=_feed_sort_key):
+    ordered_feeds: list[dict[str, Any]] = []
+    for source, document_ids in sorted(feed_lists.items(), key=_raw_feed_sort_key):
         documents = build_visible_feed_documents(
             (
                 document
@@ -3056,11 +3245,57 @@ def build_dashboard_feed_collections(
         category = str(top_document.get("source_category") or "community")
         if category == "benchmark":
             continue
+
+        if category in COMPANY_PANEL_CATEGORIES:
+            company_group = resolve_company_group(top_document)
+            if company_group is not None:
+                company_key, company_label = company_group
+                bucket = company_groups.setdefault(
+                    company_key,
+                    {
+                        "id": _build_company_panel_source(category, company_key),
+                        "source_label": company_label,
+                        "sort_label": company_label.lower(),
+                        "category": category,
+                        "documents": [],
+                    },
+                )
+                bucket["documents"].extend(documents)
+                continue
+
         category_documents.setdefault(category, []).extend(documents)
         feed_panel_counts[category] += 1
         feed_document_counts[category] += len(documents)
-        ordered_feeds.append((source, documents))
+        ordered_feeds.append(
+            {
+                "id": source,
+                "source_label": source,
+                "sort_label": source,
+                "category": category,
+                "documents": documents,
+            }
+        )
 
+    for company_key, bucket in company_groups.items():
+        documents = sort_documents(bucket.get("documents") or [])
+        if not documents:
+            continue
+        top_document = documents[0]
+        category = str(top_document.get("source_category") or bucket.get("category") or "company")
+        category_documents.setdefault(category, []).extend(documents)
+        feed_panel_counts[category] += 1
+        feed_document_counts[category] += len(documents)
+        ordered_feeds.append(
+            {
+                "id": bucket["id"],
+                "source_label": bucket["source_label"],
+                "sort_label": bucket["sort_label"],
+                "category": category,
+                "documents": documents,
+            }
+        )
+
+    ordered_feeds.sort(key=_feed_sort_key)
     return ordered_feeds, category_documents, feed_panel_counts, feed_document_counts
 
 
@@ -3103,15 +3338,20 @@ def build_dashboard_payload(
         build_dashboard_feed_collections(documents_by_id, feed_lists)
     )
 
-    for source, documents in ordered_feeds:
+    for feed in ordered_feeds:
+        source = str(feed.get("source_label") or "")
+        feed_id = str(feed.get("id") or source)
+        documents = list(feed.get("documents") or [])
+        if not documents:
+            continue
         top_document = documents[0]
         category = str(top_document.get("source_category") or "community")
-        manifest_entry = source_manifest_lookup.get(source, {})
+        manifest_entry = source_manifest_lookup.get(feed_id, {})
         panel_summary = build_feed_panel_summary(category, source, documents)
         feeds.append(
             {
-                "id": source,
-                "title": build_feed_panel_title(category, source),
+                "id": feed_id,
+                "title": build_feed_panel_title(category, feed_id),
                 "eyebrow": prettify_source_category_title(category),
                 "sourceNote": panel_summary
                 or (manifest_entry.get("notes") or [None])[0]

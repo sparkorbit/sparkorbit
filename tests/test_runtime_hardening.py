@@ -317,3 +317,66 @@ def test_noninteractive_docker_up_defaults_to_llm_off() -> None:
 
     assert 'USE_LLM="no"' in script_text
     assert "Non-interactive shell detected; defaulting to LLM OFF." in script_text
+
+
+def test_create_app_starts_inline_enrichment_worker_for_redis_store(monkeypatch) -> None:
+    import backend.app.main as main_module
+
+    class DummyRedisStore(main_module.RedisStore):
+        def __init__(self) -> None:
+            pass
+
+        def get(self, key: str) -> str | None:
+            if key == ACTIVE_SESSION_KEY:
+                return "fixture-session"
+            return None
+
+        def set(self, key: str, value: str) -> None:
+            return None
+
+        def delete(self, *keys: str) -> int:
+            return 0
+
+        def expire(self, key: str, seconds: int) -> None:
+            return None
+
+        def rpush(self, key: str, *values: str) -> int:
+            return 0
+
+        def lrange(self, key: str, start: int, stop: int) -> list[str]:
+            return []
+
+        def lpop(self, key: str) -> str | None:
+            return None
+
+    started_threads: list[dict[str, object]] = []
+
+    class FakeThread:
+        def __init__(self, *, target=None, daemon=None, name=None):
+            started_threads.append(
+                {
+                    "target": target,
+                    "daemon": daemon,
+                    "name": name,
+                    "started": False,
+                }
+            )
+
+        def start(self) -> None:
+            started_threads[-1]["started"] = True
+
+    monkeypatch.delenv("SPARKORBIT_INLINE_ENRICHMENT_WORKER", raising=False)
+    monkeypatch.setattr(main_module, "_INLINE_ENRICHMENT_WORKER_STARTED", False)
+    monkeypatch.setattr(main_module.threading, "Thread", FakeThread)
+
+    app = main_module.create_app(DummyRedisStore())
+
+    assert app.state.store is not None
+    assert started_threads == [
+        {
+            "target": started_threads[0]["target"],
+            "daemon": True,
+            "name": "sparkorbit-inline-enrichment",
+            "started": True,
+        }
+    ]

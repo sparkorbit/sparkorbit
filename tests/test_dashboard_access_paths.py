@@ -17,6 +17,7 @@ from backend.app.core.store import MemoryStore
 from backend.app.main import create_app
 from backend.app.services.session_service import (
     build_briefing_input,
+    build_dashboard_payload,
     build_visible_feed_documents,
     get_documents_by_id,
     get_json,
@@ -200,6 +201,246 @@ def test_company_feed_display_ignores_company_labels_and_keeps_all_items() -> No
         "unlabeled-doc",
         "drop-doc",
         "keep-doc",
+    ]
+
+
+def test_company_feeds_group_multiple_sources_by_company() -> None:
+    documents_by_id = {
+        "anthropic-news": {
+            "document_id": "anthropic-news",
+            "source": "anthropic_news",
+            "source_category": "company",
+            "doc_type": "news",
+            "title": "Anthropic ships a new API feature",
+            "url": "https://example.com/anthropic-news",
+            "reference_url": "https://example.com/anthropic-news",
+            "published_at": "2099-01-04T08:00:00Z",
+            "sort_at": "2099-01-04T08:00:00Z",
+            "ranking": {"feed_score": 88},
+            "engagement": {},
+            "metadata": {},
+            "tags": ["company", "anthropic_news", "news", "anthropic"],
+            "llm": {"status": "not_selected"},
+        },
+        "anthropic-engineering": {
+            "document_id": "anthropic-engineering",
+            "source": "anthropic_engineering",
+            "source_category": "company",
+            "doc_type": "blog",
+            "title": "Harness design for long-running application development",
+            "url": "https://example.com/anthropic-engineering",
+            "reference_url": "https://example.com/anthropic-engineering",
+            "published_at": "2099-01-04T08:30:00Z",
+            "sort_at": "2099-01-04T08:30:00Z",
+            "ranking": {"feed_score": 92},
+            "engagement": {},
+            "metadata": {},
+            "tags": [
+                "company",
+                "anthropic_engineering",
+                "engineering",
+                "anthropic",
+            ],
+            "llm": {"status": "not_selected"},
+        },
+        "google-news": {
+            "document_id": "google-news",
+            "source": "google_ai_blog",
+            "source_category": "company",
+            "doc_type": "blog",
+            "title": "Google announces a new Gemini workflow",
+            "url": "https://example.com/google-news",
+            "reference_url": "https://example.com/google-news",
+            "published_at": "2099-01-04T10:00:00Z",
+            "sort_at": "2099-01-04T10:00:00Z",
+            "ranking": {"feed_score": 96},
+            "engagement": {},
+            "metadata": {},
+            "tags": ["company", "google_ai_blog", "blog", "google"],
+            "llm": {"status": "not_selected"},
+        },
+        "google-research": {
+            "document_id": "google-research",
+            "source": "google_research_blog",
+            "source_category": "company",
+            "doc_type": "blog",
+            "title": "Google Research publishes a new multimodal paper",
+            "url": "https://example.com/google-research",
+            "reference_url": "https://example.com/google-research",
+            "published_at": "2099-01-04T09:30:00Z",
+            "sort_at": "2099-01-04T09:30:00Z",
+            "ranking": {"feed_score": 94},
+            "engagement": {},
+            "metadata": {},
+            "tags": [
+                "company",
+                "google_research_blog",
+                "blog",
+                "google",
+                "research",
+            ],
+            "llm": {"status": "not_selected"},
+        },
+        "microsoft-ai": {
+            "document_id": "microsoft-ai",
+            "source": "microsoft_ai_blog",
+            "source_category": "company",
+            "doc_type": "blog",
+            "title": "Microsoft AI blog highlights new Azure AI infra",
+            "url": "https://example.com/microsoft-ai",
+            "reference_url": "https://example.com/microsoft-ai",
+            "published_at": "2099-01-04T09:00:00Z",
+            "sort_at": "2099-01-04T09:00:00Z",
+            "ranking": {"feed_score": 91},
+            "engagement": {},
+            "metadata": {},
+            "tags": ["company", "microsoft_ai_blog", "blog", "microsoft", "ai"],
+            "llm": {"status": "not_selected"},
+        },
+        "microsoft-research": {
+            "document_id": "microsoft-research",
+            "source": "microsoft_research",
+            "source_category": "company",
+            "doc_type": "blog",
+            "title": "Microsoft Research posts a new foundation model study",
+            "url": "https://example.com/microsoft-research",
+            "reference_url": "https://example.com/microsoft-research",
+            "published_at": "2099-01-04T08:50:00Z",
+            "sort_at": "2099-01-04T08:50:00Z",
+            "ranking": {"feed_score": 90},
+            "engagement": {},
+            "metadata": {},
+            "tags": ["company", "microsoft_research", "blog", "microsoft", "research"],
+            "llm": {"status": "not_selected"},
+        },
+        "groq-news": {
+            "document_id": "groq-news",
+            "source": "groq_newsroom",
+            "source_category": "company",
+            "doc_type": "news",
+            "title": "Groq announces a new data center deployment",
+            "url": "https://example.com/groq-news",
+            "reference_url": "https://example.com/groq-news",
+            "published_at": "2099-01-04T08:40:00Z",
+            "sort_at": "2099-01-04T08:40:00Z",
+            "ranking": {"feed_score": 89},
+            "engagement": {},
+            "metadata": {},
+            "tags": ["company", "groq_newsroom", "news", "groq"],
+            "llm": {"status": "not_selected"},
+        },
+        "groq-blog": {
+            "document_id": "groq-blog",
+            "source": "groq_blog",
+            "source_category": "company",
+            "doc_type": "blog",
+            "title": "Groq engineers publish a low-latency serving writeup",
+            "url": "https://example.com/groq-blog",
+            "reference_url": "https://example.com/groq-blog",
+            "published_at": "2099-01-04T08:30:00Z",
+            "sort_at": "2099-01-04T08:30:00Z",
+            "ranking": {"feed_score": 88},
+            "engagement": {},
+            "metadata": {},
+            "tags": ["company", "groq_blog", "blog", "groq"],
+            "llm": {"status": "not_selected"},
+        },
+    }
+    feed_lists = {
+        "anthropic_news": ["anthropic-news"],
+        "anthropic_engineering": ["anthropic-engineering"],
+        "google_ai_blog": ["google-news"],
+        "google_research_blog": ["google-research"],
+        "microsoft_ai_blog": ["microsoft-ai"],
+        "microsoft_research": ["microsoft-research"],
+        "groq_newsroom": ["groq-news"],
+        "groq_blog": ["groq-blog"],
+    }
+
+    dashboard = build_dashboard_payload(
+        session_id="session-company-grouping",
+        meta={
+            "status": "published",
+            "created_at": "2099-01-04T12:00:00Z",
+            "docs_total": len(documents_by_id),
+            "source_ids": list(feed_lists),
+        },
+        run_manifest={
+            "run_id": "session-company-grouping",
+            "started_at": "2099-01-04T12:00:00Z",
+        },
+        source_manifest=[
+            {"source": "anthropic_news", "status": "ok", "notes": []},
+            {"source": "anthropic_engineering", "status": "ok", "notes": []},
+            {"source": "google_ai_blog", "status": "ok", "notes": []},
+            {"source": "google_research_blog", "status": "ok", "notes": []},
+            {"source": "microsoft_ai_blog", "status": "ok", "notes": []},
+            {"source": "microsoft_research", "status": "ok", "notes": []},
+            {"source": "groq_newsroom", "status": "ok", "notes": []},
+            {"source": "groq_blog", "status": "ok", "notes": []},
+        ],
+        documents_by_id=documents_by_id,
+        feed_lists=feed_lists,
+    )
+
+    company_feeds = [
+        feed for feed in dashboard["feeds"] if feed["eyebrow"] == "Company"
+    ]
+
+    assert {feed["id"] for feed in company_feeds} == {
+        "company_panel:company:anthropic",
+        "company_panel:company:google",
+        "company_panel:company:microsoft",
+        "company_panel:company:groq",
+    }
+
+    anthropic_feed = next(
+        feed for feed in company_feeds if feed["id"] == "company_panel:company:anthropic"
+    )
+    assert anthropic_feed["title"] == "[Company] Anthropic"
+    assert "Anthropic News" in anthropic_feed["sourceNote"]
+    assert "Anthropic Engineering" in anthropic_feed["sourceNote"]
+    assert [item["documentId"] for item in anthropic_feed["items"]] == [
+        "anthropic-engineering",
+        "anthropic-news",
+    ]
+
+    google_feed = next(
+        feed for feed in company_feeds if feed["id"] == "company_panel:company:google"
+    )
+    assert google_feed["title"] == "[Company] Google"
+    assert "2 updates" in google_feed["sourceNote"]
+    assert "Google AI News" in google_feed["sourceNote"]
+    assert "Google Research Blog" in google_feed["sourceNote"]
+    assert [item["documentId"] for item in google_feed["items"]] == [
+        "google-news",
+        "google-research",
+    ]
+    assert [item["meta"] for item in google_feed["items"]] == [
+        "Blog · Google AI News",
+        "Blog · Google Research Blog",
+    ]
+
+    microsoft_feed = next(
+        feed for feed in company_feeds if feed["id"] == "company_panel:company:microsoft"
+    )
+    assert microsoft_feed["title"] == "[Company] Microsoft"
+    assert "Microsoft Research" in microsoft_feed["sourceNote"]
+    assert "Microsoft AI Blog" in microsoft_feed["sourceNote"]
+    assert [item["documentId"] for item in microsoft_feed["items"]] == [
+        "microsoft-ai",
+        "microsoft-research",
+    ]
+
+    groq_feed = next(
+        feed for feed in company_feeds if feed["id"] == "company_panel:company:groq"
+    )
+    assert groq_feed["title"] == "[Company] Groq"
+    assert "Groq News" in groq_feed["sourceNote"]
+    assert "Groq Blog" in groq_feed["sourceNote"]
+    assert [item["documentId"] for item in groq_feed["items"]] == [
+        "groq-news",
+        "groq-blog",
     ]
 
 
