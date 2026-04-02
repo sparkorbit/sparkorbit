@@ -11,9 +11,10 @@ from fastapi.testclient import TestClient
 # Make backend importable when running from repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.app.core.constants import ACTIVE_SESSION_KEY, SCHEMA_VERSION
+from backend.app.core.constants import ACTIVE_SESSION_KEY, DEFAULT_RUNS_DIR, SCHEMA_VERSION
 from backend.app.core.store import MemoryStore
 from backend.app.main import create_app
+from backend.app.services import session_service as session_module
 from backend.app.services.session_service import (
     SESSION_LLM_ERRORS_FILENAME,
     artifact_root_key,
@@ -21,6 +22,7 @@ from backend.app.services.session_service import (
     doc_key,
     enqueue_session_for_enrichment,
     feed_key,
+    resolve_session_artifact_root,
     run_session_enrichment,
     session_key,
 )
@@ -291,6 +293,155 @@ def test_run_session_enrichment_records_llm_error_code_and_report(
         and row["stage"] == "generating_briefing"
         for row in error_reports
     )
+
+
+def test_wait_for_ollama_model_ready_fails_fast_when_endpoint_is_down(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SPARKORBIT_LLM_READY_TIMEOUT", "900")
+    monkeypatch.setenv("SPARKORBIT_LLM_READY_POLL_INTERVAL", "1")
+
+    elapsed = {"seconds": 0.0}
+
+    monkeypatch.setattr(session_module, "_ollama_model_ready", lambda: False)
+    monkeypatch.setattr(session_module, "_ollama_reachable", lambda: False)
+    monkeypatch.setattr(session_module.time, "monotonic", lambda: elapsed["seconds"])
+
+    def fake_sleep(seconds: float) -> None:
+        elapsed["seconds"] += seconds
+
+    monkeypatch.setattr(session_module.time, "sleep", fake_sleep)
+
+    assert session_module._wait_for_ollama_model_ready() is False
+    assert elapsed["seconds"] <= 5.0
+
+
+def test_resolve_session_artifact_root_falls_back_to_default_runs_dir() -> None:
+    path = resolve_session_artifact_root(
+        MemoryStore(),
+        "session-fallback",
+        {"run_id": "session-fallback"},
+    )
+
+    assert path == DEFAULT_RUNS_DIR / "session-fallback"
+
+
+def test_run_session_enrichment_surfaces_unreachable_ollama_message(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SPARKORBIT_BRIEFING_PROVIDER", "ollama")
+
+    class StubSummaryGenerator:
+        provider_name = "heuristic"
+        model_name = "stub-summary"
+        prompt_version = "stub"
+        fewshot_pack_version = "stub"
+
+        def summarize_document(self, document: dict[str, object]) -> dict[str, object]:
+            return {
+                "status": "complete",
+                "summary_1l": "one line",
+                "summary_short": "summary",
+                "key_points": ["point"],
+                "entities": [],
+                "run_meta": {
+                    "model_name": self.model_name,
+                    "prompt_version": self.prompt_version,
+                    "fewshot_pack_version": self.fewshot_pack_version,
+                    "generated_at": "2026-03-29T00:00:00Z",
+                },
+            }
+
+    store = MemoryStore()
+    session_id = "session-unreachable-ollama"
+    document_id = "doc-1"
+    source_id = "hn_topstories"
+
+    meta = {
+        "schema_version": SCHEMA_VERSION,
+        "session_id": session_id,
+        "run_id": session_id,
+        "status": "published",
+        "source_ids": [source_id],
+        "llm_refresh_required": True,
+        "llm_refresh_completed_at": None,
+    }
+    run_manifest = {"run_id": session_id}
+    document = {
+        "document_id": document_id,
+        "source": source_id,
+        "source_category": "community",
+        "title": "Test document",
+        "url": "https://example.com/doc",
+        "reference_url": "https://example.com/doc",
+        "published_at": "2026-03-29T00:00:00Z",
+        "sort_at": "2026-03-29T00:00:00Z",
+        "summary_input_text": "Test document body",
+        "text_scope": "body",
+        "llm": {"status": "pending"},
+        "ranking": {"feed_score": 10},
+        "discovery": {"spark_score": 10},
+        "engagement": {},
+        "metadata": {},
+        "tags": [],
+        "labels": {},
+    }
+
+    store.set(session_key(session_id, "meta"), json.dumps(meta))
+    store.set(session_key(session_id, "run_manifest"), json.dumps(run_manifest))
+    store.set(session_key(session_id, "source_manifest"), "[]")
+    store.set(artifact_root_key(session_id), json.dumps("/tmp/nonexistent-run"))
+    store.rpush(feed_key(session_id, source_id), document_id)
+    store.set(doc_key(session_id, document_id), json.dumps(document))
+
+    monkeypatch.setattr(session_module, "_wait_for_ollama_model_ready", lambda: False)
+    monkeypatch.setattr(session_module, "_ollama_reachable", lambda: False)
+
+    result = run_session_enrichment(
+        store,
+        session_id,
+        generator=StubSummaryGenerator(),
+        briefing_generator=None,
+    )
+
+    briefing = json.loads(store.get(session_key(session_id, "briefing")) or "{}")
+
+    assert result["meta"]["status"] == "partial_error"
+    assert briefing["error"].startswith("Local Ollama endpoint ")
+    assert "not reachable" in briefing["error"]
+
+
+def test_build_summary_llm_state_marks_completed_partial_labels_ready(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SPARKORBIT_BRIEFING_PROVIDER", "ollama")
+
+    llm_state = session_module.build_summary_llm_state(
+        {
+            "status": "ready",
+            "loading_stage": "ready",
+            "loading_detail": "LLM provider not connected; skipped pattern pass and generated 7 category overview(s) only.",
+            "loading_progress_current": 7,
+            "loading_progress_total": 7,
+            "llm_refresh_required": False,
+        },
+        {
+            "body_en": "Briefing body",
+            "error": None,
+            "run_meta": {"model_name": "qwen3.5:4b"},
+        },
+        [
+            {"labels": {"paper_domain": "agents"}},
+            {"labels": {}},
+            {"labels": {}},
+        ],
+    )
+
+    assert llm_state["status"] == "ready"
+    assert llm_state["summaryReady"] is True
+    assert llm_state["filteringReady"] is False
+    assert llm_state["stageLabel"] is None
+    assert "partially available" in llm_state["message"]
 
 
 def test_compose_ports_keep_internal_services_local_but_publish_frontend() -> None:

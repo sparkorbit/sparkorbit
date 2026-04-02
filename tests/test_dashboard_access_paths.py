@@ -18,6 +18,7 @@ from backend.app.main import create_app
 from backend.app.services.session_service import (
     build_briefing_input,
     build_dashboard_payload,
+    build_paper_domain_overview,
     build_visible_feed_documents,
     get_documents_by_id,
     get_json,
@@ -644,3 +645,18 @@ def test_rebuilt_category_digests_reflect_labeled_paper_domains() -> None:
         if digest.get("id") == "papers"
     )
     assert dashboard_paper_digest["headline"] == paper_digest["headline"]
+
+
+def test_paper_domain_overview_hides_ungrouped_bucket() -> None:
+    overview = build_paper_domain_overview(
+        [
+            {"labels": {"paper_domain": "agents"}},
+            {"labels": {"paper_domain": "reasoning"}},
+            {"labels": {}},
+            {"labels": {"paper_domain": "agents"}},
+        ]
+    )
+
+    assert [entry["key"] for entry in overview] == ["agents", "reasoning"]
+    assert all(entry["key"] != "others" for entry in overview)
+    assert all(entry["isUngrouped"] is False for entry in overview)

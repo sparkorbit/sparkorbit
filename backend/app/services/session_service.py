@@ -22,6 +22,7 @@ from ..core.constants import (
     BRIEFING_PROVIDER_ENV_VAR,
     DEFAULT_BRIEFING_PROVIDER,
     DEFAULT_RUN_LABEL,
+    DEFAULT_RUNS_DIR,
     HOMEPAGE_BOOTSTRAP_RUN_LABEL,
     LLM_PAPER_CHUNK_SIZE,
     OLLAMA_BASE_URL,
@@ -3034,11 +3035,18 @@ def _wait_for_ollama_model_ready() -> bool:
         1.0,
         float(os.getenv("SPARKORBIT_LLM_READY_POLL_INTERVAL", "5")),
     )
+    unreachable_grace_seconds = min(
+        timeout_seconds,
+        max(5.0, poll_interval_seconds * 3),
+    )
+    unreachable_deadline = time.monotonic() + unreachable_grace_seconds
     deadline = time.monotonic() + timeout_seconds
 
     while True:
         if _ollama_model_ready():
             return True
+        if not _ollama_reachable() and time.monotonic() >= unreachable_deadline:
+            return False
         if time.monotonic() >= deadline:
             return False
         time.sleep(min(poll_interval_seconds, max(0.0, deadline - time.monotonic())))
@@ -3055,15 +3063,14 @@ def build_paper_domain_overview(
     overview: list[dict[str, Any]] = []
     for domain, count in domain_counts.most_common(8):
         if domain == "others":
-            label = "Not Grouped Yet"
-        else:
-            label = PAPER_DOMAIN_DISPLAY.get(domain, prettify_source_name(domain))
+            continue
+        label = PAPER_DOMAIN_DISPLAY.get(domain, prettify_source_name(domain))
         overview.append(
             {
                 "key": domain,
                 "label": label,
                 "count": count,
-                "isUngrouped": domain == "others",
+                "isUngrouped": False,
             }
         )
     return overview
@@ -3112,6 +3119,18 @@ def build_summary_llm_state(
     summary_ready = briefing_status == "ready" and not llm_failure_active
     loading_stage = str(meta.get("loading_stage") or "")
     loading_status = str(meta.get("status") or "published")
+    llm_refresh_required = bool(meta.get("llm_refresh_required"))
+    active_llm_stages = {
+        "collecting",
+        "summarizing",
+        "summarizing_documents",
+        "building_digests",
+        "offline_labeling",
+        "generating_briefing",
+    }
+    llm_work_in_progress = loading_stage in active_llm_stages or (
+        loading_status not in {"ready", "partial_error"} and llm_refresh_required
+    )
     stage_progress_current = int(meta.get("loading_progress_current") or 0)
     stage_progress_total = int(meta.get("loading_progress_total") or 0)
     # Compute unified LLM progress %: offline_labeling = 0-70%, generating_briefing = 70-100%
@@ -3149,6 +3168,12 @@ def build_summary_llm_state(
     elif summary_ready and filtering_ready:
         status = "ready"
         message = "LLM summarization and paper grouping are ready."
+    elif summary_ready and not llm_work_in_progress and not llm_refresh_required:
+        status = "ready"
+        message = (
+            "LLM summarization is ready. "
+            f"Paper grouping is partially available for {labeled_paper_count}/{total_paper_count} papers."
+        )
     else:
         status = "processing"
         message = (
@@ -4523,11 +4548,17 @@ def run_session_enrichment(
 
     briefing: dict[str, Any] | None = None
     if not llm_model_available and _briefing_provider_enabled():
+        ollama_unreachable = not _ollama_reachable()
+        model_wait_error = (
+            f"Local Ollama endpoint {OLLAMA_BASE_URL} is not reachable."
+            if ollama_unreachable
+            else f"Local model {OLLAMA_MODEL} is not ready yet."
+        )
         llm_error_reports.append(
             build_llm_error_report(
                 error_code=LLM_MODEL_NOT_READY,
                 stage="waiting_model",
-                message=f"Local model {OLLAMA_MODEL} is not ready yet.",
+                message=model_wait_error,
                 session_id=session_id,
                 run_id=run_id,
                 model_name=OLLAMA_MODEL,
@@ -4536,7 +4567,7 @@ def run_session_enrichment(
         briefing = {
             "body_en": None,
             "category_summaries": {},
-            "error": f"Local model {OLLAMA_MODEL} is not ready yet.",
+            "error": model_wait_error,
             "error_code": LLM_MODEL_NOT_READY,
             "run_meta": {
                 "model_name": OLLAMA_MODEL,
@@ -4544,6 +4575,7 @@ def run_session_enrichment(
                 "generated_at": now_utc_iso(),
             },
         }
+        set_json_with_ttl(store, session_key(session_id, "briefing"), briefing)
     if briefing_generator is None and llm_model_available and _briefing_provider_enabled():
         try:
             briefing_generator = build_briefing_generator()
@@ -4569,6 +4601,7 @@ def run_session_enrichment(
                     "generated_at": now_utc_iso(),
                 },
             }
+            set_json_with_ttl(store, session_key(session_id, "briefing"), briefing)
     if briefing_generator is not None and briefing is None:
         meta["loading_stage"] = "generating_briefing"
         meta["loading_detail"] = "Aggregating collection results to generate the daily briefing."
